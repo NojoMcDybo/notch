@@ -1,5 +1,10 @@
 mod activities;
+mod audio;
+mod convert;
 mod media;
+mod open;
+mod shelf;
+mod timer;
 mod win;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,8 +17,8 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 
 /// Fenster ist eine unsichtbare Leinwand; die Notch wird darin gezeichnet.
-const WIN_W: f64 = 600.0;
-const WIN_H: f64 = 260.0;
+const WIN_W: f64 = 640.0;
+const WIN_H: f64 = 400.0;
 
 /// Bereich der Notch im Fenster (CSS-Pixel), meldet das Frontend.
 /// Nur dort faengt das Fenster die Maus ab, ueberall sonst klickt man durch.
@@ -37,6 +42,7 @@ fn snapshot() -> serde_json::Value {
         "media": media::last(),
         "cover": media::last_cover(),
         "activities": activities::list(),
+        "shelf": shelf::shelf_list(),
         "port": activities::PORT,
         "fullscreen": FULLSCREEN.load(Ordering::Relaxed),
         "hover": HOVER.load(Ordering::Relaxed),
@@ -128,13 +134,34 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_drag::init())
         .invoke_handler(tauri::generate_handler![
             set_hit_rect,
             snapshot,
             media::media_control,
-            activities::dismiss_activity
+            media::media_seek,
+            media::media_focus,
+            media::media_next_source,
+            audio::volume_get,
+            audio::volume_set,
+            audio::volume_mute,
+            activities::dismiss_activity,
+            activities::activity_open,
+            activities::activity_action,
+            open::open,
+            timer::timer_start,
+            shelf::shelf_list,
+            shelf::shelf_add,
+            shelf::shelf_remove,
+            shelf::shelf_clear,
+            shelf::reveal,
+            shelf::drag_icon,
+            convert::convert_targets,
+            convert::convert,
+            convert::ffmpeg_available
         ])
         .setup(|app| {
+            shelf::load(app.handle());
             let w = app.get_webview_window("notch").expect("Fenster 'notch' fehlt");
             place(&w, None);
             let hwnd = w.hwnd().map(|h| h.0 as isize).unwrap_or(0);
@@ -156,6 +183,7 @@ pub fn run() {
 
             media::spawn(app.handle().clone());
             activities::spawn(app.handle().clone());
+            timer::spawn(app.handle().clone());
             spawn_pointer(w, hwnd);
             Ok(())
         })

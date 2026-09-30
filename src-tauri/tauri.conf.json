@@ -15,8 +15,8 @@
       {
         "label": "notch",
         "title": "Notch",
-        "width": 600,
-        "height": 260,
+        "width": 640,
+        "height": 400,
         "x": 0,
         "y": 0,
         "decorations": false,
@@ -32,7 +32,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": { "allow": ["**"] }
+      }
     }
   },
   "bundle": {

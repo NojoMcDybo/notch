@@ -1,15 +1,17 @@
 //! Live-Activity-Schnittstelle: jede App kann per HTTP auf 127.0.0.1:47800 etwas in die Notch legen.
 //!
-//!   POST   /activity        JSON-Body (siehe Activity) -> anlegen oder ersetzen (gleiche id)
-//!   DELETE /activity/<id>   entfernen
-//!   GET    /activities      aktuelle Liste
-//!   GET    /health          "ok"
+//!   POST   /activity         JSON-Body (siehe Activity) -> anlegen oder ersetzen (gleiche id)
+//!   DELETE /activity/<id>    entfernen
+//!   GET    /activities       aktuelle Liste
+//!   GET    /events?after=N   Klicks auf Aktionsknoepfe (fuer Apps ohne eigenen Server)
+//!   GET    /health           "ok"
 //!
 //! Nur localhost. Browser-Seiten duerfen nur von localhost/tauri aus schreiben,
 //! damit nicht jede Website, die du besuchst, dir Zeug in die Notch spammt.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Read;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -19,7 +21,23 @@ use tiny_http::{Header, Method, Response, Server};
 
 pub const PORT: u16 = 47800;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Action {
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    /// eingebautes Symbol: play, pause, stop, plus, folder, open, check, close
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// beim Klick oeffnen (gleiche Regeln wie Activity.open)
+    #[serde(default)]
+    pub open: Option<String>,
+    /// beim Klick {"activity","action"} an diese localhost-URL posten
+    #[serde(default)]
+    pub post: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Activity {
     /// eindeutig pro Sache, z. B. "blutzucker" oder "folio-export"
     pub id: String,
@@ -41,7 +59,7 @@ pub struct Activity {
     /// Akzentfarbe, CSS-Farbe
     #[serde(default)]
     pub color: Option<String>,
-    /// 0..1 -> Fortschrittsbalken
+    /// 0..1 -> Fortschrittsbalken, negativ -> laufender Balken ohne Ende
     #[serde(default)]
     pub progress: Option<f64>,
     /// Sekunden bis zum automatischen Verschwinden
@@ -53,6 +71,12 @@ pub struct Activity {
     /// true = Notch klappt kurz auf (wie ein Anruf auf dem iPhone)
     #[serde(default)]
     pub alert: bool,
+    /// Klick auf die Zeile: URL, Datei, "reveal:<pfad>" oder Programm (.exe wird nach vorn geholt)
+    #[serde(default)]
+    pub open: Option<String>,
+    /// Knoepfe unter der Zeile
+    #[serde(default)]
+    pub actions: Vec<Action>,
     #[serde(default, skip_deserializing)]
     pub updated: u64,
 }
@@ -62,13 +86,27 @@ struct Entry {
     expires: Option<Instant>,
 }
 
+#[derive(Serialize, Clone)]
+struct Event {
+    seq: u64,
+    activity: String,
+    action: String,
+    ts: u64,
+}
+
 static STORE: LazyLock<Mutex<HashMap<String, Entry>>> = LazyLock::new(Default::default);
+static EVENTS: LazyLock<Mutex<VecDeque<Event>>> = LazyLock::new(Default::default);
+static SEQ: AtomicU64 = AtomicU64::new(0);
 
 pub fn list() -> Vec<Activity> {
     let store = STORE.lock().unwrap();
     let mut v: Vec<Activity> = store.values().map(|e| e.act.clone()).collect();
     v.sort_by(|a, b| b.priority.cmp(&a.priority).then(b.updated.cmp(&a.updated)));
     v
+}
+
+pub fn get(id: &str) -> Option<Activity> {
+    STORE.lock().unwrap().get(id).map(|e| e.act.clone())
 }
 
 fn now_ms() -> u64 {
@@ -87,7 +125,7 @@ fn header(k: &str, v: &str) -> Header {
     Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap()
 }
 
-fn upsert(app: &AppHandle, mut act: Activity) {
+pub fn upsert(app: &AppHandle, mut act: Activity) {
     act.updated = now_ms();
     let expires = act.ttl.map(|s| Instant::now() + Duration::from_secs(s));
     let alert = act.alert;
@@ -105,6 +143,19 @@ pub fn remove(app: &AppHandle, id: &str) -> bool {
         let _ = app.emit("activities", list());
     }
     hit
+}
+
+fn push_event(activity: &str, action: &str) {
+    let mut q = EVENTS.lock().unwrap();
+    q.push_back(Event {
+        seq: SEQ.fetch_add(1, Ordering::Relaxed) + 1,
+        activity: activity.into(),
+        action: action.into(),
+        ts: now_ms(),
+    });
+    while q.len() > 100 {
+        q.pop_front();
+    }
 }
 
 pub fn spawn(app: AppHandle) {
@@ -152,7 +203,9 @@ pub fn spawn(app: AppHandle) {
                 None => r,
             };
             let json = header("Content-Type", "application/json; charset=utf-8");
-            let url = req.url().split('?').next().unwrap_or("").to_string();
+            let full = req.url().to_string();
+            let (url, query) = full.split_once('?').unwrap_or((full.as_str(), ""));
+            let url = url.to_string();
             let method = req.method().clone();
 
             let resp = match (method, url.as_str()) {
@@ -161,15 +214,44 @@ pub fn spawn(app: AppHandle) {
                 (Method::Get, "/activities") => {
                     Response::from_string(serde_json::to_string(&list()).unwrap()).with_header(json)
                 }
+                (Method::Get, "/events") => {
+                    let after: u64 = query
+                        .split('&')
+                        .find_map(|kv| kv.strip_prefix("after="))
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    let ev: Vec<Event> =
+                        EVENTS.lock().unwrap().iter().filter(|e| e.seq > after).cloned().collect();
+                    Response::from_string(serde_json::to_string(&ev).unwrap()).with_header(json)
+                }
                 (Method::Post, "/activity") => {
                     let mut body = String::new();
-                    let _ = req.as_reader().take(256 * 1024).read_to_string(&mut body);
+                    let _ = req.as_reader().take(512 * 1024).read_to_string(&mut body);
                     match serde_json::from_str::<Activity>(&body) {
+                        Ok(a) if a.id.starts_with("notch:") => {
+                            Response::from_string("ids mit notch: sind reserviert").with_status_code(400)
+                        }
                         Ok(a) if !a.id.is_empty() => {
                             upsert(&app, a);
                             Response::from_string("{\"ok\":true}").with_header(json)
                         }
                         Ok(_) => Response::from_string("id fehlt").with_status_code(400),
+                        Err(e) => Response::from_string(format!("ungueltiges JSON: {e}")).with_status_code(400),
+                    }
+                }
+                (Method::Post, "/shelf") => {
+                    // {"paths": ["C:\\…\\datei.pdf"]} -> Dateien in die Ablage legen (z. B. nach einem Export)
+                    let mut body = String::new();
+                    let _ = req.as_reader().take(256 * 1024).read_to_string(&mut body);
+                    #[derive(Deserialize)]
+                    struct B {
+                        paths: Vec<String>,
+                    }
+                    match serde_json::from_str::<B>(&body) {
+                        Ok(b) => {
+                            crate::shelf::shelf_add(app.clone(), b.paths);
+                            Response::from_string("{\"ok\":true}").with_header(json)
+                        }
                         Err(e) => Response::from_string(format!("ungueltiges JSON: {e}")).with_status_code(400),
                     }
                 }
@@ -190,5 +272,41 @@ pub fn spawn(app: AppHandle) {
 
 #[tauri::command]
 pub fn dismiss_activity(app: AppHandle, id: String) {
+    if id == crate::timer::ID {
+        crate::timer::action(&app, "stop");
+    }
     remove(&app, &id);
+    push_event(&id, "dismiss");
+}
+
+/// Klick auf die Zeile selbst.
+#[tauri::command]
+pub fn activity_open(app: AppHandle, id: String) -> Result<(), String> {
+    push_event(&id, "open");
+    match get(&id).and_then(|a| a.open) {
+        Some(t) => crate::open::open_target(&app, &t),
+        None => Ok(()),
+    }
+}
+
+/// Klick auf einen Aktionsknopf.
+#[tauri::command]
+pub fn activity_action(app: AppHandle, id: String, action: String) -> Result<(), String> {
+    push_event(&id, &action);
+    if id == crate::timer::ID {
+        crate::timer::action(&app, &action);
+        return Ok(());
+    }
+    let Some(act) = get(&id) else { return Ok(()) };
+    let Some(a) = act.actions.iter().find(|a| a.id == action) else { return Ok(()) };
+    if let Some(url) = &a.post {
+        crate::open::post_local(url, serde_json::json!({ "activity": id, "action": action }).to_string());
+    }
+    if let Some(t) = &a.open {
+        crate::open::open_target(&app, t)?;
+    }
+    if a.id == "dismiss" {
+        remove(&app, &id);
+    }
+    Ok(())
 }
