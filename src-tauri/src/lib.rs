@@ -5,6 +5,7 @@ mod media;
 mod open;
 mod shelf;
 mod timer;
+mod voice;
 mod win;
 
 use std::path::PathBuf;
@@ -48,8 +49,12 @@ fn snapshot() -> serde_json::Value {
         "fullscreen": FULLSCREEN.load(Ordering::Relaxed),
         "hover": HOVER.load(Ordering::Relaxed),
         "dock": dock(),
+        "voice_key": VOICE_KEY.lock().unwrap().clone(),
     })
 }
+
+/// Tastenkuerzel fuer den Sprachassistenten, das sich registrieren liess
+static VOICE_KEY: Mutex<String> = Mutex::new(String::new());
 
 // Fuer den Fall, dass das Frontend (neu) laedt, nachdem ein Event schon raus ist.
 static FULLSCREEN: AtomicBool = AtomicBool::new(false);
@@ -251,11 +256,24 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_drag::init())
+        .plugin(
+            // Strg+Alt+Leertaste: Sprachassistent an/aus — egal, welches Programm vorne ist
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, ev| {
+                    if ev.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        let _ = app.emit("voice-toggle", ());
+                    }
+                })
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             set_hit_rect,
             snapshot,
             dock_set,
             dock_drag_start,
+            voice::voice_ready,
+            voice::voice_setup,
+            voice::voice_token,
             media::media_control,
             media::media_seek,
             media::media_focus,
@@ -286,6 +304,24 @@ pub fn run() {
             let hwnd = w.hwnd().map(|h| h.0 as isize).unwrap_or(0);
             win::enforce(hwnd, true);
             win::show_noactivate(hwnd);
+            let _ = w.with_webview(|wv| voice::allow_microphone(wv.controller()));
+            {
+                // Erstes freies Kuerzel nehmen (Strg+Alt+Leertaste belegt z. B. die Claude-App)
+                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                for (key, label) in [
+                    ("ctrl+alt+space", "Strg+Alt+Leertaste"),
+                    ("ctrl+shift+alt+space", "Strg+Umschalt+Alt+Leertaste"),
+                    ("ctrl+alt+n", "Strg+Alt+N"),
+                ] {
+                    match app.global_shortcut().register(key) {
+                        Ok(()) => {
+                            *VOICE_KEY.lock().unwrap() = label.into();
+                            break;
+                        }
+                        Err(e) => eprintln!("[notch] Kuerzel {label} belegt: {e}"),
+                    }
+                }
+            }
 
             let top = MenuItem::with_id(app, "dock:top", "Oben andocken", true, None::<&str>)?;
             let left = MenuItem::with_id(app, "dock:left", "Links andocken", true, None::<&str>)?;

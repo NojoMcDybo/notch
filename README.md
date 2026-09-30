@@ -28,6 +28,17 @@ Die Form (nicht Knöpfe/Regler/Dateien) mit gedrückter Maus greifen und Richtun
 
 Seitlich ist die Notch eine senkrechte Pille; aufgeklappt zeigt sie **alles auf einmal** (Musik, Activities, Ablage, Timer) statt Reitern.
 
+## Sprachassistent (OpenAI Realtime)
+
+Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (erstes freies aus Strg+Alt+Leertaste → Strg+Umschalt+Alt+Leertaste → Strg+Alt+N; das aktive steht im Tooltip des Knopfs). Nochmal drücken = auflegen; nach 40 s Stille legt er selbst auf.
+
+- Modell `gpt-realtime-2.1`, Stimme `marin`, Sprache rein/raus über WebRTC direkt zu OpenAI
+- Der API-Schlüssel bleibt in Rust (`src-tauri/src/voice.rs`); das Frontend bekommt nur einen kurzlebigen Sitzungsschlüssel
+- Schlüssel: Umgebungsvariable `OPENAI_API_KEY` oder Datei `%APPDATA%\de.nojo.notch\openai-key.txt` (eine Zeile `sk-…`). Ohne Schlüssel zeigt die Notch „Schlüssel eintragen“ und öffnet die Datei im Editor.
+- Werkzeuge des Assistenten: Musik steuern, Lautstärke, Timer starten/stoppen, Status der Notch lesen, Datei aus der Ablage öffnen oder konvertieren
+- Mikrofonfreigabe wird für das Notch-Fenster automatisch erteilt (nur Mikrofon)
+- Kosten: API-Abrechnung pro Audiominute, getrennt von einem ChatGPT-Abo
+
 ## Was man anklicken kann
 
 **Jetzt** (Kreis-Symbol)

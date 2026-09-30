@@ -2,6 +2,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
+import { Voice, type VoiceState } from "./voice";
 
 // ---------- Typen ----------
 
@@ -94,6 +95,87 @@ let view: View = "home";
 let hoverTimer = 0;
 let dragIcon = "";
 let dock: Dock = "top";
+let voiceShown = false;
+let voiceKey = "";
+
+// ---------- Sprachassistent ----------
+
+const voiceEl = q(".voice");
+const orb = q(".orb");
+const micBtn = q(".mic-btn");
+const V_LABEL: Record<string, string> = {
+  connecting: "Verbinde …",
+  listening: "Hört zu",
+  thinking: "Denkt nach …",
+  speaking: "Spricht",
+  error: "Fehler",
+  nokey: "OpenAI-Schlüssel fehlt",
+};
+
+function showVoice(s: VoiceState | "nokey", detail = "") {
+  voiceShown = s !== "off";
+  voiceEl.hidden = !voiceShown;
+  voiceEl.dataset.s = s;
+  q(".v-state", voiceEl).textContent = V_LABEL[s] ?? "";
+  if (detail || s === "error" || s === "nokey") {
+    q(".v-text", voiceEl).textContent =
+      s === "nokey" ? `Einmal eintragen, danach mit ${voiceKey || "dem Mikrofon"} starten.` : detail;
+  }
+  q(".v-setup", voiceEl).hidden = s !== "nokey";
+  micBtn.classList.toggle("on", voice.active);
+  if (s === "listening" || s === "connecting") { view = "home"; notch.dataset.view = "home"; }
+  render(false);
+}
+
+const findShelf = (name: string) => {
+  const n = name.toLowerCase().trim();
+  return shelf.find((i) => i.name.toLowerCase() === n) ?? shelf.find((i) => i.name.toLowerCase().includes(n));
+};
+
+const voice = new Voice({
+  onState: (s, detail) => showVoice(s, detail),
+  onTranscript: (t) => { q(".v-text", voiceEl).textContent = t; render(false); },
+  onLevel: (l) => orb.style.setProperty("--lvl", l.toFixed(3)),
+  // Werkzeuge, mit denen der Assistent die Notch bedient — alles ueber die vorhandenen Befehle
+  tools: {
+    musik: async (a) => { await invoke("media_control", { action: String(a.aktion) }); return { ok: true }; },
+    lautstaerke: async (a) => {
+      const pct = Math.max(0, Math.min(100, Number(a.prozent) || 0));
+      volume = await invoke<Volume>("volume_set", { level: pct / 100 });
+      renderVolume();
+      return { prozent: Math.round(volume.level * 100) };
+    },
+    timer_starten: async (a) => { await invoke("timer_start", { seconds: Math.max(1, Number(a.minuten) || 1) * 60 }); return { ok: true }; },
+    timer_stoppen: async () => { await invoke("activity_action", { id: "notch:timer", action: "stop" }); return { ok: true }; },
+    status: async () => ({
+      uhrzeit: new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }),
+      musik: media ? { titel: media.title, kuenstler: media.artist, quelle: appName(media.source), spielt: media.playing } : null,
+      eintraege: acts.map((a) => ({ app: a.app, titel: a.title, wert: [a.value, a.unit].filter(Boolean).join(" "), info: a.subtitle ?? "" })),
+      ablage: shelf.map((i) => i.name),
+    }),
+    datei_oeffnen: async (a) => {
+      const it = findShelf(String(a.name ?? ""));
+      if (!it) return { fehler: "nicht in der Ablage", ablage: shelf.map((i) => i.name) };
+      await invoke("open", { target: it.path });
+      return { geoeffnet: it.name };
+    },
+    datei_konvertieren: async (a) => {
+      const it = findShelf(String(a.name ?? ""));
+      if (!it) return { fehler: "nicht in der Ablage", ablage: shelf.map((i) => i.name) };
+      const ziel = String(a.ziel ?? "").toLowerCase().replace(/^\./, "").replace("jpeg", "jpg");
+      const targets = await invoke<Target[]>("convert_targets", { path: it.path });
+      if (!targets.some((t) => t.id === ziel)) return { fehler: `${it.name} geht nicht nach ${ziel}`, moeglich: targets.map((t) => t.id) };
+      await invoke("convert", { path: it.path, target: ziel });
+      return { gestartet: `${it.name} → ${ziel}` };
+    },
+  },
+});
+
+async function toggleVoice() {
+  if (voice.active) { voice.stop(); return; }
+  if (!(await invoke<boolean>("voice_ready"))) { showVoice("nokey"); return; }
+  void voice.start();
+}
 
 // ---------- Hilfen ----------
 
@@ -221,7 +303,7 @@ function musicVisible() {
 }
 
 function wanted(): State {
-  if (hover || dragOver || holding > 0 || Date.now() < peekUntil) return "expanded";
+  if (hover || dragOver || holding > 0 || voiceShown || Date.now() < peekUntil) return "expanded";
   if (musicVisible() || acts.length) return "compact";
   return "idle";
 }
@@ -561,9 +643,11 @@ async function main() {
 
   const snap = await invoke<{
     media: Media; cover: string | null; activities: Activity[]; shelf: Item[]; fullscreen: boolean; hover: boolean;
-    dock: Dock;
+    dock: Dock; voice_key: string;
   }>("snapshot");
   dock = snap.dock;
+  voiceKey = snap.voice_key;
+  micBtn.title = voiceKey ? `Sprachassistent (${voiceKey})` : "Sprachassistent";
   fullscreen = snap.fullscreen;
   hover = hoverRaw = snap.hover;
   setMedia(snap.media);
@@ -579,6 +663,12 @@ async function main() {
     t.addEventListener("click", () => setView(t.dataset.view as View)),
   );
   clearTray.addEventListener("click", () => invoke("shelf_clear"));
+
+  // Sprachassistent: Mikrofon-Knopf, Strg+Alt+Leertaste, Beenden, Schluessel eintragen
+  micBtn.addEventListener("click", () => void toggleVoice());
+  await listen("voice-toggle", () => void toggleVoice());
+  q(".v-stop").addEventListener("click", () => { voice.stop(); showVoice("off"); });
+  q(".v-setup").addEventListener("click", () => { invoke("voice_setup"); showVoice("off"); });
 
   // Player
   player.querySelectorAll<HTMLButtonElement>(".controls button").forEach((b) =>
