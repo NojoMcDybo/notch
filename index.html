@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Notch</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <div id="notch" data-state="idle">
+      <i class="ear l"></i><i class="ear r"></i>
+      <div class="shape">
+        <!-- kompakt: links Cover/Icon, rechts Pegel/Wert -->
+        <div class="compact">
+          <div class="c-lead"></div>
+          <div class="c-trail"></div>
+        </div>
+
+        <!-- aufgeklappt -->
+        <div class="expanded">
+          <section class="player" hidden>
+            <img class="cover" alt="" />
+            <div class="meta">
+              <div class="title"></div>
+              <div class="artist"></div>
+              <div class="bar"><span></span></div>
+              <div class="times"><span class="t-pos">0:00</span><span class="t-dur"></span></div>
+            </div>
+            <div class="controls">
+              <button data-act="prev" aria-label="Zurück">
+                <svg viewBox="0 0 24 24"><path d="M7 6h2v12H7zM20 6v12L10.5 12z" /></svg>
+              </button>
+              <button data-act="toggle" class="play" aria-label="Play/Pause">
+                <svg class="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                <svg class="i-pause" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" /></svg>
+              </button>
+              <button data-act="next" aria-label="Weiter">
+                <svg viewBox="0 0 24 24"><path d="M15 6h2v12h-2zM4 6v12l9.5-6z" /></svg>
+              </button>
+            </div>
+          </section>
+
+          <section class="idle-info" hidden>
+            <div class="clock"></div>
+            <div class="date"></div>
+          </section>
+
+          <section class="acts"></section>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
