@@ -22,6 +22,12 @@ Beenden über das Tray-Symbol → „Notch beenden".
 
 Bei Vollbild-Programmen auf dem Hauptmonitor fährt die Notch nach oben weg.
 
+## Andocken: oben, links, rechts
+
+Die Form (nicht Knöpfe/Regler/Dateien) mit gedrückter Maus greifen und Richtung Kante ziehen, beim Loslassen dockt sie an: linkes Viertel des Bildschirms → links, rechtes → rechts, Mitte → oben. Alternativ im Tray-Menü. Die Wahl wird gespeichert (`%APPDATA%\de.nojo.notch\config.json`).
+
+Seitlich ist die Notch eine senkrechte Pille; aufgeklappt zeigt sie **alles auf einmal** (Musik, Activities, Ablage, Timer) statt Reitern.
+
 ## Was man anklicken kann
 
 **Jetzt** (Kreis-Symbol)
@@ -36,7 +42,7 @@ Bei Vollbild-Programmen auf dem Hauptmonitor fährt die Notch nach oben weg.
 - Dateien auf die Notch ziehen → landen hier (nur Verweise, keine Kopien; bleiben über Neustarts)
 - Klick = auswählen, Doppelklick = öffnen, Ziehen = Datei wieder rausziehen, Rechtsklick = aus der Ablage
 - Auswahl-Leiste: Öffnen, Im Ordner zeigen, Konvertieren, Entfernen
-- Konvertieren: Bilder nativ (PNG, JPG, WEBP, GIF, BMP, TIFF, ICO, ≤ 1600 px). Audio/Video nur mit installiertem ffmpeg. Ergebnis landet neben dem Original, nie überschrieben.
+- Konvertieren: Bilder nativ (PNG, JPG, WEBP, GIF, BMP, TIFF, ICO, ≤ 1600 px). Audio (MP3, M4A, WAV, FLAC, OGG) und Video (MP4, GIF, MP3) über ffmpeg (`winget install Gyan.FFmpeg`, wird auch im winget-Paketordner gefunden). Ergebnis landet neben dem Original, nie überschrieben.
 
 **Timer** (Stoppuhr-Symbol)
 - Vorwahl 1–60 min → läuft als Activity mit Pause, +1 min, Stopp; Ton und Aufklappen am Ende
@@ -101,6 +107,7 @@ Browser-Seiten dürfen nur von `localhost`/`127.0.0.1`/`tauri://` aus schreiben 
 
 ## Angebunden
 
+- **Folio** (`D:\Dev\folio\src\notch.ts`): jedes offene Dokument erscheint mit Deckelbild, „Seite x von y“ und Lesefortschritt. Klick holt genau dieses Dokumentfenster nach vorn (Folio ist Standard-PDF-App). Auffrischen jede Minute, ttl 180 s, Entfernen beim Schließen. `notchShelf(paths)` legt Dateien in die Ablage.
 - **Haze** (Blutzucker-Widget, `OneDrive\Projects\Haze`): `NotchBridge` in `Haze.cs` schickt Wert, Trend, Alter; Farbe nach Bereich; `alert` beim Wechsel in hoch/tief; `ttl` 180 s + Auffrischen jede Minute (stürzt Haze ab, verschwindet der Wert von selbst); beim Beenden wird der Eintrag gelöscht. Klick auf die Zeile holt Haze nach vorn. Aktuell **Demowerte** — Haze hat noch keine echte Datenquelle.
 
 ## Aufbau

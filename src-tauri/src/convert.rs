@@ -8,7 +8,7 @@ use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::LazyLock;
+use std::sync::Mutex;
 
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
@@ -30,16 +30,36 @@ fn t(id: &str, label: &str) -> Target {
     Target { id: id.into(), label: label.into() }
 }
 
-/// ffmpeg im PATH oder dort, wo winget es ablegt.
-static FFMPEG: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
+/// ffmpeg suchen: PATH, winget-Links, winget-Paketordner (dorthin legt "winget install Gyan.FFmpeg" es ab —
+/// der neue PATH-Eintrag kommt bei einer schon laufenden Notch nicht an, deshalb direkt nachsehen).
+fn find_ffmpeg() -> Option<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
     if let Some(l) = std::env::var_os("LOCALAPPDATA") {
-        dirs.push(PathBuf::from(l).join("Microsoft").join("WinGet").join("Links"));
+        let wg = PathBuf::from(l).join("Microsoft").join("WinGet");
+        dirs.push(wg.join("Links"));
+        if let Ok(pkgs) = std::fs::read_dir(wg.join("Packages")) {
+            for p in pkgs.flatten().filter(|p| p.file_name().to_string_lossy().to_lowercase().contains("ffmpeg")) {
+                if let Ok(sub) = std::fs::read_dir(p.path()) {
+                    dirs.extend(sub.flatten().map(|s| s.path().join("bin")));
+                }
+            }
+        }
     }
+    dirs.push(PathBuf::from(r"C:\Program Files\WinGet\Links"));
     dirs.into_iter().map(|d| d.join("ffmpeg.exe")).find(|p| p.exists())
-});
+}
+
+/// Einmal gefunden, bleibt es gemerkt; solange nicht gefunden, wird bei Bedarf neu gesucht.
+static FFMPEG_CACHE: Mutex<Option<PathBuf>> = Mutex::new(None);
+fn ffmpeg() -> Option<PathBuf> {
+    let mut c = FFMPEG_CACHE.lock().unwrap();
+    if c.is_none() {
+        *c = find_ffmpeg();
+    }
+    c.clone()
+}
 
 fn norm(ext: &str) -> &str {
     match ext {
@@ -53,7 +73,7 @@ fn norm(ext: &str) -> &str {
 pub fn convert_targets(path: String) -> Vec<Target> {
     let ext = Path::new(&path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     let own = norm(&ext).to_string();
-    let ff = FFMPEG.is_some();
+    let ff = ffmpeg().is_some();
     let list: Vec<Target> = match kind_of(&ext) {
         "image" if !matches!(own.as_str(), "heic" | "avif") => vec![
             t("png", "PNG"),
@@ -74,7 +94,7 @@ pub fn convert_targets(path: String) -> Vec<Target> {
 
 #[tauri::command]
 pub fn ffmpeg_available() -> bool {
-    FFMPEG.is_some()
+    ffmpeg().is_some()
 }
 
 /// name.ext, name (1).ext, name (2).ext …
@@ -128,7 +148,7 @@ fn image_convert(src: &Path, target: &str, out: &Path) -> Result<(), String> {
 }
 
 fn ffmpeg_convert(src: &Path, target: &str, out: &Path, video: bool) -> Result<(), String> {
-    let ff = FFMPEG.as_ref().ok_or("ffmpeg fehlt")?;
+    let ff = ffmpeg().ok_or("ffmpeg fehlt")?;
     let mut c = Command::new(ff);
     c.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-n", "-i"]).arg(src);
     let a: &[&str] = match (target, video) {

@@ -30,15 +30,22 @@ type Volume = { level: number; muted: boolean };
 type State = "idle" | "compact" | "expanded";
 type View = "home" | "tray" | "timer";
 
-/** muss zu WIN_W in lib.rs passen */
-const WIN_W = 640;
+type Dock = "top" | "left" | "right";
+
 const EAR = 10;
 const EAR_X = 14;
 const MAX_H = 380;
+/** oben: waagerecht wie die Mac-Notch */
 const SIZE = {
   idle: { w: 190, h: 30, r: 10 },
   compact: { w: 320, h: 34, r: 13 },
   expanded: { w: 520, h: 0, r: 30 },
+};
+/** seitlich: senkrechte Pille, aufgeklappt ein hohes Panel mit allem auf einmal */
+const SIDE = {
+  idle: { w: 30, h: 180, r: 10 },
+  compact: { w: 44, h: 280, r: 15 },
+  expanded: { w: 400, h: 0, r: 28 },
 };
 /** so lange bleibt die Notch nach Pause noch kompakt */
 const PAUSE_LINGER = 30_000;
@@ -86,6 +93,7 @@ let state: State = "idle";
 let view: View = "home";
 let hoverTimer = 0;
 let dragIcon = "";
+let dock: Dock = "top";
 
 // ---------- Hilfen ----------
 
@@ -347,7 +355,6 @@ function renderShelf() {
   badge.hidden = shelf.length === 0;
   badge.textContent = String(shelf.length);
   trayView.classList.toggle("has-files", shelf.length > 0);
-  clearTray.hidden = !(view === "tray" && shelf.length > 0);
   if (selected && !shelf.some((i) => i.path === selected)) selected = null;
 
   const sig = JSON.stringify(shelf.map((i) => i.path)) + "|" + selected;
@@ -454,20 +461,27 @@ function render(full = true) {
   notch.classList.toggle("gone", fullscreen);
   notch.classList.toggle("dragging", dragOver);
 
-  const s = { ...SIZE[state] };
+  notch.dataset.dock = dock;
+  const side = dock !== "top";
+  const s = { ...(side ? SIDE : SIZE)[state] };
   if (state === "expanded") {
     expanded.style.setProperty("--xw", `${s.w}px`);
-    s.h = Math.min(MAX_H, Math.ceil(expanded.scrollHeight));
+    const max = side ? Math.floor(innerHeight * 0.92) : MAX_H;
+    s.h = Math.min(max, Math.ceil(expanded.scrollHeight));
   }
   const e = state === "expanded" ? EAR_X : EAR;
   notch.style.setProperty("--w", `${s.w}px`);
   notch.style.setProperty("--h", `${s.h}px`);
   notch.style.setProperty("--r", `${s.r}px`);
   notch.style.setProperty("--e", `${e}px`);
+  clearTray.hidden = !((side || view === "tray") && shelf.length > 0);
 
-  invoke("set_hit_rect", {
-    rect: fullscreen ? { x: 0, y: 0, w: 0, h: 0 } : { x: (WIN_W - s.w) / 2 - e, y: 0, w: s.w + 2 * e, h: s.h },
-  });
+  // Wo die Form im Fenster liegt -> nur dort faengt das Fenster die Maus
+  const rect =
+    dock === "top"
+      ? { x: (innerWidth - s.w) / 2 - e, y: 0, w: s.w + 2 * e, h: s.h }
+      : { x: dock === "left" ? 0 : innerWidth - s.w, y: (innerHeight - s.h) / 2 - e, w: s.w, h: s.h + 2 * e };
+  invoke("set_hit_rect", { rect: fullscreen ? { x: 0, y: 0, w: 0, h: 0 } : rect });
 }
 
 function setHover(v: boolean) {
@@ -532,9 +546,24 @@ async function main() {
     if (p.type !== "over") render();
   });
 
+  // Andocken: oben / links / rechts
+  await listen<Dock>("dock", (e) => {
+    dock = e.payload;
+    render();
+    setTimeout(render, 80); // Fenstergroesse kommt einen Moment spaeter an
+  });
+  const hint = q(".dock-hint");
+  await listen<Dock | null>("dock-preview", (e) => {
+    notch.classList.toggle("moving", !!e.payload);
+    hint.textContent = e.payload ? { top: "↑  Oben", left: "←  Links", right: "Rechts  →" }[e.payload] : "";
+  });
+  window.addEventListener("resize", () => render(false));
+
   const snap = await invoke<{
     media: Media; cover: string | null; activities: Activity[]; shelf: Item[]; fullscreen: boolean; hover: boolean;
+    dock: Dock;
   }>("snapshot");
+  dock = snap.dock;
   fullscreen = snap.fullscreen;
   hover = hoverRaw = snap.hover;
   setMedia(snap.media);
@@ -542,6 +571,7 @@ async function main() {
   acts = snap.activities;
   shelf = snap.shelf;
   dragIcon = await invoke<string>("drag_icon").catch(() => "");
+  renderPresets(); // seitlich sind alle Bereiche gleichzeitig sichtbar
   render();
 
   // Tabs
@@ -601,6 +631,20 @@ async function main() {
   q(".fb-open").addEventListener("click", () => selected && invoke("open", { target: selected }));
   q(".fb-reveal").addEventListener("click", () => selected && invoke("reveal", { path: selected }));
   q(".fb-remove").addEventListener("click", () => selected && invoke("shelf_remove", { path: selected }));
+
+  // Die Form selbst (nicht Knoepfe/Regler/Dateien) mit gedrueckter Maus ziehen -> an eine andere Kante andocken
+  const INTERACTIVE = "button, .slider, .file, .act, .preset, .drop";
+  q(".shape").addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || (e.target as Element).closest(INTERACTIVE)) return;
+    const x0 = e.clientX, y0 = e.clientY;
+    const mv = (ev: PointerEvent) => {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 12) return;
+      window.removeEventListener("pointermove", mv);
+      invoke("dock_drag_start");
+    };
+    window.addEventListener("pointermove", mv);
+    window.addEventListener("pointerup", () => window.removeEventListener("pointermove", mv), { once: true });
+  });
 
   document.addEventListener("contextmenu", (e) => e.preventDefault());
 

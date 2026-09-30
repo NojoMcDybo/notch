@@ -5,6 +5,7 @@ use std::process::Command;
 
 use windows::core::{BOOL, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, POINT, RECT};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
@@ -16,6 +17,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Linke Maustaste gerade gedrueckt? (auch ausserhalb unseres Fensters)
+pub fn lbutton_down() -> bool {
+    unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 }
+}
 
 /// Cursor in physischen Bildschirmpixeln.
 pub fn cursor() -> Option<(i32, i32)> {
