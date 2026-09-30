@@ -11,12 +11,24 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowLongPtrW,
-    GetWindowRect, GetWindowTextLengthW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
+    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
     SetForegroundWindow, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, GW_OWNER, SW_RESTORE,
     SW_SHOWNOACTIVATE, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+pub fn foreground() -> isize {
+    unsafe { GetForegroundWindow().0 as isize }
+}
+
+/// Fokus zurueckgeben. WebView2 aktiviert das Notch-Fenster beim Klick trotz WS_EX_NOACTIVATE;
+/// wir geben den Fokus sofort an das Programm zurueck, in dem man vorher war (Spiel, Editor …).
+pub fn set_foreground(h: isize) {
+    unsafe {
+        let _ = SetForegroundWindow(HWND(h as *mut core::ffi::c_void));
+    }
+}
 
 /// Linke Maustaste gerade gedrueckt? (auch ausserhalb unseres Fensters)
 pub fn lbutton_down() -> bool {
@@ -100,6 +112,8 @@ fn process_path(pid: u32) -> Option<String> {
 struct Search {
     target: String,
     by_path: bool,
+    /// statt nach Programm nach Fenstertitel suchen (enthaelt diesen Text)
+    by_title: bool,
     found: Option<HWND>,
 }
 
@@ -114,6 +128,15 @@ unsafe extern "system" fn enum_cb(hwnd: HWND, lp: LPARAM) -> BOOL {
     let mut pid = 0u32;
     GetWindowThreadProcessId(hwnd, Some(&mut pid));
     if pid == std::process::id() {
+        return true.into();
+    }
+    if s.by_title {
+        let mut buf = [0u16; 512];
+        let n = GetWindowTextW(hwnd, &mut buf) as usize;
+        if String::from_utf16_lossy(&buf[..n]).to_lowercase().contains(&s.target) {
+            s.found = Some(hwnd);
+            return false.into();
+        }
         return true.into();
     }
     if let Some(p) = process_path(pid) {
@@ -132,7 +155,18 @@ unsafe extern "system" fn enum_cb(hwnd: HWND, lp: LPARAM) -> BOOL {
 /// Das klappt, weil der Klick auf die Notch die letzte Eingabe war -> Windows erlaubt uns den Fokuswechsel.
 pub fn focus_exe(target: &str) -> bool {
     let t = target.to_lowercase();
-    let mut s = Search { by_path: t.contains('\\'), target: t, found: None };
+    focus(Search { by_path: t.contains('\\'), by_title: false, target: t, found: None })
+}
+
+/// Fenster nach vorn holen, dessen Titel `text` enthaelt (z. B. ein schon offenes Dokument).
+pub fn focus_title(text: &str) -> bool {
+    if text.len() < 3 {
+        return false;
+    }
+    focus(Search { by_path: false, by_title: true, target: text.to_lowercase(), found: None })
+}
+
+fn focus(mut s: Search) -> bool {
     unsafe {
         let _ = EnumWindows(Some(enum_cb), LPARAM(&mut s as *mut Search as isize));
         if let Some(h) = s.found {

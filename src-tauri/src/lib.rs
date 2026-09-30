@@ -187,8 +187,18 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
         let mut inside_prev = false;
         let mut fs_prev = false;
         let mut tick: u32 = 0;
+        let mut last_fg: isize = 0;
         loop {
             win::enforce(hwnd, !inside_prev);
+            // Klick auf die Notch soll dem aktuellen Programm nicht den Fokus klauen
+            let fg = win::foreground();
+            if fg == hwnd {
+                if last_fg != 0 && !DOCK_DRAG.load(Ordering::Relaxed) {
+                    win::set_foreground(last_fg);
+                }
+            } else if fg != 0 {
+                last_fg = fg;
+            }
             if tick % 15 == 0 {
                 let fs = win::fullscreen_foreground(geo.mon);
                 if fs != fs_prev {

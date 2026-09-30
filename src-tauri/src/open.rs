@@ -35,6 +35,17 @@ pub fn open_target(app: &AppHandle, target: &str) -> Result<(), String> {
         }
         return c.spawn().map(|_| ()).map_err(|e| e.to_string());
     }
+    // Ist die Datei schon offen (Fenstertitel = Dateiname, z. B. in Folio oder Word), das Fenster nach vorn holen.
+    // Direkt hier, weil nur wir gerade die letzte Eingabe hatten und Windows uns den Fokuswechsel erlaubt.
+    if let Some(name) = Path::new(t).file_name().map(|n| n.to_string_lossy().to_string()) {
+        let hit = win::focus_title(&name);
+        if cfg!(debug_assertions) {
+            eprintln!("[notch] open {t}: Fenster mit Titel '{name}' nach vorn -> {hit}");
+        }
+        if hit {
+            return Ok(());
+        }
+    }
     app.opener().open_path(t, None::<&str>).map_err(|e| e.to_string())
 }
 
