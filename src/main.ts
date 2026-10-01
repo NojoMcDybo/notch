@@ -37,7 +37,7 @@ type Clip = {
 type Target = { id: string; label: string };
 type Volume = { level: number; muted: boolean; device?: string; follows_player?: boolean };
 
-type State = "idle" | "compact" | "expanded";
+type State = "idle" | "compact" | "clip" | "expanded";
 type View = "home" | "tray" | "timer";
 
 type Dock = "top" | "left" | "right";
@@ -49,12 +49,15 @@ const MAX_H = 380;
 const SIZE = {
   idle: { w: 190, h: 30, r: 10 },
   compact: { w: 320, h: 34, r: 13 },
+  /** kurz beim Kopieren */
+  clip: { w: 300, h: 46, r: 17 },
   expanded: { w: 520, h: 0, r: 30 },
 };
 /** seitlich: senkrechte Pille, aufgeklappt ein hohes Panel mit allem auf einmal */
 const SIDE = {
   idle: { w: 30, h: 180, r: 10 },
   compact: { w: 44, h: 280, r: 15 },
+  clip: { w: 250, h: 54, r: 18 },
   expanded: { w: 400, h: 0, r: 28 },
 };
 /** so lange bleibt die Notch nach Pause noch kompakt */
@@ -358,6 +361,7 @@ const timerAlarm = () => acts.some((a) => a.id === "notch:timer" && a.title.incl
 
 function wanted(): State {
   if (hover || dragOver || holding > 0 || typing || voiceShown || timerAlarm() || Date.now() < peekUntil) return "expanded";
+  if (Date.now() < clipPeekUntil) return "clip";
   if (musicVisible() || acts.length) return "compact";
   return "idle";
 }
@@ -723,6 +727,57 @@ const clipsEl = q(".clips");
 let clipsSig = "";
 let copied = { id: 0, until: 0 };
 
+// ---------- Neu kopiert: Notch faehrt kurz auf, das Ding faellt in die Ablage ----------
+
+const CLIP_PEEK_MS = 2300;
+let clipPeekUntil = 0;
+let fresh = { id: 0, until: 0 };
+let clipsReadyAt = Infinity; // erst nach dem Start reagieren (beim Start kommt der aktuelle Inhalt rein)
+const seenClips = new Set<number>();
+const peekEl = q(".clip-peek");
+
+function clipLabel(c: Clip) {
+  if (c.kind === "image") return `Bild · ${c.width} × ${c.height}`;
+  if (c.kind === "files") return baseName(c.files[0] ?? "") + (c.files.length > 1 ? ` + ${c.files.length - 1} weitere` : "");
+  return (c.text ?? "").replace(/\s+/g, " ").trim();
+}
+
+function onClips(list: Clip[]) {
+  const top = list[0];
+  // neu = noch nie gesehene id (erneutes Kopieren aus dem Verlauf schiebt nur nach oben -> kein Auftritt)
+  const isNew = !!top && !seenClips.has(top.id) && Date.now() > clipsReadyAt;
+  list.forEach((c) => seenClips.add(c.id));
+  clips = list;
+  if (isNew && !fullscreen) {
+    fresh = { id: top.id, until: Date.now() + 1500 };
+    if (state === "expanded") {
+      // schon offen: nur Liste und Reiter reagieren lassen
+      const tab = q('.tab[data-view="tray"]');
+      tab.classList.remove("ping"); void tab.offsetWidth; tab.classList.add("ping");
+    } else {
+      const item = q(".cp-item", peekEl);
+      item.className = `cp-item k-${top.kind}`;
+      item.replaceChildren();
+      if (top.kind === "image" && top.path) {
+        const img = new Image();
+        img.src = convertFileSrc(top.path);
+        item.append(img);
+      } else if (top.kind === "files") {
+        const n = top.files.length;
+        const ext = (top.files[0]?.split(".").pop() ?? "").toUpperCase();
+        item.textContent = n > 1 ? String(n) : ext.length <= 4 ? ext : "DIR";
+      } else {
+        item.textContent = "T";
+      }
+      q(".cp-text", peekEl).textContent = clipLabel(top);
+      peekEl.classList.remove("go"); void peekEl.offsetWidth; peekEl.classList.add("go");
+      clipPeekUntil = Date.now() + CLIP_PEEK_MS;
+      setTimeout(() => { if (Date.now() >= clipPeekUntil) { peekEl.classList.remove("go"); render(false); } }, CLIP_PEEK_MS + 30);
+    }
+  }
+  render();
+}
+
 function ago(at: number) {
   const s = Math.max(0, (Date.now() - at) / 1000);
   if (s < 60) return "jetzt";
@@ -734,7 +789,7 @@ function ago(at: number) {
 const baseName = (p: string) => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? p;
 
 function clipRow(c: Clip) {
-  const row = el("div", `clip k-${c.kind}`);
+  const row = el("div", `clip k-${c.kind}` + (fresh.id === c.id && Date.now() < fresh.until ? " fresh" : ""));
   const lead = el("div", "clip-lead");
   const label = el("div", "clip-text");
   if (c.kind === "image" && c.path) {
@@ -1092,7 +1147,7 @@ async function main() {
   });
   await listen<Item[]>("shelf", (e) => { shelf = e.payload; render(); });
   await listen<number>("level", (e) => onLevel(e.payload));
-  await listen<Clip[]>("clips", (e) => { clips = e.payload; render(); });
+  await listen<Clip[]>("clips", (e) => onClips(e.payload));
   await listen<string>("activity-alert", () => {
     peekUntil = Date.now() + 3500;
     render();
@@ -1149,6 +1204,8 @@ async function main() {
   acts = snap.activities;
   shelf = snap.shelf;
   clips = snap.clips ?? [];
+  clips.forEach((c) => seenClips.add(c.id));
+  clipsReadyAt = Date.now() + 1500;
   dragIcon = await invoke<string>("drag_icon").catch(() => "");
   renderPresets(); // seitlich sind alle Bereiche gleichzeitig sichtbar
   render();

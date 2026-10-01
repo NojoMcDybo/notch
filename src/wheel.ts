@@ -4,8 +4,8 @@
  * Scrollen — so rastet es sauber ein und laesst sich auch mit der Maus ziehen.
  */
 
-const ROW = 30; // px je Zeile
-const SHOW = 3.2; // so viele Zeilen ober-/unterhalb sind sichtbar
+const ROW = 24; // px je Zeile (muss zu .w-item im CSS passen)
+const SHOW = 2.6; // so viele Zeilen ober-/unterhalb sind sichtbar
 
 export class Wheel {
   readonly el: HTMLElement;
@@ -56,8 +56,8 @@ export class Wheel {
       if (Math.abs(d) > SHOW) { it.style.visibility = "hidden"; continue; }
       it.style.visibility = "";
       const a = Math.abs(d);
-      it.style.transform = `translateY(${d * ROW}px) rotateX(${-d * 17}deg) scale(${1 - a * 0.05})`;
-      it.style.opacity = String(Math.max(0, 1 - a * 0.3));
+      it.style.transform = `translateY(${d * ROW}px) rotateX(${-d * 20}deg) scale(${1 - a * 0.06})`;
+      it.style.opacity = String(Math.max(0, 1 - a * 0.38));
       it.classList.toggle("on", a < 0.5);
     }
   }
