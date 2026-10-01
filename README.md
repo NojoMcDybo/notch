@@ -98,6 +98,7 @@ Die Notch hört auf `http://127.0.0.1:47800`.
     { "id": "log", "label": "Protokoll", "open": "C:\\…\\log.txt" }
   ],
   "ends_at": 1790870000000,  // Countdown: ms seit 1970, an dem progress 0 ist -> Balken läuft flüssig
+  "pulse": 72,               // Herzfrequenz: Symbol schlaegt in diesem Takt (Phase laeuft weiter, z. B. Helio)
   "input": {                 // Eingabefeld in der aufgeklappten Zeile (z. B. Suche)
     "placeholder": "In Folio suchen",
     "value": ""              // Stand aus Sicht der App; die Notch übernimmt ihn, solange man nicht tippt
