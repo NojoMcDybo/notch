@@ -12,7 +12,8 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowLongPtrW,
     GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
-    SetForegroundWindow, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, GW_OWNER, SW_RESTORE,
+    SetForegroundWindow, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, GWL_STYLE, GW_OWNER, SW_RESTORE,
+    WS_CAPTION,
     SW_SHOWNOACTIVATE, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
@@ -44,11 +45,17 @@ pub fn cursor() -> Option<(i32, i32)> {
 
 /// true, wenn das Vordergrundfenster den ganzen Monitor bedeckt (Spiel, Video, F11-Browser).
 /// Bewusst NICHT SHQueryUserNotificationState: das meldet auch bei Wallpaper Engine & Co.
-/// dauerhaft "busy". Maximierte Fenster zaehlen nicht (die lassen die Taskleiste frei).
+/// dauerhaft "busy". Vollbild erkennen wir an: deckt den ganzen Monitor UND hat keine
+/// Titelleiste (Browser-Vollbild und Spiele entfernen sie; ein maximiertes Fenster bei
+/// automatisch ausgeblendeter Taskleiste behaelt sie und zaehlt deshalb nicht).
 pub fn fullscreen_foreground(mon: (i32, i32, i32, i32)) -> bool {
     unsafe {
         let fg = GetForegroundWindow();
-        if fg.0.is_null() || IsZoomed(fg).as_bool() {
+        if fg.0.is_null() {
+            return false;
+        }
+        let style = GetWindowLongPtrW(fg, GWL_STYLE) as u32;
+        if style & WS_CAPTION.0 == WS_CAPTION.0 && IsZoomed(fg).as_bool() {
             return false;
         }
         let mut pid = 0u32;
@@ -97,7 +104,7 @@ pub fn show_noactivate(raw: isize) {
     }
 }
 
-fn process_path(pid: u32) -> Option<String> {
+pub fn process_path(pid: u32) -> Option<String> {
     unsafe {
         let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
         let mut buf = [0u16; 1024];

@@ -26,7 +26,7 @@ type Activity = {
 };
 type Item = { path: string; name: string; ext: string; size: number; kind: string; added: number };
 type Target = { id: string; label: string };
-type Volume = { level: number; muted: boolean };
+type Volume = { level: number; muted: boolean; device?: string; follows_player?: boolean };
 
 type State = "idle" | "compact" | "expanded";
 type View = "home" | "tray" | "timer";
@@ -82,7 +82,9 @@ let pausedAt = 0;
 let coverSrc: string | null = null;
 let acts: Activity[] = [];
 let shelf: Item[] = [];
-let selected: string | null = null;
+let sel = new Set<string>();
+let anchor: string | null = null;
+let convertStatus = "";
 let volume: Volume = { level: 0.5, muted: false };
 let hover = false;
 let hoverRaw = false;
@@ -302,8 +304,11 @@ function musicVisible() {
   return media.playing || Date.now() - pausedAt < PAUSE_LINGER;
 }
 
+/** Timer abgelaufen und noch nicht bestaetigt? Dann bleibt die Notch offen und pulsiert. */
+const timerAlarm = () => acts.some((a) => a.id === "notch:timer" && a.title.includes("abgelaufen"));
+
 function wanted(): State {
-  if (hover || dragOver || holding > 0 || voiceShown || Date.now() < peekUntil) return "expanded";
+  if (hover || dragOver || holding > 0 || voiceShown || timerAlarm() || Date.now() < peekUntil) return "expanded";
   if (musicVisible() || acts.length) return "compact";
   return "idle";
 }
@@ -365,6 +370,13 @@ function renderVolume() {
   const lvl = volume.muted || volume.level < 0.01 ? 0 : volume.level < 0.5 ? 1 : 2;
   volEl.dataset.lvl = String(lvl);
   if (!volSlider.classList.contains("drag")) setSlider(volSlider, volume.muted ? 0 : volume.level);
+  // Welcher Ausgang geregelt wird (z. B. "SteelSeries Sonar - Media"); Zusatz in Klammern weglassen
+  const dev = (volume.device ?? "").replace(/\s*\(.*\)\s*$/, "");
+  const devEl = q(".vol-dev");
+  devEl.textContent = dev;
+  devEl.title = volume.follows_player
+    ? `Lautstärke des Ausgangs, auf dem der Player spielt: ${volume.device}`
+    : `Windows-Standardausgang: ${volume.device ?? ""}`;
 }
 
 function renderActs() {
@@ -433,63 +445,180 @@ function fileThumb(it: Item) {
   return t;
 }
 
+// ---------- Ablage: Auswahl (Strg/Umschalt), Doppelklick, Rechtsklick-Menue ----------
+
+/** Pfade der markierten Dateien in Ablage-Reihenfolge */
+const selectedItems = () => shelf.filter((i) => sel.has(i.path));
+
+function selectClick(path: string, e: MouseEvent) {
+  const order = shelf.map((i) => i.path);
+  if (e.shiftKey && anchor && order.includes(anchor)) {
+    const [a, b] = [order.indexOf(anchor), order.indexOf(path)].sort((x, y) => x - y);
+    if (!e.ctrlKey) sel.clear();
+    order.slice(a, b + 1).forEach((p) => sel.add(p));
+  } else if (e.ctrlKey) {
+    if (sel.has(path)) sel.delete(path); else sel.add(path);
+    anchor = path;
+  } else {
+    const only = sel.size === 1 && sel.has(path);
+    sel.clear();
+    if (!only) sel.add(path);
+    anchor = path;
+  }
+  convertStatus = "";
+  applySel();
+}
+
+/** Auswahl nur per Klasse umschalten — kein Neuaufbau, sonst geht der Doppelklick verloren */
+function applySel() {
+  filesEl.querySelectorAll<HTMLElement>(".file").forEach((f) => f.classList.toggle("sel", sel.has(f.dataset.path!)));
+  void renderFileBar();
+}
+
 function renderShelf() {
   badge.hidden = shelf.length === 0;
   badge.textContent = String(shelf.length);
   trayView.classList.toggle("has-files", shelf.length > 0);
-  if (selected && !shelf.some((i) => i.path === selected)) selected = null;
+  const known = new Set(shelf.map((i) => i.path));
+  for (const p of [...sel]) if (!known.has(p)) sel.delete(p);
 
-  const sig = JSON.stringify(shelf.map((i) => i.path)) + "|" + selected;
-  if (sig !== shelfSig) {
-    shelfSig = sig;
-    filesEl.replaceChildren(
-      ...shelf.map((it) => {
-        const f = el("div", "file" + (it.path === selected ? " sel" : ""));
-        f.title = it.path;
-        f.append(fileThumb(it), el("div", "fname", it.name));
-        f.addEventListener("click", () => { selected = selected === it.path ? null : it.path; render(); });
-        f.addEventListener("dblclick", () => invoke("open", { target: it.path }));
-        f.addEventListener("contextmenu", (e) => { e.preventDefault(); invoke("shelf_remove", { path: it.path }); });
-        // Rausziehen: ab 6 px Bewegung uebernimmt Windows das Ziehen
-        f.addEventListener("pointerdown", (e) => {
-          if (e.button !== 0) return;
-          const x0 = e.clientX, y0 = e.clientY;
-          const mv = (ev: PointerEvent) => {
-            if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
-            window.removeEventListener("pointermove", mv);
-            if (dragIcon) startDrag({ item: [it.path], icon: dragIcon }).catch(() => {});
-          };
-          window.addEventListener("pointermove", mv);
-          window.addEventListener("pointerup", () => window.removeEventListener("pointermove", mv), { once: true });
-        });
-        return f;
-      }),
-    );
-    renderFileBar();
-  }
+  const sig = JSON.stringify(shelf.map((i) => i.path));
+  if (sig === shelfSig) return;
+  shelfSig = sig;
+  filesEl.replaceChildren(
+    ...shelf.map((it) => {
+      const f = el("div", "file" + (sel.has(it.path) ? " sel" : ""));
+      f.dataset.path = it.path;
+      f.title = it.path;
+      f.append(fileThumb(it), el("div", "fname", it.name));
+      f.addEventListener("click", (e) => selectClick(it.path, e));
+      f.addEventListener("dblclick", () => { closeMenu(); invoke("open", { target: it.path }); });
+      f.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!sel.has(it.path)) { sel.clear(); sel.add(it.path); anchor = it.path; applySel(); }
+        void openMenu(e.clientX, e.clientY);
+      });
+      // Rausziehen: ab 6 px Bewegung uebernimmt Windows das Ziehen (alle markierten, wenn diese dabei ist)
+      f.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        const x0 = e.clientX, y0 = e.clientY;
+        const mv = (ev: PointerEvent) => {
+          if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
+          window.removeEventListener("pointermove", mv);
+          const items = sel.has(it.path) ? selectedItems().map((i) => i.path) : [it.path];
+          if (dragIcon) startDrag({ item: items, icon: dragIcon }).catch(() => {});
+        };
+        window.addEventListener("pointermove", mv);
+        window.addEventListener("pointerup", () => window.removeEventListener("pointermove", mv), { once: true });
+      });
+      return f;
+    }),
+  );
+  void renderFileBar();
 }
 
+/** Ziele, die fuer ALLE markierten Dateien gehen */
+async function commonTargets(items: Item[]) {
+  let common: Target[] | null = null;
+  for (const it of items) {
+    const t = await invoke<Target[]>("convert_targets", { path: it.path });
+    common = common ? common.filter((c) => t.some((x) => x.id === c.id)) : t;
+  }
+  return common ?? [];
+}
+
+function convertSelected(target: Target) {
+  const items = selectedItems();
+  for (const it of items) invoke("convert", { path: it.path, target: target.id });
+  convertStatus = `${items.length > 1 ? items.length + " Dateien" : items[0]?.name} → ${target.label} …`;
+  closeMenu();
+  void renderFileBar(); // in der Ablage bleiben; Ergebnis taucht hier auf
+}
+
+const ACTIONS = {
+  open: () => selectedItems().forEach((i) => invoke("open", { target: i.path })),
+  reveal: () => { const i = selectedItems()[0]; if (i) invoke("reveal", { path: i.path }); },
+  remove: () => { selectedItems().forEach((i) => invoke("shelf_remove", { path: i.path })); sel.clear(); convertStatus = ""; },
+};
+
+let fbToken = 0;
 async function renderFileBar() {
-  const it = shelf.find((i) => i.path === selected);
-  fileBar.hidden = !it;
-  if (!it) { render(false); return; }
-  q(".fb-name", fileBar).textContent = it.name;
+  const items = selectedItems();
+  fileBar.hidden = !items.length && !convertStatus;
+  const token = ++fbToken;
+  q(".fb-name", fileBar).textContent =
+    convertStatus || (items.length === 1 ? items[0].name : `${items.length} Dateien ausgewählt`);
+  q(".fb-row", fileBar).hidden = !items.length;
   const box = q(".fb-formats", fileBar);
+  if (!items.length) { box.replaceChildren(); render(false); return; }
+  const targets = await commonTargets(items);
+  if (token !== fbToken) return; // inzwischen anders ausgewaehlt
   box.replaceChildren();
-  const targets = await invoke<Target[]>("convert_targets", { path: it.path });
   if (!targets.length) {
-    const ff = await invoke<boolean>("ffmpeg_available");
-    box.append(el("span", "none", (it.kind === "audio" || it.kind === "video") && !ff ? "Für Audio/Video fehlt ffmpeg" : ""));
+    const av = items.some((i) => i.kind === "audio" || i.kind === "video");
+    const ff = av ? await invoke<boolean>("ffmpeg_available") : true;
+    box.append(el("span", "none", !ff ? "Für Audio/Video fehlt ffmpeg" : items.length > 1 ? "kein gemeinsames Format" : ""));
   }
   for (const t of targets) {
     const b = el("button", "pill", t.label);
     b.title = `In ${t.label} umwandeln — landet neben dem Original`;
-    b.addEventListener("click", () => {
-      invoke("convert", { path: it.path, target: t.id });
-      setView("home");
-    });
+    b.addEventListener("click", () => convertSelected(t));
     box.append(b);
   }
+  render(false);
+}
+
+// Rechtsklick-Menue: liegt in der Notch, damit es nie aus dem Fenster ragt
+const menu = el("div", "ctx");
+menu.hidden = true;
+let menuOpen = false;
+
+async function openMenu(x: number, y: number) {
+  const items = selectedItems();
+  if (!items.length) return;
+  const n = items.length;
+  menu.replaceChildren();
+  const add = (label: string, fn: () => void, cls = "") => {
+    const b = el("button", "ctx-item " + cls, label);
+    b.addEventListener("click", () => { fn(); closeMenu(); });
+    menu.append(b);
+  };
+  add(n > 1 ? `${n} Dateien öffnen` : "Öffnen", ACTIONS.open);
+  add("Im Ordner zeigen", ACTIONS.reveal);
+  const targets = await commonTargets(items);
+  if (targets.length) {
+    menu.append(el("div", "ctx-sep"));
+    menu.append(el("div", "ctx-label", "Umwandeln in"));
+    const row = el("div", "ctx-formats");
+    for (const t of targets) {
+      const b = el("button", "pill", t.label);
+      b.addEventListener("click", () => convertSelected(t));
+      row.append(b);
+    }
+    menu.append(row);
+  }
+  menu.append(el("div", "ctx-sep"));
+  add(n > 1 ? `${n} aus der Ablage nehmen` : "Aus der Ablage nehmen", ACTIONS.remove, "danger");
+
+  // Position relativ zur Form; an den Raendern nach innen schieben
+  const host = q(".shape").getBoundingClientRect();
+  menu.hidden = false;
+  menuOpen = true;
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  const left = Math.min(Math.max(8, x - host.left), host.width - mw - 8);
+  // Nach unten darf das Menue ueberstehen: die Notch waechst dann mit (siehe render)
+  let top = y - host.top;
+  if (top + mh > MAX_H - 8) top = Math.max(8, MAX_H - 8 - mh);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  render(false);
+}
+
+function closeMenu() {
+  if (!menuOpen) return;
+  menuOpen = false;
+  menu.hidden = true;
   render(false);
 }
 
@@ -542,6 +671,8 @@ function render(full = true) {
   notch.dataset.state = state;
   notch.classList.toggle("gone", fullscreen);
   notch.classList.toggle("dragging", dragOver);
+  notch.classList.toggle("alarm", timerAlarm());
+  if (timerAlarm() && view !== "home") { view = "home"; notch.dataset.view = "home"; }
 
   notch.dataset.dock = dock;
   const side = dock !== "top";
@@ -550,6 +681,8 @@ function render(full = true) {
     expanded.style.setProperty("--xw", `${s.w}px`);
     const max = side ? Math.floor(innerHeight * 0.92) : MAX_H;
     s.h = Math.min(max, Math.ceil(expanded.scrollHeight));
+    // offenes Rechtsklick-Menue: Notch waechst mit, statt es abzuschneiden
+    if (menuOpen) s.h = Math.min(max, Math.max(s.h, menu.offsetTop + menu.offsetHeight + 12));
   }
   const e = state === "expanded" ? EAR_X : EAR;
   notch.style.setProperty("--w", `${s.w}px`);
@@ -559,11 +692,23 @@ function render(full = true) {
   clearTray.hidden = !((side || view === "tray") && shelf.length > 0);
 
   // Wo die Form im Fenster liegt -> nur dort faengt das Fenster die Maus
-  const rect =
+  let rect: Rect =
     dock === "top"
       ? { x: (innerWidth - s.w) / 2 - e, y: 0, w: s.w + 2 * e, h: s.h }
       : { x: dock === "left" ? 0 : innerWidth - s.w, y: (innerHeight - s.h) / 2 - e, w: s.w, h: s.h + 2 * e };
+  // Schrumpft der Inhalt unter der Maus (z. B. Leiste verschwindet nach einem Klick), bleibt der
+  // Fangbereich so gross wie vorher, bis die Maus wirklich weg ist — sonst klappt die Notch einem
+  // unter dem Zeiger weg.
+  if (state === "expanded" && hoverRaw && lastRect) rect = union(rect, lastRect);
+  lastRect = state === "expanded" && hoverRaw ? rect : null;
   invoke("set_hit_rect", { rect: fullscreen ? { x: 0, y: 0, w: 0, h: 0 } : rect });
+}
+
+type Rect = { x: number; y: number; w: number; h: number };
+let lastRect: Rect | null = null;
+function union(a: Rect, b: Rect): Rect {
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+  return { x, y, w: Math.max(a.x + a.w, b.x + b.w) - x, h: Math.max(a.y + a.h, b.y + b.h) - y };
 }
 
 function setHover(v: boolean) {
@@ -574,7 +719,10 @@ function setHover(v: boolean) {
     if (view === "timer") { view = "home"; notch.dataset.view = "home"; }
     invoke<Volume>("volume_get").then((v) => { volume = v; renderVolume(); }).catch(() => {});
   }
-  if (!v) selected = null;
+  if (!v) {
+    // Maus ist weg: Menue zu; Auswahl bleibt, damit man nach dem Zurueckkommen weitermachen kann
+    closeMenu();
+  }
   render();
 }
 
@@ -597,7 +745,17 @@ async function main() {
   // Erst zuhoeren, dann den Stand holen — sonst gehen Ereignisse beim Start verloren.
   await listen<Media>("media", (e) => { setMedia(e.payload); render(); });
   await listen<{ key: string; src: string }>("media-cover", (e) => { setCover(e.payload.src); render(); });
-  await listen<Activity[]>("activities", (e) => { acts = e.payload; render(); });
+  await listen<Activity[]>("activities", (e) => {
+    acts = e.payload;
+    // Stand der Umwandlung in der Ablage-Leiste zeigen (man bleibt in der Ablage)
+    if (convertStatus) {
+      const conv = acts.filter((a) => a.id.startsWith("notch:convert:")).sort((a, b) => b.updated - a.updated)[0];
+      if (conv?.subtitle === "fertig") convertStatus = `Fertig: ${conv.title}`;
+      else if (conv && conv.color === "#ff453a") convertStatus = `Fehler: ${conv.subtitle ?? ""}`;
+      void renderFileBar();
+    }
+    render();
+  });
   await listen<Item[]>("shelf", (e) => { shelf = e.payload; render(); });
   await listen<string>("activity-alert", () => {
     peekUntil = Date.now() + 3500;
@@ -718,12 +876,17 @@ async function main() {
   }, { passive: false });
 
   // Ablage-Leiste
-  q(".fb-open").addEventListener("click", () => selected && invoke("open", { target: selected }));
-  q(".fb-reveal").addEventListener("click", () => selected && invoke("reveal", { path: selected }));
-  q(".fb-remove").addEventListener("click", () => selected && invoke("shelf_remove", { path: selected }));
+  q(".fb-open").addEventListener("click", ACTIONS.open);
+  q(".fb-reveal").addEventListener("click", ACTIONS.reveal);
+  q(".fb-remove").addEventListener("click", ACTIONS.remove);
+  // Rechtsklick-Menue: lebt in der Form, schliesst bei jedem Klick daneben
+  q(".shape").append(menu);
+  document.addEventListener("pointerdown", (e) => { if (!menu.contains(e.target as Node)) closeMenu(); }, true);
+  // Klick ins Leere der Ablage hebt die Auswahl auf
+  filesEl.addEventListener("click", (e) => { if (e.target === filesEl) { sel.clear(); convertStatus = ""; applySel(); } });
 
   // Die Form selbst (nicht Knoepfe/Regler/Dateien) mit gedrueckter Maus ziehen -> an eine andere Kante andocken
-  const INTERACTIVE = "button, .slider, .file, .act, .preset, .drop";
+  const INTERACTIVE = "button, .slider, .file, .files, .file-bar, .ctx, .act, .preset, .drop";
   q(".shape").addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || (e.target as Element).closest(INTERACTIVE)) return;
     const x0 = e.clientX, y0 = e.clientY;

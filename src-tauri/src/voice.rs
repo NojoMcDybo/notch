@@ -6,7 +6,6 @@
 //! %APPDATA%\de.nojo.notch\openai-key.txt (eine Zeile, beginnt mit "sk-").
 
 use std::path::PathBuf;
-use std::process::Command;
 
 use tauri::{AppHandle, Manager};
 
@@ -47,7 +46,13 @@ pub fn voice_setup(app: AppHandle) -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
     }
-    Command::new("notepad.exe").arg(&f).spawn().map(|_| ()).map_err(|e| e.to_string())
+    // Mit dem Standardprogramm fuer .txt oeffnen (notepad.exe direkt meldete "Pfad nicht gefunden");
+    // klappt das nicht, wenigstens im Explorer zeigen.
+    use tauri_plugin_opener::OpenerExt;
+    if app.opener().open_path(f.to_string_lossy(), None::<&str>).is_err() {
+        crate::win::reveal(&f.to_string_lossy());
+    }
+    Ok(())
 }
 
 /// Kurzlebigen Schluessel fuer eine Sprachsitzung holen.
