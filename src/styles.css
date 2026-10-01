@@ -475,3 +475,46 @@ svg { display: block; }
   .clip-peek.go .cp-item, .clip-peek.go .cp-tray, .clip-peek.go .cp-body, .clip.fresh, .tab.ping svg { animation: none; }
   .clip-peek.go .cp-dot { animation: none; transform: scale(1); }
 }
+
+/* ---------- Blutzucker (Verlaufs-Activity, glucose.ts) ---------- */
+/* zu: Wert + Pfeil + Aenderung in der Farbe des Bereichs */
+.c-trail.bg { gap: 4px; }
+.c-trail.bg .bg-v { font-size: 15px; }
+.c-trail.bg .arrow { font-size: 14px; line-height: 1; }
+.c-trail.bg .bg-d { color: var(--fg2); font-size: 11px; font-weight: 500; }
+#notch[data-dock="left"] .c-trail.bg .bg-d, #notch[data-dock="right"] .c-trail.bg .bg-d { display: none; }
+
+/* auf: Kopf + Graph */
+.act.bg { display: block; padding: 8px 8px 4px; cursor: default; }
+.act.bg:hover { background: none; }
+.bg-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.bg-left { min-width: 0; }
+.bg-title { font-size: 10.5px; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.06em; }
+.bg-line { display: flex; align-items: baseline; gap: 6px; color: var(--bg); line-height: 1.05; }
+.bg-val { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; }
+.bg-arrow { font-size: 22px; font-weight: 600; }
+.bg-delta { font-size: 13px; font-weight: 500; color: var(--fg2); font-variant-numeric: tabular-nums; }
+.bg-meta { font-size: 11px; color: var(--fg2); margin-top: 2px; }
+.bg-pills { display: flex; gap: 3px; padding: 2px; border-radius: 9px; background: rgba(255, 255, 255, 0.06); flex: none; }
+.bg-pill { height: 22px; padding: 0 8px; border-radius: 7px; font-size: 11px; color: var(--fg2); transition: background 0.15s, color 0.15s; }
+.bg-pill:hover { color: var(--fg); }
+.bg-pill.on { background: rgba(255, 255, 255, 0.16); color: var(--fg); }
+.bg-graph-wrap { margin: 0 -2px; }
+.bg-graph { display: block; overflow: visible; }
+.bg-vgrid { stroke: rgba(255, 255, 255, 0.06); stroke-width: 1; }
+.bg-tlab { fill: rgba(255, 255, 255, 0.45); font-size: 10px; font-variant-numeric: tabular-nums; }
+.bg-lim { stroke-width: 1; stroke-dasharray: 3 4; }
+.bg-lim.hi { stroke: rgba(237, 188, 86, 0.55); }
+.bg-lim.lo { stroke: rgba(255, 121, 113, 0.55); }
+.bg-llab { font-size: 10px; font-variant-numeric: tabular-nums; }
+.bg-llab.hi { fill: rgba(237, 188, 86, 0.85); }
+.bg-llab.lo { fill: rgba(255, 121, 113, 0.85); }
+.bg-pt.ok { fill: #f5f5f7; }
+.bg-pt.hi { fill: #EDBC56; }
+.bg-pt.lo { fill: #FF7971; }
+.bg-graph.stale .bg-pt { opacity: 0.45; }
+.bg-sel { fill: none; stroke: #fff; stroke-width: 1.5; }
+.bg-selline { stroke: rgba(255, 255, 255, 0.25); stroke-width: 1; }
+.bg-tip { fill: #2c2c2e; stroke: rgba(255, 255, 255, 0.12); }
+.bg-tiptext { fill: #fff; font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.bg-empty { fill: var(--fg2); font-size: 11px; }

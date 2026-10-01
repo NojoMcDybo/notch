@@ -21,7 +21,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Webview
 
 /// Fenster ist eine unsichtbare Leinwand; die Notch wird darin gezeichnet.
 const WIN_W: f64 = 640.0;
-const WIN_H: f64 = 400.0;
+const WIN_H: f64 = 560.0; // Platz fuer Player + Blutzucker-Graph + weitere Zeilen
 
 /// Bereich der Notch im Fenster (CSS-Pixel), meldet das Frontend.
 /// Nur dort faengt das Fenster die Maus ab, ueberall sonst klickt man durch.
@@ -64,6 +64,25 @@ static HOVER: AtomicBool = AtomicBool::new(false);
 /// Ein Eingabefeld in der Notch hat den Fokus -> Fenster darf vorne bleiben (Tastatur)
 static KEYBOARD: AtomicBool = AtomicBool::new(false);
 static HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// Bis zu diesem Zeitpunkt (ms) gibt das Polling den Fokus nicht zurueck — damit eine App,
+/// die per Doppelklick nach vorn geholt wird, nicht sofort wieder weggedrueckt wird.
+static FOCUS_HOLD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Doppelklick auf einen Verlauf (z. B. Haze-Graph): die App soll nach vorn kommen.
+/// Bewusste Ausnahme zu "ein Klick klaut nie den Fokus". Die Notch erlaubt dem App-Prozess,
+/// sich selbst in den Vordergrund zu holen, und legt ein "open"-Ereignis in /events.
+/// Die App pollt /events und macht Restore/Show/Activate selbst (klappt auch aus Tray/minimiert).
+#[tauri::command]
+fn activity_focus_app(id: String) {
+    use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+    let pid = activities::get(&id).and_then(|a| a.pid).unwrap_or(u32::MAX); // MAX = ASFW_ANY
+    unsafe {
+        let _ = AllowSetForegroundWindow(pid);
+    }
+    FOCUS_HOLD.store(activities::now_ms() + 1200, Ordering::Relaxed);
+    activities::push_event(&id, "open");
+}
 
 /// Tippen in der Notch: solange `on`, gibt das Polling den Fokus nicht zurueck.
 #[tauri::command]
@@ -214,7 +233,8 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
             // Klick auf die Notch soll dem aktuellen Programm nicht den Fokus klauen
             let fg = win::foreground();
             if fg == hwnd {
-                if last_fg != 0 && !DOCK_DRAG.load(Ordering::Relaxed) && !KEYBOARD.load(Ordering::Relaxed) {
+                let hold = activities::now_ms() < FOCUS_HOLD.load(Ordering::Relaxed);
+                if last_fg != 0 && !DOCK_DRAG.load(Ordering::Relaxed) && !KEYBOARD.load(Ordering::Relaxed) && !hold {
                     win::set_foreground(last_fg);
                 }
             } else if fg != 0 {
@@ -301,6 +321,7 @@ pub fn run() {
             activities::activity_open,
             activities::activity_action,
             activities::activity_input,
+            activity_focus_app,
             keyboard,
             clipboard::clip_list,
             clipboard::clip_copy,

@@ -106,6 +106,31 @@ Die Notch hört auf `http://127.0.0.1:47800`.
 }
 ```
 
+### Verlaufs-Activities (Blutzucker aus Haze)
+
+Optionaler Feldblock an `POST /activity` — sobald `chart` da ist, zeichnet die Notch statt der normalen Zeile eine Verlaufs-Karte:
+
+```jsonc
+{
+  "id": "haze:bg", "app": "Haze", "title": "Blutzucker",
+  "value": 112, "unit": "mg/dL",          // value darf Zahl oder Text sein
+  "trend": "down45",                      // up2 | up | up45 | flat | down45 | down | down2
+  "delta": -7,                            // Wert minus vorheriger Messwert
+  "chart": { "low": 70, "high": 180,
+             "points": [[1790870000000, 119], ...],   // [epoch_ms, wert], 24 h, die Notch schneidet selbst
+             "ranges": [3, 6, 12, 24], "range": 3 },
+  "pid": 12345,                           // fuer AllowSetForegroundWindow beim Doppelklick
+  "ttl": 900, "alert": false
+}
+```
+
+- Zu: nur Wert + Pfeil + Änderung (`112 ↘ −7`), Farbe aus low/high (über high bernstein, unter low rot). Seitlich ohne Änderung.
+- Auf: Kopf mit Wert/Pfeil/Änderung/Alter und Pillen 3/6/12/24 Std., darunter der Graph: weiße Punkte im Zielbereich, bernstein über `high`, rot unter `low`, gestrichelte Grenzlinien mit Beschriftung rechts, drei Uhrzeiten unten. Punkt antippen → Zeit und Wert. Doppelklick → `open`-Ereignis (siehe unten).
+- **Veraltet:** Maßgeblich ist der Zeitstempel des letzten Punkts, nicht die letzte Sendung. Ab 12 Min. ohne neuen Messwert grau, kein Pfeil, keine Änderung, „vor X Min“. Läuft die `ttl` ab, bleibt der Eintrag stehen und zeigt „keine Daten“ (verschwindet nur per `DELETE` oder ×).
+- **Alarme** entscheidet die App (`alert`), die Notch klappt dann nur kurz auf.
+- **Doppelklick auf den Graphen:** Die Notch ruft `AllowSetForegroundWindow(pid)` auf, legt `{"activity":"haze:bg","action":"open"}` in `GET /events` und gibt den Fokus 1,2 s lang nicht an das vorige Fenster zurück. Die App pollt `/events` (200 ms) und holt sich selbst nach vorn (Restore/Show/Focus) — klappt so auch aus dem Tray. Bewusste Ausnahme zu „ein Klick klaut nie den Fokus“.
+- Zum Testen ohne Haze: `.\tools\bg-demo.ps1` (Optionen `-AgeMin 15`, `-Ttl 20`, `-Alert`, `-Remove`).
+
 Eingabefeld: Tippen landet (entprellt) als Ereignis `input`, Enter als `submit`, Umschalt+Enter als `submit-prev`,
 jeweils mit `value` in `GET /events`. Bei Enter holt die Notch außerdem `open` nach vorn. Solange das Feld den Fokus
 hat, behält die Notch die Tastatur; ist das Feld leer und die Maus weg, gibt sie sie sofort zurück.
@@ -134,7 +159,8 @@ Browser-Seiten dürfen nur von `localhost`/`127.0.0.1`/`tauri://` aus schreiben 
 ## Angebunden
 
 - **Folio** (`D:\Dev\folio\src\notch.ts` + `src-tauri\src\notch.rs`): jedes offene Dokument erscheint mit Deckelbild und „Seite x von y“ — beim Scrollen höchstens alle 80 ms nachgeführt, in fester Reihenfolge über einen Rust-Faden. Aufgeklappt steht darunter dauerhaft **Folios Suchfeld**: Tippen sucht im Dokument (Treffer stehen in der Zeile), Enter/Umschalt+Enter springt zum nächsten/vorigen Treffer und holt das Fenster nach vorn. Folio holt die Eingaben alle 200 ms über `GET /events` ab. Klick auf die Zeile holt genau dieses Dokumentfenster nach vorn. Auffrischen jede Minute, ttl 180 s, Entfernen beim Schließen. `notchShelf(paths)` legt Dateien in die Ablage.
-- **Haze** (Blutzucker-Widget, `OneDrive\Projects\Haze`): `NotchBridge` in `Haze.cs` schickt Wert, Trend, Alter; Farbe nach Bereich; `alert` beim Wechsel in hoch/tief; `ttl` 180 s + Auffrischen jede Minute (stürzt Haze ab, verschwindet der Wert von selbst); beim Beenden wird der Eintrag gelöscht. Klick auf die Zeile holt Haze nach vorn. Aktuell **Demowerte** — Haze hat noch keine echte Datenquelle.
+- **Haze** (Electron-App, `C:\Users\nojod\Projects\haze-app`, Repo NojoMcDybo/Haze): Nightscout-Dashboard (Dexcom Share über Nightscout als Brücke), hält selbst bis zu 600 Messwerte (~2 Tage). `desktop/notch-bridge.cjs` schickt bei jedem neuen Messwert `haze:bg` mit Wert, Trend (Sensor, sonst Dexcom-Schwellen), Änderung und 24 h Verlauf, `ttl` 900 s + Auffrischen jede Minute, `alert` beim Wechsel in hoch/tief; beim Beenden wird der Eintrag gelöscht. Doppelklick auf den Graphen holt das Dashboard nach vorn (Haze pollt `/events`). Stand: Branch `claude/notch-verlauf` auf Basis von PR #1, nur lokal; zum Testen `tools\haze-branch-start.cmd` per Explorer starten.
+- Der ältere C#-Prototyp `OneDrive\Projects\Haze` (Widget Lab, nur Demowerte, id `haze-bz`) ist nicht mehr die angebundene App.
 
 ## Aufbau
 

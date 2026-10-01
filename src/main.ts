@@ -4,6 +4,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { Voice, type VoiceState } from "./voice";
 import { Wheel } from "./wheel";
+import { bgSig, fillCard, fillCompact, isBg, type ChartData } from "./glucose";
 
 // ---------- Typen ----------
 
@@ -30,6 +31,12 @@ type Activity = {
   input?: { placeholder: string; value?: string };
   /** Herzfrequenz: Symbol schlaegt in diesem Takt (siehe Pulse-Taktgeber) */
   pulse?: number;
+  /** Verlaufs-Activities (Blutzucker aus Haze), siehe glucose.ts */
+  trend?: string;
+  delta?: number;
+  chart?: ChartData;
+  pid?: number;
+  expired?: boolean;
 };
 type Item = { path: string; name: string; ext: string; size: number; kind: string; added: number };
 type Clip = {
@@ -46,7 +53,7 @@ type Dock = "top" | "left" | "right";
 
 const EAR = 10;
 const EAR_X = 14;
-const MAX_H = 380;
+const MAX_H = 540; // Fenster ist 560 hoch (lib.rs WIN_H)
 /** oben: waagerecht wie die Mac-Notch */
 const SIZE = {
   idle: { w: 190, h: 30, r: 10 },
@@ -432,11 +439,12 @@ let shelfSig = "";
 function renderCompact() {
   const top = acts[0];
   // nur neu bauen, wenn sich etwas Sichtbares aendert (sonst startet der Pegel jede Sekunde neu)
-  const sig = [musicVisible(), media?.playing, coverSrc?.length, top?.id, top?.value, top?.unit, top?.color, top?.icon].join("|");
+  const sig = [musicVisible(), media?.playing, coverSrc?.length, top?.id, top?.value, top?.unit, top?.color, top?.icon, top && isBg(top) ? bgSig(top) : ""].join("|");
   if (sig === compactSig) return;
   compactSig = sig;
   lead.replaceChildren();
   trail.replaceChildren();
+  trail.className = "c-trail";
 
   if (musicVisible()) {
     if (coverSrc) {
@@ -446,7 +454,10 @@ function renderCompact() {
     } else lead.append(el("div", "icon", "♪"));
   } else if (top) lead.append(iconEl(top));
 
-  if (top?.value) {
+  if (top && isBg(top)) {
+    // Blutzucker: zu nur Wert + Pfeil + Aenderung (Graph gehoert ins aufgeklappte Panel)
+    fillCompact(trail, top);
+  } else if (top?.value) {
     trail.style.setProperty("--accent", top.color ?? "");
     trail.append(el("span", "", top.value));
     if (top.unit) trail.append(el("small", "", top.unit));
@@ -610,8 +621,31 @@ function inputBox(id: string) {
   return box;
 }
 
+/** Breite des Graphen: Panel oben 520 bzw. seitlich 400, abzueglich Innenabstand */
+const bgWidth = () => (dock === "top" ? 480 : 360);
+
 function fillRow(row: HTMLElement, a: Activity) {
   rowAct.set(row, a);
+  if (isBg(a)) {
+    // Verlaufs-Karte (Haze): eigener Aufbau, wird nur neu gezeichnet, wenn sich etwas Sichtbares aendert
+    row.className = "act bg";
+    row.style.removeProperty("--accent");
+    row.title = "";
+    const rebuilt = fillCard(row, a, {
+      width: bgWidth(),
+      onDouble: () => invoke("activity_focus_app", { id: a.id }),
+      onChange: () => { const cur = rowAct.get(row); if (cur) fillRow(row, cur); render(false); },
+    });
+    if (rebuilt) {
+      const x = el("button", "act-x");
+      x.title = "Entfernen";
+      x.append(svgIcon("close")!);
+      x.addEventListener("click", (e) => { e.stopPropagation(); invoke("dismiss_activity", { id: a.id }); });
+      row.append(x);
+    }
+    return;
+  }
+  delete row.dataset.bgsig;
   row.className = "act" + (a.open ? " link" : "") + (a.input ? " has-input" : "");
   if (a.color) row.style.setProperty("--accent", a.color);
   else row.style.removeProperty("--accent");
@@ -680,7 +714,7 @@ function newRow(id: string) {
 
 function renderActs() {
   const list = acts.slice(0, 4);
-  const sig = JSON.stringify(list);
+  const sig = JSON.stringify(list) + dock;
   if (sig === actsSig) return;
   actsSig = sig;
   const keep = new Set(list.map((a) => a.id));
@@ -1353,8 +1387,14 @@ async function main() {
 
   document.addEventListener("contextmenu", (e) => e.preventDefault());
 
+  let bgTick = 0;
   setInterval(() => {
     if (state === "expanded") { tickProgress(); tickClock(); tickAges(); }
+    // Verlaufs-Eintraege altern auch ohne neue Meldung: "vor X Min", grau ab 12 Min (alle 10 s pruefen)
+    if (++bgTick % 20 === 0 && acts.some(isBg)) {
+      for (const [, row] of rows) { const a = rowAct.get(row); if (a && isBg(a)) fillRow(row, a); }
+      renderCompact();
+    }
     // Pause-Nachlauf abgelaufen -> zurueck auf idle
     if (media && !media.playing && pausedAt && Date.now() - pausedAt > PAUSE_LINGER && state === "compact") {
       pausedAt = 0;

@@ -47,8 +47,8 @@ pub struct Activity {
     pub title: String,
     #[serde(default)]
     pub subtitle: Option<String>,
-    /// grosser Wert rechts, z. B. "112"
-    #[serde(default)]
+    /// grosser Wert rechts, z. B. "112" (Zahl oder Text)
+    #[serde(default, deserialize_with = "num_or_str")]
     pub value: Option<String>,
     /// kleine Einheit hinter dem Wert, z. B. "mg/dL"
     #[serde(default)]
@@ -87,8 +87,53 @@ pub struct Activity {
     /// Herzfrequenz (Schlaege/min): das Symbol schlaegt in diesem Takt, z. B. Helio
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pulse: Option<f64>,
+    /// Messwert-Trend: up2 | up | up45 | flat | down45 | down | down2
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trend: Option<String>,
+    /// Wert minus vorheriger Messwert
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delta: Option<f64>,
+    /// Verlauf (z. B. Blutzucker 24 h); die Notch schneidet die Zeitbereiche selbst
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chart: Option<Chart>,
+    /// Prozess der App — fuer AllowSetForegroundWindow beim Doppelklick
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    /// ttl abgelaufen: Eintraege mit Verlauf bleiben stehen und zeigen "keine Daten"
+    #[serde(default, skip_deserializing)]
+    pub expired: bool,
     #[serde(default, skip_deserializing)]
     pub updated: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Chart {
+    /// Zielbereich: darunter rot, darueber bernstein
+    #[serde(default)]
+    pub low: f64,
+    #[serde(default)]
+    pub high: f64,
+    /// [[epoch_ms, wert], ...] — aelteste zuerst
+    #[serde(default)]
+    pub points: Vec<(f64, f64)>,
+    #[serde(default)]
+    pub ranges: Vec<u32>,
+    #[serde(default)]
+    pub range: Option<u32>,
+}
+
+/// "112" oder 112 -> Some("112")
+fn num_or_str<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    use serde_json::Value;
+    Ok(match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => None,
+        Some(Value::String(s)) => Some(s),
+        Some(Value::Number(n)) => Some(match n.as_f64() {
+            Some(f) if f.fract() == 0.0 && f.abs() < 1e15 => format!("{}", f as i64),
+            _ => n.to_string(),
+        }),
+        Some(v) => Some(v.to_string()),
+    })
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -148,6 +193,19 @@ fn header(k: &str, v: &str) -> Header {
 
 pub fn upsert(app: &AppHandle, mut act: Activity) {
     act.updated = now_ms();
+    act.expired = false;
+    if let Some(c) = act.chart.as_mut() {
+        // nur gueltige Punkte der letzten 24 h, hoechstens 2000
+        c.points.retain(|p| p.0.is_finite() && p.1.is_finite());
+        c.points.sort_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some(&(last, _)) = c.points.last() {
+            c.points.retain(|p| p.0 >= last - 24.5 * 3_600_000.0);
+        }
+        let n = c.points.len();
+        if n > 2000 {
+            c.points.drain(..n - 2000);
+        }
+    }
     let expires = act.ttl.map(|s| Instant::now() + Duration::from_secs(s));
     let alert = act.alert;
     let id = act.id.clone();
@@ -166,7 +224,7 @@ pub fn remove(app: &AppHandle, id: &str) -> bool {
     hit
 }
 
-fn push_event(activity: &str, action: &str) {
+pub fn push_event(activity: &str, action: &str) {
     push_event_value(activity, action, None);
 }
 
@@ -193,8 +251,18 @@ pub fn spawn(app: AppHandle) {
         let removed = {
             let mut s = STORE.lock().unwrap();
             let before = s.len();
+            // Eintraege mit Verlauf (Messwerte) verschwinden nicht einfach: sie bleiben als
+            // "keine Daten" stehen, bis die App sie loescht oder man sie wegklickt.
+            let mut marked = false;
+            for e in s.values_mut() {
+                if e.act.chart.is_some() && e.expires.is_some_and(|t| t <= now) {
+                    e.expires = None;
+                    e.act.expired = true;
+                    marked = true;
+                }
+            }
             s.retain(|_, e| e.expires.map_or(true, |t| t > now));
-            before != s.len()
+            before != s.len() || marked
         };
         if removed {
             let _ = app2.emit("activities", list());
