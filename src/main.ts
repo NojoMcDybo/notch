@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { Voice, type VoiceState } from "./voice";
+import { Wheel } from "./wheel";
 
 // ---------- Typen ----------
 
@@ -29,6 +30,10 @@ type Activity = {
   input?: { placeholder: string; value?: string };
 };
 type Item = { path: string; name: string; ext: string; size: number; kind: string; added: number };
+type Clip = {
+  id: number; kind: "text" | "image" | "files"; text?: string; path?: string;
+  files: string[]; width: number; height: number; at: number;
+};
 type Target = { id: string; label: string };
 type Volume = { level: number; muted: boolean; device?: string; follows_player?: boolean };
 
@@ -54,7 +59,6 @@ const SIDE = {
 };
 /** so lange bleibt die Notch nach Pause noch kompakt */
 const PAUSE_LINGER = 30_000;
-const PRESETS = [1, 3, 5, 10, 15, 25, 45, 60];
 
 // ---------- DOM ----------
 
@@ -86,6 +90,7 @@ let pausedAt = 0;
 let coverSrc: string | null = null;
 let acts: Activity[] = [];
 let shelf: Item[] = [];
+let clips: Clip[] = [];
 let sel = new Set<string>();
 let anchor: string | null = null;
 /** laufende Umwandlung -> Statusleiste unten in der Ablage */
@@ -444,22 +449,29 @@ let cdRaf = 0;
 function setProgress(a: Activity, s: HTMLElement) {
   const p = Math.min(1, Math.max(0, a.progress ?? 0));
   if (a.ends_at && a.ends_at > a.updated && p > 0) {
+    // Startwert sofort setzen; weiter rechnet erst das naechste Bild — dann haengt der
+    // Balken schon im DOM (vorher wurde er als "nicht mehr da" aussortiert und blieb leer)
     s.style.transition = "none";
-    countdowns.set(s, { p0: p, t0: a.updated, end: a.ends_at });
-    tickCountdowns();
+    const c = { p0: p, t0: a.updated, end: a.ends_at };
+    s.style.width = `${countdownAt(c, Date.now()) * 100}%`;
+    countdowns.set(s, c);
+    cancelAnimationFrame(cdRaf);
+    cdRaf = requestAnimationFrame(tickCountdowns);
   } else {
     countdowns.delete(s);
     s.style.width = `${p * 100}%`;
   }
 }
 
+const countdownAt = (c: { p0: number; t0: number; end: number }, now: number) =>
+  Math.max(0, Math.min(1, (c.p0 * (c.end - now)) / (c.end - c.t0)));
+
 function tickCountdowns() {
   cancelAnimationFrame(cdRaf);
   const now = Date.now();
   for (const [s, c] of countdowns) {
     if (!s.isConnected) { countdowns.delete(s); continue; }
-    const f = Math.max(0, (c.p0 * (c.end - now)) / (c.end - c.t0));
-    s.style.width = `${(f * 100).toFixed(3)}%`;
+    s.style.width = `${(countdownAt(c, now) * 100).toFixed(3)}%`;
   }
   // nur rechnen, solange man es sieht
   if (countdowns.size && state === "expanded") cdRaf = requestAnimationFrame(tickCountdowns);
@@ -704,6 +716,104 @@ function renderShelf() {
   );
 }
 
+// ---------- Zwischenablage: die letzten 5 Dinge ----------
+
+const clipsWrap = q(".clips-wrap");
+const clipsEl = q(".clips");
+let clipsSig = "";
+let copied = { id: 0, until: 0 };
+
+function ago(at: number) {
+  const s = Math.max(0, (Date.now() - at) / 1000);
+  if (s < 60) return "jetzt";
+  if (s < 3600) return `${Math.floor(s / 60)} min`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h`;
+  return `${Math.floor(s / 86400)} T`;
+}
+
+const baseName = (p: string) => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? p;
+
+function clipRow(c: Clip) {
+  const row = el("div", `clip k-${c.kind}`);
+  const lead = el("div", "clip-lead");
+  const label = el("div", "clip-text");
+  if (c.kind === "image" && c.path) {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = convertFileSrc(c.path);
+    lead.append(img);
+    label.textContent = `Bild · ${c.width} × ${c.height}`;
+    row.title = "Klick: wieder kopieren · Ziehen: als Datei ablegen";
+  } else if (c.kind === "files") {
+    const first = c.files[0] ?? "";
+    const ext = (first.split(".").pop() ?? "").toUpperCase();
+    lead.textContent = c.files.length > 1 ? String(c.files.length) : ext.length <= 4 && first.includes(".") ? ext : "DIR";
+    label.textContent = baseName(first) + (c.files.length > 1 ? ` + ${c.files.length - 1} weitere` : "");
+    row.title = c.files.join("\n") + "\n\nKlick: wieder kopieren · Ziehen: Dateien ablegen";
+  } else {
+    lead.textContent = "T";
+    label.textContent = (c.text ?? "").replace(/\s+/g, " ").trim();
+    row.title = (c.text ?? "").slice(0, 600) + "\n\nKlick: wieder kopieren";
+  }
+  const age = el("div", "clip-age", ago(c.at));
+  age.dataset.at = String(c.at);
+  const done = el("div", "clip-done", "Kopiert");
+  row.append(lead, label, age, done);
+
+  if (c.kind !== "text") {
+    const toShelf = el("button", "clip-btn");
+    toShelf.title = "In die Ablage legen";
+    toShelf.append(svgIcon("plus")!);
+    toShelf.addEventListener("click", (e) => { e.stopPropagation(); invoke("clip_to_shelf", { id: c.id }); });
+    row.append(toShelf);
+  }
+  const x = el("button", "clip-btn");
+  x.title = "Aus dem Verlauf nehmen";
+  x.append(svgIcon("close")!);
+  x.addEventListener("click", (e) => { e.stopPropagation(); invoke("clip_remove", { id: c.id }); });
+  row.append(x);
+
+  // "Kopiert" ueberlebt den Neuaufbau (der Eintrag rutscht beim Kopieren nach oben)
+  const flash = () => {
+    row.classList.add("copied");
+    setTimeout(() => row.classList.remove("copied"), Math.max(0, copied.until - Date.now()));
+  };
+  if (copied.id === c.id && Date.now() < copied.until) flash();
+  row.addEventListener("click", () => {
+    copied = { id: c.id, until: Date.now() + 1100 };
+    flash();
+    invoke("clip_copy", { id: c.id }).catch(() => { row.classList.remove("copied"); });
+  });
+  // Bilder und Dateien lassen sich direkt rausziehen
+  const paths = c.kind === "files" ? c.files : c.kind === "image" && c.path ? [c.path] : [];
+  if (paths.length) {
+    row.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || (e.target as Element).closest("button")) return;
+      const x0 = e.clientX, y0 = e.clientY;
+      const mv = (ev: PointerEvent) => {
+        if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
+        window.removeEventListener("pointermove", mv);
+        if (dragIcon) startDrag({ item: paths, icon: dragIcon }).catch(() => {});
+      };
+      window.addEventListener("pointermove", mv);
+      window.addEventListener("pointerup", () => window.removeEventListener("pointermove", mv), { once: true });
+    });
+  }
+  return row;
+}
+
+function renderClips() {
+  clipsWrap.hidden = clips.length === 0;
+  const sig = JSON.stringify(clips.map((c) => [c.id, c.at]));
+  if (sig === clipsSig) return;
+  clipsSig = sig;
+  clipsEl.replaceChildren(...clips.map(clipRow));
+}
+
+function tickAges() {
+  clipsEl.querySelectorAll<HTMLElement>(".clip-age").forEach((a) => { a.textContent = ago(Number(a.dataset.at)); });
+}
+
 /** Ziele, die fuer ALLE markierten Dateien gehen */
 async function commonTargets(items: Item[]) {
   let common: Target[] | null = null;
@@ -829,15 +939,31 @@ function closeMenu() {
   render(false);
 }
 
+/** Timer einstellen wie auf dem iPhone: drei Drehraeder (Std./Min./Sek.) und ein runder Start-Knopf.
+ *  Die letzte Einstellung bleibt gemerkt. */
+let pickWheels: Wheel[] = [];
 function renderPresets() {
-  const box = q(".presets");
+  const box = q(".timer-pick");
   if (box.childElementCount) return;
-  for (const m of PRESETS) {
-    const b = el("button", "preset");
-    b.append(el("b", "", String(m)), el("small", "", "min"));
-    b.addEventListener("click", () => { invoke("timer_start", { seconds: m * 60 }); setView("home"); });
-    box.append(b);
-  }
+  let last = [0, 5, 0];
+  try {
+    const s = JSON.parse(localStorage.getItem("timer-pick") ?? "null");
+    if (Array.isArray(s) && s.length === 3) last = s.map((n) => Number(n) || 0);
+  } catch { /* kein Speicher, egal */ }
+  const hold = (on: boolean) => { holding = Math.max(0, holding + (on ? 1 : -1)); if (!on && !hoverRaw) setHover(false); };
+  pickWheels = [new Wheel(24, last[0], "Std.", hold), new Wheel(60, last[1], "Min.", hold), new Wheel(60, last[2], "Sek.", hold)];
+  const picker = el("div", "picker");
+  picker.append(el("div", "pick-band"), ...pickWheels.map((w) => w.el));
+  const start = el("button", "pick-start", "Start");
+  start.addEventListener("click", () => {
+    const [h, m, s] = pickWheels.map((w) => w.get());
+    const secs = h * 3600 + m * 60 + s;
+    if (!secs) { start.classList.remove("nope"); void start.offsetWidth; start.classList.add("nope"); return; }
+    try { localStorage.setItem("timer-pick", JSON.stringify([h, m, s])); } catch { /* egal */ }
+    invoke("timer_start", { seconds: secs });
+    setView("home");
+  });
+  box.append(picker, start);
 }
 
 function tickProgress() {
@@ -870,6 +996,7 @@ function render(full = true) {
     renderPlayer();
     renderActs();
     renderShelf();
+    renderClips();
     renderVolume();
     tickClock();
   }
@@ -965,6 +1092,7 @@ async function main() {
   });
   await listen<Item[]>("shelf", (e) => { shelf = e.payload; render(); });
   await listen<number>("level", (e) => onLevel(e.payload));
+  await listen<Clip[]>("clips", (e) => { clips = e.payload; render(); });
   await listen<string>("activity-alert", () => {
     peekUntil = Date.now() + 3500;
     render();
@@ -1008,7 +1136,7 @@ async function main() {
   window.addEventListener("resize", () => render(false));
 
   const snap = await invoke<{
-    media: Media; cover: string | null; activities: Activity[]; shelf: Item[]; fullscreen: boolean; hover: boolean;
+    media: Media; cover: string | null; activities: Activity[]; shelf: Item[]; clips: Clip[]; fullscreen: boolean; hover: boolean;
     dock: Dock; voice_key: string;
   }>("snapshot");
   dock = snap.dock;
@@ -1020,6 +1148,7 @@ async function main() {
   setCover(snap.cover);
   acts = snap.activities;
   shelf = snap.shelf;
+  clips = snap.clips ?? [];
   dragIcon = await invoke<string>("drag_icon").catch(() => "");
   renderPresets(); // seitlich sind alle Bereiche gleichzeitig sichtbar
   render();
@@ -1029,6 +1158,7 @@ async function main() {
     t.addEventListener("click", () => setView(t.dataset.view as View)),
   );
   clearTray.addEventListener("click", () => invoke("shelf_clear"));
+  q(".clips-clear").addEventListener("click", () => invoke("clip_clear"));
 
   // Sprachassistent: Mikrofon-Knopf, Strg+Alt+Leertaste, Beenden, Schluessel eintragen
   micBtn.addEventListener("click", () => void toggleVoice());
@@ -1092,7 +1222,7 @@ async function main() {
   filesEl.addEventListener("click", (e) => { if (e.target === filesEl) { sel.clear(); applySel(); } });
 
   // Die Form selbst (nicht Knoepfe/Regler/Dateien) mit gedrueckter Maus ziehen -> an eine andere Kante andocken
-  const INTERACTIVE = "button, .slider, .file, .files, .file-bar, .ctx, .act, .preset, .drop";
+  const INTERACTIVE = "button, .slider, .file, .files, .file-bar, .ctx, .act, .wheel, .timer-pick, .clips, .drop";
   q(".shape").addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || (e.target as Element).closest(INTERACTIVE)) return;
     const x0 = e.clientX, y0 = e.clientY;
@@ -1108,7 +1238,7 @@ async function main() {
   document.addEventListener("contextmenu", (e) => e.preventDefault());
 
   setInterval(() => {
-    if (state === "expanded") { tickProgress(); tickClock(); }
+    if (state === "expanded") { tickProgress(); tickClock(); tickAges(); }
     // Pause-Nachlauf abgelaufen -> zurueck auf idle
     if (media && !media.playing && pausedAt && Date.now() - pausedAt > PAUSE_LINGER && state === "compact") {
       pausedAt = 0;

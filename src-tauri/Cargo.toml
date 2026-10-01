@@ -24,6 +24,7 @@ image = "0.25"
 ureq = { version = "3", features = ["json"] }
 webview2-com = "0.39"
 tauri-plugin-global-shortcut = "2"
+arboard = "3"
 
 [dependencies.windows]
 version = "0.62"
@@ -43,6 +44,9 @@ features = [
   "Win32_Devices_FunctionDiscovery",
   "Win32_Devices_Properties",
   "Win32_UI_Shell_PropertiesSystem",
+  "Win32_UI_Shell",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
 ]
 
 [profile.release]

@@ -1,5 +1,6 @@
 mod activities;
 mod audio;
+mod clipboard;
 mod convert;
 mod media;
 mod open;
@@ -45,6 +46,7 @@ fn snapshot() -> serde_json::Value {
         "cover": media::last_cover(),
         "activities": activities::list(),
         "shelf": shelf::shelf_list(),
+        "clips": clipboard::list(),
         "port": activities::PORT,
         "fullscreen": FULLSCREEN.load(Ordering::Relaxed),
         "hover": HOVER.load(Ordering::Relaxed),
@@ -300,6 +302,11 @@ pub fn run() {
             activities::activity_action,
             activities::activity_input,
             keyboard,
+            clipboard::clip_list,
+            clipboard::clip_copy,
+            clipboard::clip_remove,
+            clipboard::clip_clear,
+            clipboard::clip_to_shelf,
             open::open,
             timer::timer_start,
             shelf::shelf_list,
@@ -364,6 +371,7 @@ pub fn run() {
             timer::spawn(app.handle().clone());
             audio::spawn_meter(app.handle().clone());
             spawn_pointer(w, hwnd);
+            clipboard::spawn(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

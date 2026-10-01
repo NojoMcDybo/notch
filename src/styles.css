@@ -278,12 +278,23 @@ svg { display: block; }
 .fb-prog.err span { background: #ff453a; }
 
 /* Timer-Auswahl */
-.presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.preset { height: 56px; border-radius: 14px; background: rgba(255, 179, 64, 0.12); color: #ffb340; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: background 0.15s, transform 0.12s; }
-.preset:hover { background: rgba(255, 179, 64, 0.22); }
-.preset:active { transform: scale(0.94); }
-.preset b { font-size: 20px; font-weight: 600; line-height: 1; }
-.preset small { font-size: 10.5px; opacity: 0.8; margin-top: 2px; }
+/* Timer einstellen: Drehraeder wie in der iPhone-Uhr */
+.timer-pick { display: flex; align-items: center; gap: 14px; }
+.picker { position: relative; flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); height: 150px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28%, #000 72%, transparent);
+          mask-image: linear-gradient(to bottom, transparent, #000 28%, #000 72%, transparent); }
+.pick-band { position: absolute; left: 0; right: 0; top: 50%; height: 32px; margin-top: -16px; border-radius: 9px; background: rgba(255, 255, 255, 0.09); pointer-events: none; }
+.wheel { position: relative; height: 100%; perspective: 420px; cursor: grab; touch-action: none; user-select: none; }
+.wheel:active { cursor: grabbing; }
+.w-track { position: absolute; inset: 0; transform-style: preserve-3d; }
+.w-item { position: absolute; left: 0; right: 0; top: 50%; height: 30px; margin-top: -15px; padding-right: 46%; display: flex; align-items: center; justify-content: flex-end; font-size: 21px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--fg2); backface-visibility: hidden; will-change: transform; }
+.w-item.on { color: var(--fg); }
+.w-unit { position: absolute; top: 50%; left: 57%; transform: translateY(-50%); font-size: 13px; font-weight: 600; color: var(--fg); pointer-events: none; }
+.pick-start { flex: none; width: 72px; height: 72px; border-radius: 50%; background: rgba(48, 209, 88, 0.2); color: #30d158; font-size: 15px; font-weight: 600; box-shadow: 0 0 0 2px #000 inset, 0 0 0 3px rgba(48, 209, 88, 0.2) inset; transition: background 0.15s, transform 0.12s; }
+.pick-start:hover { background: rgba(48, 209, 88, 0.3); }
+.pick-start:active { transform: scale(0.93); }
+.pick-start.nope { animation: nope 0.35s; }
+@keyframes nope { 20% { transform: translateX(-6px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
 
 /* ---------- Andocken ---------- */
 
@@ -328,8 +339,7 @@ svg { display: block; }
 #notch[data-dock="left"] .player, #notch[data-dock="right"] .player { grid-template-columns: 64px 1fr; }
 #notch[data-dock="left"] .cover-btn, #notch[data-dock="right"] .cover-btn { --cover: 64px; width: 64px; height: 64px; }
 #notch[data-dock="left"] .side, #notch[data-dock="right"] .side { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; }
-#notch[data-dock="left"] .presets, #notch[data-dock="right"] .presets { grid-template-columns: repeat(4, 1fr); }
-#notch[data-dock="left"] .preset, #notch[data-dock="right"] .preset { height: 46px; }
+#notch[data-dock="left"] .pick-start, #notch[data-dock="right"] .pick-start { width: 62px; height: 62px; }
 #notch[data-dock="left"] .files, #notch[data-dock="right"] .files { max-height: none; }
 
 /* ---------- Sprachassistent ---------- */
@@ -397,3 +407,27 @@ svg { display: block; }
 .act-input.filled .ai-btn { display: grid; }
 .ai-btn:hover { background: var(--hover); color: var(--fg); }
 .ai-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+/* ---------- Zwischenablage (Ablage-Ansicht) ---------- */
+.clips-wrap { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 8px; }
+.clips-wrap[hidden] { display: none; }
+.clips-head { display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.06em; padding: 0 2px; }
+.clips-clear { font-size: 10.5px; color: var(--fg2); padding: 2px 6px; border-radius: 6px; text-transform: none; letter-spacing: 0; }
+.clips-clear:hover { background: var(--hover); color: var(--fg); }
+.clips { display: flex; flex-direction: column; gap: 2px; }
+.clip { position: relative; display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 4px 0 4px; margin: 0 -4px; border-radius: 9px; cursor: pointer; transition: background 0.15s; }
+.clip:hover { background: var(--hover); }
+.clip:active { background: rgba(255, 255, 255, 0.14); }
+.clip-lead { flex: none; width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; overflow: hidden; background: rgba(255, 255, 255, 0.08); color: var(--fg2); font: 700 9.5px system-ui; letter-spacing: 0.2px; }
+.clip.k-text .clip-lead { font: 600 13px Georgia, serif; }
+.clip.k-files .clip-lead { background: #4a4520; color: #fff; }
+.clip-lead img { width: 100%; height: 100%; object-fit: cover; }
+.clip-text { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clip-age { flex: none; font-size: 10.5px; color: var(--fg2); font-variant-numeric: tabular-nums; }
+.clip-btn { flex: none; display: none; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--fg2); }
+.clip:hover .clip-btn { display: grid; }
+.clip:hover .clip-age { display: none; }
+.clip-btn:hover { background: rgba(255, 255, 255, 0.14); color: var(--fg); }
+.clip-btn svg { width: 12px; height: 12px; fill: currentColor; }
+.clip-done { position: absolute; inset: 0; border-radius: 9px; display: grid; place-items: center; background: rgba(48, 209, 88, 0.92); color: #000; font-size: 12px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity 0.18s; }
+.clip.copied .clip-done { opacity: 1; }

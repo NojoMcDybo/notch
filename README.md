@@ -55,10 +55,12 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (erstes
 - Klick = auswählen (Strg/Umschalt = mehrere), Doppelklick = öffnen, Ziehen = Datei wieder rausziehen
 - Rechtsklick-Menü: Öffnen, Im Ordner zeigen, Umwandeln in …, Aus der Ablage nehmen
 - Unten erscheint nur noch während einer Umwandlung eine Statusleiste (läuft → grün fertig / rot Fehler)
+- **Zwischenablage**: die letzten 5 kopierten Dinge — Text, Dateien (aus dem Explorer kopiert) und Bilder (z. B. Screenshots). Klick = wieder in die Zwischenablage, Bilder/Dateien rausziehen, „+“ = in die Ablage (Bilder werden dafür unter Bilder\Notch gespeichert), × = aus dem Verlauf. Nur im Speicher; Inhalte, die Passwortmanager als „nicht für den Verlauf“ markieren, werden übersprungen (wie beim Windows-Verlauf Win+V). Code: `src-tauri/src/clipboard.rs`
 - Konvertieren: Bilder nativ (PNG, JPG, WEBP, GIF, BMP, TIFF, ICO, ≤ 1600 px). Audio (MP3, M4A, WAV, FLAC, OGG) und Video (MP4, GIF, MP3) über ffmpeg (`winget install Gyan.FFmpeg`, wird auch im winget-Paketordner gefunden). Ergebnis landet neben dem Original, nie überschrieben.
 
 **Timer** (Stoppuhr-Symbol)
-- Vorwahl 1–60 min → läuft als Activity mit Pause, +1 min, Stopp; Ton und Aufklappen am Ende
+- Drehräder wie in der iPhone-Uhr (Std./Min./Sek., endlos): ziehen mit Schwung, Mausrad = ein Schritt, Klick auf eine Zahl springt hin; grüner Start-Knopf. Letzte Einstellung bleibt gemerkt.
+- Läuft als Activity mit Pause, +1 min, Stopp; Balken gleitet flüssig (`ends_at`); Ton und Aufklappen am Ende
 
 ## Live Activities — so hängt sich jede App an
 
