@@ -95,7 +95,7 @@ svg { display: block; }
 #notch[data-state="compact"] .compact { opacity: 1; transition: opacity 0.25s 0.18s; }
 
 .c-lead, .c-trail { display: flex; align-items: center; gap: 5px; min-width: 22px; height: 100%; }
-.c-lead img { width: 22px; height: 22px; border-radius: 6px; object-fit: cover; }
+.c-lead img { width: auto; max-width: 40px; height: 22px; border-radius: 4px; object-fit: contain; }
 .c-trail { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
 .c-trail small { color: var(--fg2); font-weight: 400; font-size: 10px; }
 .c-trail .arrow { font-weight: 600; }
@@ -103,6 +103,9 @@ svg { display: block; }
 .icon { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; font-size: 13px; background: color-mix(in srgb, var(--accent) 18%, transparent); overflow: hidden; }
 .icon img { width: 70%; height: 70%; object-fit: contain; }
 .icon img.full { width: 100%; height: 100%; object-fit: cover; }
+/* Bild-Symbole (PDF-Deckel usw.): eigenes Seitenverhaeltnis, kein Kreis */
+.icon.pic { width: auto; max-width: 40px; border-radius: 4px; background: none; }
+.icon.pic img { width: auto; height: 100%; max-width: 40px; object-fit: contain; border-radius: 4px; }
 
 /* Pegel-Balken */
 .eq { display: flex; align-items: center; gap: 2.5px; height: 14px; }
@@ -167,10 +170,10 @@ svg { display: block; }
 /* Player */
 .player { display: grid; grid-template-columns: 72px 1fr auto; gap: 14px; align-items: center; }
 .player[hidden], .idle-info[hidden] { display: none; }
-.cover-btn { width: 72px; height: 72px; border-radius: 14px; overflow: hidden; transition: transform 0.2s var(--settle), box-shadow 0.2s; box-shadow: 0 6px 24px -6px color-mix(in srgb, var(--accent) 55%, transparent); }
+.cover-btn { --cover: 72px; width: 72px; height: 72px; justify-self: center; border-radius: 7px; overflow: hidden; transition: transform 0.2s var(--settle), box-shadow 0.2s; box-shadow: 0 6px 24px -6px color-mix(in srgb, var(--accent) 55%, transparent); }
 .cover-btn:hover { transform: scale(1.04); }
 .cover-btn:active { transform: scale(0.96); }
-.cover { width: 100%; height: 100%; object-fit: cover; background: #1c1c1e; display: block; }
+.cover { width: 100%; height: 100%; object-fit: contain; background: #1c1c1e; display: block; }
 .meta { min-width: 0; }
 .title-btn { display: block; width: 100%; border-radius: 6px; padding: 1px 4px; margin: -1px -4px 4px; transition: background 0.15s; }
 .title-btn:hover { background: var(--hover); }
@@ -225,7 +228,7 @@ svg { display: block; }
 .acts { display: flex; flex-direction: column; gap: 4px; }
 .acts:empty { display: none; }
 .player:not([hidden]) ~ .acts, .idle-info:not([hidden]) ~ .acts { border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 8px; }
-.act { --accent: #fff; position: relative; display: grid; grid-template-columns: 30px 1fr auto; align-items: center; column-gap: 10px; row-gap: 6px; padding: 6px 8px; margin: 0 -8px; border-radius: 12px; transition: background 0.15s; }
+.act { --accent: #fff; position: relative; display: grid; grid-template-columns: minmax(30px, max-content) 1fr auto; align-items: center; column-gap: 10px; row-gap: 6px; padding: 6px 8px; margin: 0 -8px; border-radius: 12px; transition: background 0.15s; }
 .act.link:hover { background: var(--hover); }
 .act.link:active { background: rgba(255, 255, 255, 0.14); }
 .act .icon { width: 30px; height: 30px; font-size: 15px; }
@@ -323,7 +326,7 @@ svg { display: block; }
 #notch[data-dock="left"] .nav .spacer, #notch[data-dock="right"] .nav .spacer { order: 0; }
 #notch[data-dock="left"] .idle-info, #notch[data-dock="right"] .idle-info { display: none; }
 #notch[data-dock="left"] .player, #notch[data-dock="right"] .player { grid-template-columns: 64px 1fr; }
-#notch[data-dock="left"] .cover-btn, #notch[data-dock="right"] .cover-btn { width: 64px; height: 64px; }
+#notch[data-dock="left"] .cover-btn, #notch[data-dock="right"] .cover-btn { --cover: 64px; width: 64px; height: 64px; }
 #notch[data-dock="left"] .side, #notch[data-dock="right"] .side { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; }
 #notch[data-dock="left"] .presets, #notch[data-dock="right"] .presets { grid-template-columns: repeat(4, 1fr); }
 #notch[data-dock="left"] .preset, #notch[data-dock="right"] .preset { height: 46px; }
@@ -346,10 +349,6 @@ svg { display: block; }
 .v-text { color: var(--fg2); font-size: 12px; line-height: 1.35; max-height: 3.9em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .v-setup[hidden] { display: none; }
 
-/* ---------- Ausgang unter der Lautstaerke ---------- */
-.vol-dev { width: 118px; font-size: 10px; color: var(--fg3); color: rgba(255, 255, 255, 0.4); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: -4px; }
-.vol-dev { height: 13px; line-height: 13px; }
-.vol-dev:empty { visibility: hidden; }
 
 /* ---------- Ablage: Auswahl-Leiste und Rechtsklick-Menue ---------- */
 .fb-row[hidden] { display: none; }
@@ -382,3 +381,19 @@ svg { display: block; }
 }
 @keyframes alarm-blink { 50% { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) { #notch.alarm, #notch.alarm .shape, #notch.alarm .act .act-val { animation: none; } }
+
+/* ---------- Bild-Symbole in Zeilen (z. B. Folio-Deckel) ---------- */
+.act .icon.pic { width: auto; height: 36px; justify-self: center; }
+
+/* ---------- Eingabefeld in einer Zeile (Folio-Suche) ---------- */
+.act-input { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; height: 30px; padding: 0 4px 0 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.07); border: 1px solid transparent; transition: background 0.15s, border-color 0.15s; cursor: text; }
+.act-input:hover { background: rgba(255, 255, 255, 0.1); }
+.act-input:focus-within { background: rgba(255, 255, 255, 0.12); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.ai-icon { display: grid; place-items: center; color: var(--fg2); }
+.ai-icon svg { width: 14px; height: 14px; fill: currentColor; }
+.act-input input { flex: 1; min-width: 0; height: 100%; background: none; border: 0; outline: 0; color: var(--fg); font: inherit; font-size: 12.5px; }
+.act-input input::placeholder { color: var(--fg2); }
+.ai-btn { display: none; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--fg2); }
+.act-input.filled .ai-btn { display: grid; }
+.ai-btn:hover { background: var(--hover); color: var(--fg); }
+.ai-btn svg { width: 16px; height: 16px; fill: currentColor; }

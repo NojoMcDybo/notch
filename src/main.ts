@@ -23,6 +23,10 @@ type Activity = {
   id: string; app: string; title: string; subtitle?: string; value?: string; unit?: string;
   icon?: string; color?: string; progress?: number; priority: number; alert: boolean;
   open?: string; actions: Action[]; updated: number;
+  /** Countdown-Ende (ms seit 1970) -> Balken laeuft fluessig */
+  ends_at?: number;
+  /** Eingabefeld in der Zeile, z. B. Folios Suche */
+  input?: { placeholder: string; value?: string };
 };
 type Item = { path: string; name: string; ext: string; size: number; kind: string; added: number };
 type Target = { id: string; label: string };
@@ -208,6 +212,9 @@ const ICONS: Record<string, string> = {
   open: "M14 4h6v6h-2V7.4l-7.3 7.3-1.4-1.4L16.6 6H14zM5 6h6v2H6v10h10v-5h2v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z",
   restart: "M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z",
   plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
+  search: "M10.5 4a6.5 6.5 0 0 1 5.2 10.4l4.4 4.4-1.4 1.4-4.4-4.4A6.5 6.5 0 1 1 10.5 4zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z",
+  up: "M12 8.6 18.4 15 17 16.4l-5-5-5 5L5.6 15z",
+  down: "M12 15.4 5.6 9 7 7.6l5 5 5-5L18.4 9z",
 };
 
 function svgIcon(name: string) {
@@ -225,6 +232,8 @@ function iconEl(a: Activity) {
   const box = el("div", "icon");
   const i = a.icon ?? "";
   if (i.startsWith("data:") || i.startsWith("http")) {
+    // Bilder (z. B. PDF-Deckel) im eigenen Seitenverhaeltnis zeigen, nicht im Kreis beschnitten
+    if (!i.startsWith("data:image/svg")) box.classList.add("pic");
     const img = new Image();
     img.src = i;
     box.append(img);
@@ -343,7 +352,7 @@ function musicVisible() {
 const timerAlarm = () => acts.some((a) => a.id === "notch:timer" && a.title.includes("abgelaufen"));
 
 function wanted(): State {
-  if (hover || dragOver || holding > 0 || voiceShown || timerAlarm() || Date.now() < peekUntil) return "expanded";
+  if (hover || dragOver || holding > 0 || typing || voiceShown || timerAlarm() || Date.now() < peekUntil) return "expanded";
   if (musicVisible() || acts.length) return "compact";
   return "idle";
 }
@@ -379,6 +388,21 @@ function renderCompact() {
   }
 }
 
+/**
+ * Cover im echten Seitenverhaeltnis: quadratische Alben bleiben 72×72, ein 16:9-Video-Vorschaubild
+ * wird flach statt seitlich abgeschnitten. Leichte Rundung statt der grossen, die Ecken frass.
+ */
+function fitCover() {
+  const apply = () => {
+    const ar = cover.naturalWidth && cover.naturalHeight ? cover.naturalWidth / cover.naturalHeight : 1;
+    const box = q<HTMLElement>(".cover-btn", player);
+    const base = parseFloat(getComputedStyle(box).getPropertyValue("--cover")) || 72;
+    box.style.width = `${Math.round(ar >= 1 ? base : base * ar)}px`;
+    box.style.height = `${Math.round(ar >= 1 ? base / ar : base)}px`;
+  };
+  if (cover.complete) apply(); else cover.addEventListener("load", apply, { once: true });
+}
+
 function renderPlayer() {
   const show = !!media;
   player.hidden = !show;
@@ -392,7 +416,7 @@ function renderPlayer() {
   src.classList.toggle("multi", media.sessions > 1);
   src.title = media.sessions > 1 ? "Andere Quelle zeigen" : "";
   player.classList.toggle("playing", media.playing);
-  if (coverSrc) { if (cover.getAttribute("src") !== coverSrc) cover.src = coverSrc; }
+  if (coverSrc) { if (cover.getAttribute("src") !== coverSrc) { cover.src = coverSrc; fitCover(); } }
   else cover.removeAttribute("src");
   q(".t-dur", player).textContent = media.duration ? fmt(media.duration) : "";
   q<HTMLButtonElement>('[data-act="next"]', player).disabled = !media.can_next;
@@ -405,96 +429,194 @@ function renderVolume() {
   const lvl = volume.muted || volume.level < 0.01 ? 0 : volume.level < 0.5 ? 1 : 2;
   volEl.dataset.lvl = String(lvl);
   if (!volSlider.classList.contains("drag")) setSlider(volSlider, volume.muted ? 0 : volume.level);
-  // Welcher Ausgang geregelt wird (z. B. "SteelSeries Sonar - Media"); Zusatz in Klammern weglassen
-  const dev = (volume.device ?? "").replace(/\s*\(.*\)\s*$/, "");
-  const devEl = q(".vol-dev");
-  devEl.textContent = dev;
-  devEl.title = volume.follows_player
-    ? `Lautstärke des Ausgangs, auf dem der Player spielt: ${volume.device}`
-    : `Windows-Standardausgang: ${volume.device ?? ""}`;
+  // Welcher Ausgang geregelt wird, steht nur im Tooltip (sichtbar war es zu viel)
+  volSlider.title = volume.device ? `Lautstärke · ${volume.device}` : "Lautstärke";
 }
 
 /**
- * Fortschrittsbalken fluessig statt in Sekundenspruengen: Der Timer meldet sich einmal pro
- * Sekunde. Aus den letzten zwei Meldungen ergibt sich das Tempo; bis zur naechsten Meldung
- * laeuft der Balken linear weiter (hoechstens 1,2 s, falls keine Meldung mehr kommt).
+ * Countdown-Balken (Timer): Rust schickt mit jeder Meldung `ends_at`. Daraus rechnet das
+ * Frontend den Balken in jedem Bildschirmbild neu aus — keine Sekundenschritte, keine
+ * Uebergaenge, die beim Neuaufbau der Zeile kurz haengen.
  */
-const progHist = new Map<string, { p: number; at: number; rate: number }>();
-function smoothProgress(a: Activity, s: HTMLElement) {
-  const cur = Math.min(1, Math.max(0, a.progress ?? 0));
-  const now = Date.now();
-  const prev = progHist.get(a.id);
-  const running = a.id === "notch:timer" && !a.subtitle && !a.title.includes("abgelaufen");
-  let h = prev;
-  if (!h || cur !== h.p || !running) {
-    const dt = h ? now - h.at : 0;
-    const d = h ? h.p - cur : 0;
-    const rate = running && d > 0 && d < 0.2 && dt >= 300 && dt <= 3000 ? d / dt : 0;
-    h = { p: cur, at: now, rate };
-    progHist.set(a.id, h);
+const countdowns = new Map<HTMLElement, { p0: number; t0: number; end: number }>();
+let cdRaf = 0;
+
+function setProgress(a: Activity, s: HTMLElement) {
+  const p = Math.min(1, Math.max(0, a.progress ?? 0));
+  if (a.ends_at && a.ends_at > a.updated && p > 0) {
+    s.style.transition = "none";
+    countdowns.set(s, { p0: p, t0: a.updated, end: a.ends_at });
+    tickCountdowns();
+  } else {
+    countdowns.delete(s);
+    s.style.width = `${p * 100}%`;
   }
-  const ANIM = 1200;
-  const left = h.at + ANIM - now;
-  const pos = (t: number) => Math.max(0, h!.p - h!.rate * t);
-  s.style.transition = "none";
-  s.style.width = `${pos(now - h.at) * 100}%`;
-  if (!h.rate || left <= 0) return;
-  const end = pos(ANIM);
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    s.style.transition = `width ${left}ms linear`;
-    s.style.width = `${end * 100}%`;
-  }));
+}
+
+function tickCountdowns() {
+  cancelAnimationFrame(cdRaf);
+  const now = Date.now();
+  for (const [s, c] of countdowns) {
+    if (!s.isConnected) { countdowns.delete(s); continue; }
+    const f = Math.max(0, (c.p0 * (c.end - now)) / (c.end - c.t0));
+    s.style.width = `${(f * 100).toFixed(3)}%`;
+  }
+  // nur rechnen, solange man es sieht
+  if (countdowns.size && state === "expanded") cdRaf = requestAnimationFrame(tickCountdowns);
+}
+
+// ---------- Activity-Zeilen: bleiben bestehen und werden nur aktualisiert ----------
+// (sonst verliert ein Eingabefeld in der Zeile bei jeder Seitenzahl-Meldung den Fokus)
+
+const rows = new Map<string, HTMLElement>();
+const rowAct = new WeakMap<HTMLElement, Activity>();
+
+/** Tastatur in der Notch an/aus: solange ein Feld den Fokus hat, gibt Rust das Fenster nicht ab. */
+let typing = false;
+function setTyping(on: boolean) {
+  if (typing === on) return;
+  typing = on;
+  invoke("keyboard", { on }).catch(() => {});
+  render(false);
+}
+
+function inputBox(id: string) {
+  const box = el("div", "act-input");
+  const icon = el("span", "ai-icon");
+  icon.append(svgIcon("search")!);
+  const inp = el("input") as HTMLInputElement;
+  inp.type = "text";
+  inp.spellcheck = false;
+  inp.autocomplete = "off";
+  const prev = el("button", "ai-btn ai-prev");
+  prev.title = "Vorheriger Treffer (Umschalt+Enter)";
+  prev.append(svgIcon("up")!);
+  const next = el("button", "ai-btn ai-next");
+  next.title = "Nächster Treffer (Enter)";
+  next.append(svgIcon("down")!);
+  box.append(icon, inp, prev, next);
+
+  let t = 0;
+  const send = (kind: "input" | "submit" | "submit-prev") =>
+    invoke("activity_input", { id, kind, value: inp.value }).catch(() => {});
+  const sync = () => box.classList.toggle("filled", inp.value.length > 0);
+  // Enter: Treffer anspringen und die App nach vorn holen
+  const submit = (prevHit: boolean) => {
+    if (!inp.value) return;
+    window.clearTimeout(t);
+    send(prevHit ? "submit-prev" : "submit");
+    inp.blur();
+    invoke("activity_open", { id }).catch(() => {});
+  };
+
+  box.addEventListener("click", (e) => e.stopPropagation());
+  box.addEventListener("contextmenu", (e) => e.stopPropagation());
+  // vor dem Fokus melden, sonst holt sich das vorige Programm die Tastatur zurueck
+  inp.addEventListener("pointerdown", () => setTyping(true));
+  inp.addEventListener("focus", () => setTyping(true));
+  inp.addEventListener("blur", () => setTyping(false));
+  inp.addEventListener("input", () => {
+    sync();
+    window.clearTimeout(t);
+    t = window.setTimeout(() => send("input"), 180);
+  });
+  inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); submit(e.shiftKey); }
+    else if (e.key === "Escape") {
+      e.preventDefault();
+      inp.value = "";
+      sync();
+      send("input");
+      inp.blur();
+    }
+  });
+  prev.addEventListener("click", () => submit(true));
+  next.addEventListener("click", () => submit(false));
+  return box;
+}
+
+function fillRow(row: HTMLElement, a: Activity) {
+  rowAct.set(row, a);
+  row.className = "act" + (a.open ? " link" : "") + (a.input ? " has-input" : "");
+  if (a.color) row.style.setProperty("--accent", a.color);
+  else row.style.removeProperty("--accent");
+  row.title = a.open ? "Öffnen" : "";
+
+  // alles ausser dem Eingabefeld neu aufbauen
+  let box = row.querySelector<HTMLElement>(".act-input");
+  for (const c of [...row.children]) if (c !== box) c.remove();
+
+  const text = el("div", "act-text");
+  text.append(el("div", "act-title", a.title));
+  const sub = a.subtitle || (a.app !== a.title ? a.app : "");
+  if (sub) text.append(el("div", "act-sub", sub));
+  const val = el("div", "act-val", a.value ?? "");
+  if (a.unit && a.value) val.append(el("small", "", a.unit));
+
+  const x = el("button", "act-x");
+  x.title = "Entfernen";
+  x.append(svgIcon("close")!);
+  x.addEventListener("click", (e) => { e.stopPropagation(); invoke("dismiss_activity", { id: a.id }); });
+
+  const parts: Element[] = [iconEl(a), text, val, x];
+  if (a.progress != null) {
+    const p = el("div", "act-prog" + (a.progress < 0 ? " busy" : ""));
+    const s = el("span");
+    p.append(s);
+    setProgress(a, s);
+    parts.push(p);
+  }
+  if (a.actions?.length) {
+    const bar = el("div", "act-actions");
+    for (const ac of a.actions) {
+      const ic = ac.icon ? svgIcon(ac.icon) : null;
+      const b = el("button", "pill" + (ic ? " ic" : ""));
+      b.title = ac.label;
+      if (ic) b.append(ic); else b.textContent = ac.label;
+      b.addEventListener("click", (e) => { e.stopPropagation(); invoke("activity_action", { id: a.id, action: ac.id }); });
+      bar.append(b);
+    }
+    parts.push(bar);
+  }
+  for (const p of parts) row.insertBefore(p, box);
+
+  if (a.input) {
+    if (!box) { box = inputBox(a.id); row.append(box); }
+    const inp = box.querySelector("input")!;
+    inp.placeholder = a.input.placeholder || "Suchen";
+    // Text der App uebernehmen, solange man nicht selbst tippt
+    if (document.activeElement !== inp && a.input.value != null && inp.value !== a.input.value) {
+      inp.value = a.input.value;
+      box.classList.toggle("filled", inp.value.length > 0);
+    }
+  } else if (box) {
+    box.remove();
+  }
+}
+
+function newRow(id: string) {
+  const row = el("div", "act");
+  row.addEventListener("click", () => {
+    if (rowAct.get(row)?.open) invoke("activity_open", { id });
+  });
+  row.addEventListener("contextmenu", (e) => { e.preventDefault(); invoke("dismiss_activity", { id }); });
+  return row;
 }
 
 function renderActs() {
-  const sig = JSON.stringify(acts.slice(0, 4));
+  const list = acts.slice(0, 4);
+  const sig = JSON.stringify(list);
   if (sig === actsSig) return;
   actsSig = sig;
-  actsEl.replaceChildren(
-    ...acts.slice(0, 4).map((a) => {
-      const row = el("div", "act" + (a.open ? " link" : ""));
-      if (a.color) row.style.setProperty("--accent", a.color);
-      if (a.open) {
-        row.title = "Öffnen";
-        row.addEventListener("click", () => invoke("activity_open", { id: a.id }));
-      }
-      const text = el("div", "act-text");
-      text.append(el("div", "act-title", a.title));
-      const sub = a.subtitle || (a.app !== a.title ? a.app : "");
-      if (sub) text.append(el("div", "act-sub", sub));
-      const val = el("div", "act-val", a.value ?? "");
-      if (a.unit && a.value) val.append(el("small", "", a.unit));
-      row.append(iconEl(a), text, val);
-
-      const x = el("button", "act-x");
-      x.title = "Entfernen";
-      x.append(svgIcon("close")!);
-      x.addEventListener("click", (e) => { e.stopPropagation(); invoke("dismiss_activity", { id: a.id }); });
-      row.append(x);
-
-      if (a.progress != null) {
-        const p = el("div", "act-prog" + (a.progress < 0 ? " busy" : ""));
-        const s = el("span");
-        smoothProgress(a, s);
-        p.append(s);
-        row.append(p);
-      }
-      if (a.actions?.length) {
-        const bar = el("div", "act-actions");
-        for (const ac of a.actions) {
-          const ic = ac.icon ? svgIcon(ac.icon) : null;
-          const b = el("button", "pill" + (ic ? " ic" : ""));
-          b.title = ac.label;
-          if (ic) b.append(ic); else b.textContent = ac.label;
-          b.addEventListener("click", (e) => { e.stopPropagation(); invoke("activity_action", { id: a.id, action: ac.id }); });
-          bar.append(b);
-        }
-        row.append(bar);
-      }
-      row.addEventListener("contextmenu", (e) => { e.preventDefault(); invoke("dismiss_activity", { id: a.id }); });
-      return row;
-    }),
-  );
+  const keep = new Set(list.map((a) => a.id));
+  for (const [id, r] of rows) if (!keep.has(id)) { r.remove(); rows.delete(id); }
+  list.forEach((a, i) => {
+    let row = rows.get(a.id);
+    if (!row) { row = newRow(a.id); rows.set(a.id, row); }
+    fillRow(row, a);
+    // nur verschieben, wenn die Reihenfolge wirklich anders ist (Verschieben nimmt den Fokus)
+    if (actsEl.children[i] !== row) actsEl.insertBefore(row, actsEl.children[i] ?? null);
+  });
 }
 
 function fileThumb(it: Item) {
@@ -787,6 +909,7 @@ function render(full = true) {
   if (state === "expanded" && hoverRaw && lastRect) rect = union(rect, lastRect);
   lastRect = state === "expanded" && hoverRaw ? rect : null;
   invoke("set_hit_rect", { rect: fullscreen ? { x: 0, y: 0, w: 0, h: 0 } : rect });
+  if (state === "expanded" && countdowns.size) tickCountdowns();
 }
 
 type Rect = { x: number; y: number; w: number; h: number };
@@ -807,6 +930,10 @@ function setHover(v: boolean) {
   if (!v) {
     // Maus ist weg: Menue zu; Auswahl bleibt, damit man nach dem Zurueckkommen weitermachen kann
     closeMenu();
+    // Suchfeld: ist es leer, Tastatur sofort zurueckgeben; mit Text bleibt man drin,
+    // bis man woanders klickt (dann holt sich Windows den Fokus ohnehin)
+    const ae = document.activeElement as HTMLInputElement | null;
+    if (ae?.tagName === "INPUT" && !ae.value) ae.blur();
   }
   render();
 }

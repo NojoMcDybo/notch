@@ -77,8 +77,24 @@ pub struct Activity {
     /// Knoepfe unter der Zeile
     #[serde(default)]
     pub actions: Vec<Action>,
+    /// Countdown: Zeitpunkt (ms seit 1970), an dem progress 0 erreicht -> Balken laeuft fluessig
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ends_at: Option<u64>,
+    /// Eingabefeld in der aufgeklappten Zeile (z. B. Suche). Tippen/Enter landen als
+    /// Ereignisse "input" / "submit" / "submit-prev" mit `value` in GET /events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<Input>,
     #[serde(default, skip_deserializing)]
     pub updated: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Input {
+    #[serde(default)]
+    pub placeholder: String,
+    /// aktueller Text aus Sicht der App (die Notch uebernimmt ihn, solange man nicht tippt)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
 }
 
 struct Entry {
@@ -91,6 +107,8 @@ struct Event {
     seq: u64,
     activity: String,
     action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<String>,
     ts: u64,
 }
 
@@ -109,7 +127,7 @@ pub fn get(id: &str) -> Option<Activity> {
     STORE.lock().unwrap().get(id).map(|e| e.act.clone())
 }
 
-fn now_ms() -> u64 {
+pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
@@ -146,11 +164,16 @@ pub fn remove(app: &AppHandle, id: &str) -> bool {
 }
 
 fn push_event(activity: &str, action: &str) {
+    push_event_value(activity, action, None);
+}
+
+fn push_event_value(activity: &str, action: &str, value: Option<String>) {
     let mut q = EVENTS.lock().unwrap();
     q.push_back(Event {
         seq: SEQ.fetch_add(1, Ordering::Relaxed) + 1,
         activity: activity.into(),
         action: action.into(),
+        value,
         ts: now_ms(),
     });
     while q.len() > 100 {
@@ -286,6 +309,14 @@ pub fn activity_open(app: AppHandle, id: String) -> Result<(), String> {
     match get(&id).and_then(|a| a.open) {
         Some(t) => crate::open::open_target(&app, &t),
         None => Ok(()),
+    }
+}
+
+/// Eingabefeld einer Zeile: kind = "input" (getippt), "submit" (Enter), "submit-prev" (Umschalt+Enter).
+#[tauri::command]
+pub fn activity_input(id: String, kind: String, value: String) {
+    if matches!(kind.as_str(), "input" | "submit" | "submit-prev") {
+        push_event_value(&id, &kind, Some(value.chars().take(500).collect()));
     }
 }
 

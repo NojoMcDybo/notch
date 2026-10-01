@@ -93,9 +93,18 @@ Die Notch hört auf `http://127.0.0.1:47800`.
     { "id": "snooze", "label": "Später", "icon": "pause",
       "post": "http://127.0.0.1:5000/notch" },   // bekommt {"activity","action"}
     { "id": "log", "label": "Protokoll", "open": "C:\\…\\log.txt" }
-  ]
+  ],
+  "ends_at": 1790870000000,  // Countdown: ms seit 1970, an dem progress 0 ist -> Balken läuft flüssig
+  "input": {                 // Eingabefeld in der aufgeklappten Zeile (z. B. Suche)
+    "placeholder": "In Folio suchen",
+    "value": ""              // Stand aus Sicht der App; die Notch übernimmt ihn, solange man nicht tippt
+  }
 }
 ```
+
+Eingabefeld: Tippen landet (entprellt) als Ereignis `input`, Enter als `submit`, Umschalt+Enter als `submit-prev`,
+jeweils mit `value` in `GET /events`. Bei Enter holt die Notch außerdem `open` nach vorn. Solange das Feld den Fokus
+hat, behält die Notch die Tastatur; ist das Feld leer und die Maus weg, gibt sie sie sofort zurück.
 
 Eingebaute Knopf-Symbole: `play pause stop check close folder open restart plus`. Ohne Symbol wird `label` als Text gezeigt.
 
@@ -120,7 +129,7 @@ Browser-Seiten dürfen nur von `localhost`/`127.0.0.1`/`tauri://` aus schreiben 
 
 ## Angebunden
 
-- **Folio** (`D:\Dev\folio\src\notch.ts`): jedes offene Dokument erscheint mit Deckelbild, „Seite x von y“ und Lesefortschritt. Klick holt genau dieses Dokumentfenster nach vorn (Folio ist Standard-PDF-App). Auffrischen jede Minute, ttl 180 s, Entfernen beim Schließen. `notchShelf(paths)` legt Dateien in die Ablage.
+- **Folio** (`D:\Dev\folio\src\notch.ts` + `src-tauri\src\notch.rs`): jedes offene Dokument erscheint mit Deckelbild und „Seite x von y“ — beim Scrollen höchstens alle 80 ms nachgeführt, in fester Reihenfolge über einen Rust-Faden. Aufgeklappt steht darunter dauerhaft **Folios Suchfeld**: Tippen sucht im Dokument (Treffer stehen in der Zeile), Enter/Umschalt+Enter springt zum nächsten/vorigen Treffer und holt das Fenster nach vorn. Folio holt die Eingaben alle 200 ms über `GET /events` ab. Klick auf die Zeile holt genau dieses Dokumentfenster nach vorn. Auffrischen jede Minute, ttl 180 s, Entfernen beim Schließen. `notchShelf(paths)` legt Dateien in die Ablage.
 - **Haze** (Blutzucker-Widget, `OneDrive\Projects\Haze`): `NotchBridge` in `Haze.cs` schickt Wert, Trend, Alter; Farbe nach Bereich; `alert` beim Wechsel in hoch/tief; `ttl` 180 s + Auffrischen jede Minute (stürzt Haze ab, verschwindet der Wert von selbst); beim Beenden wird der Eintrag gelöscht. Klick auf die Zeile holt Haze nach vorn. Aktuell **Demowerte** — Haze hat noch keine echte Datenquelle.
 
 ## Aufbau

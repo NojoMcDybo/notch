@@ -59,6 +59,19 @@ static VOICE_KEY: Mutex<String> = Mutex::new(String::new());
 // Fuer den Fall, dass das Frontend (neu) laedt, nachdem ein Event schon raus ist.
 static FULLSCREEN: AtomicBool = AtomicBool::new(false);
 static HOVER: AtomicBool = AtomicBool::new(false);
+/// Ein Eingabefeld in der Notch hat den Fokus -> Fenster darf vorne bleiben (Tastatur)
+static KEYBOARD: AtomicBool = AtomicBool::new(false);
+static HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// Tippen in der Notch: solange `on`, gibt das Polling den Fokus nicht zurueck.
+#[tauri::command]
+fn keyboard(on: bool) {
+    KEYBOARD.store(on, Ordering::Relaxed);
+    let h = HWND.load(Ordering::Relaxed);
+    if on && h != 0 && win::foreground() != h {
+        win::set_foreground(h);
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Geo {
@@ -186,6 +199,7 @@ fn place(w: &WebviewWindow, prev: Option<Geo>) -> Option<Geo> {
 /// Maus abfragen statt auf Fenster-Events zu warten: das Fenster ist ja meist durchklickbar
 /// und bekommt dann gar keine Mausereignisse. ~60x pro Sekunde, kostet praktisch nichts.
 fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
+    HWND.store(hwnd, Ordering::Relaxed);
     std::thread::spawn(move || {
         let mut geo = place(&w, None)
             .unwrap_or(Geo { wx: 0, wy: 0, ww: 640, wh: 400, scale: 1.0, mon: (0, 0, 1920, 1080) });
@@ -198,7 +212,7 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
             // Klick auf die Notch soll dem aktuellen Programm nicht den Fokus klauen
             let fg = win::foreground();
             if fg == hwnd {
-                if last_fg != 0 && !DOCK_DRAG.load(Ordering::Relaxed) {
+                if last_fg != 0 && !DOCK_DRAG.load(Ordering::Relaxed) && !KEYBOARD.load(Ordering::Relaxed) {
                     win::set_foreground(last_fg);
                 }
             } else if fg != 0 {
@@ -284,6 +298,8 @@ pub fn run() {
             activities::dismiss_activity,
             activities::activity_open,
             activities::activity_action,
+            activities::activity_input,
+            keyboard,
             open::open,
             timer::timer_start,
             shelf::shelf_list,

@@ -73,6 +73,8 @@ fn publish(app: &AppHandle, t: &Timer, alert: bool) {
             icon: Some(icon()),
             color: Some(if t.done { "#ff453a".into() } else { "#ffb340".into() }),
             progress: Some(if t.total > 0.0 { l / t.total } else { 0.0 }),
+            // Frontend laesst den Balken damit pro Bildschirmbild weiterlaufen statt pro Sekunde
+            ends_at: if running { Some(activities::now_ms() + (l * 1000.0) as u64) } else { None },
             priority: 5,
             alert,
             actions,
