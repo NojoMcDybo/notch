@@ -84,6 +84,9 @@ pub struct Activity {
     /// Ereignisse "input" / "submit" / "submit-prev" mit `value` in GET /events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<Input>,
+    /// Herzfrequenz (Schlaege/min): das Symbol schlaegt in diesem Takt, z. B. Helio
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pulse: Option<f64>,
     #[serde(default, skip_deserializing)]
     pub updated: u64,
 }

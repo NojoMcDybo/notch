@@ -28,6 +28,8 @@ type Activity = {
   ends_at?: number;
   /** Eingabefeld in der Zeile, z. B. Folios Suche */
   input?: { placeholder: string; value?: string };
+  /** Herzfrequenz: Symbol schlaegt in diesem Takt (siehe Pulse-Taktgeber) */
+  pulse?: number;
 };
 type Item = { path: string; name: string; ext: string; size: number; kind: string; added: number };
 type Clip = {
@@ -248,8 +250,65 @@ function iconEl(a: Activity) {
   } else {
     box.textContent = i || (a.app || a.title).slice(0, 1).toUpperCase();
   }
+  if (a.pulse && a.pulse > 0) {
+    box.dataset.pulse = a.id;
+    pulseCatchUp(box);
+  }
   return box;
 }
+
+// ---------- Pulse-Taktgeber ----------
+// Activities mit `pulse` (bpm) lassen ihr Symbol im Takt schlagen. Die Phase laeuft pro Activity
+// weiter, auch wenn Zeilen jede Sekunde neu gebaut werden oder sich der Takt aendert: ein
+// neu gebautes Symbol setzt einen laufenden Schlag an der richtigen Stelle fort.
+const BEAT: Keyframe[] = [
+  { transform: "scale(1)", offset: 0 },
+  { transform: "scale(1.22)", offset: 0.14 },
+  { transform: "scale(0.96)", offset: 0.3 },
+  { transform: "scale(1.1)", offset: 0.44 },
+  { transform: "scale(1)", offset: 0.72 },
+  { transform: "scale(1)", offset: 1 },
+];
+const pulses = new Map<string, { phase: number; at: number; dur: number }>();
+let pulseLast = 0;
+
+function beatOn(e: HTMLElement, dur: number, from = 0) {
+  // nur das Symbol schlaegt, der getoente Kreis dahinter bleibt ruhig
+  const target = (e.querySelector("img") as HTMLElement | null) ?? e;
+  const anim = target.animate(BEAT, { duration: dur, easing: "ease-out" });
+  if (from > 0) anim.currentTime = from;
+}
+
+function pulseCatchUp(box: HTMLElement) {
+  const p = pulses.get(box.dataset.pulse!);
+  if (!p) return;
+  const since = performance.now() - p.at;
+  if (since < p.dur) beatOn(box, p.dur, since);
+}
+
+function pulseTick(t: number) {
+  const dt = pulseLast ? Math.min((t - pulseLast) / 1000, 2) : 0;
+  pulseLast = t;
+  const live = new Set<string>();
+  for (const a of acts) {
+    if (!a.pulse || a.pulse <= 0) continue;
+    live.add(a.id);
+    let p = pulses.get(a.id);
+    if (!p) { p = { phase: 0, at: 0, dur: 0 }; pulses.set(a.id, p); }
+    p.phase += (dt * a.pulse) / 60;
+    if (p.phase >= 1) {
+      p.phase %= 1;
+      p.at = t;
+      p.dur = Math.min(560, (60_000 / a.pulse) * 0.62);
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        for (const e of document.querySelectorAll<HTMLElement>(`[data-pulse="${CSS.escape(a.id)}"]`)) beatOn(e, p.dur);
+      }
+    }
+  }
+  for (const id of pulses.keys()) if (!live.has(id)) pulses.delete(id);
+  requestAnimationFrame(pulseTick);
+}
+requestAnimationFrame(pulseTick);
 
 function eq(playing: boolean) {
   const e = el("div", "eq" + (playing ? "" : " paused") + (Date.now() - meter.at < 400 ? " live" : ""));
