@@ -84,7 +84,9 @@ let acts: Activity[] = [];
 let shelf: Item[] = [];
 let sel = new Set<string>();
 let anchor: string | null = null;
-let convertStatus = "";
+/** laufende Umwandlung -> Statusleiste unten in der Ablage */
+type Conv = { total: number; since: number; label: string; done: Map<string, string>; failed: Map<string, string>; hideAt: number };
+let conv: Conv | null = null;
 let volume: Volume = { level: 0.5, muted: false };
 let hover = false;
 let hoverRaw = false;
@@ -233,9 +235,42 @@ function iconEl(a: Activity) {
 }
 
 function eq(playing: boolean) {
-  const e = el("div", "eq" + (playing ? "" : " paused"));
+  const e = el("div", "eq" + (playing ? "" : " paused") + (Date.now() - meter.at < 400 ? " live" : ""));
   for (let i = 0; i < 4; i++) e.append(el("i"));
   return e;
+}
+
+/**
+ * Echter Pegel statt Endlos-Animation: Rust misst ~30x/s den Peak der Audio-Sitzung des
+ * Players. Jeder Balken bekommt eine eigene Verzoegerung, Gewichtung und Abklingzeit, damit
+ * sie nicht im Gleichschritt huepfen. Automatische Aussteuerung, damit leise Stuecke nicht
+ * platt und laute nicht dauernd am Anschlag sind. Kommt nichts mehr, faellt die CSS-Animation zurueck.
+ */
+const meter = { at: 0, ref: 0.2, hist: [] as number[], bars: [0.2, 0.2, 0.2, 0.2] };
+const BAR_DELAY = [0, 2, 1, 3]; // in Messungen (~33 ms)
+const BAR_GAIN = [0.75, 1, 0.9, 0.65];
+const BAR_FALL = [0.8, 0.86, 0.83, 0.78];
+let meterTimer = 0;
+
+function onLevel(peak: number) {
+  meter.at = Date.now();
+  meter.ref = Math.max(peak, meter.ref * 0.997, 0.04);
+  const n = Math.min(1, peak / meter.ref);
+  meter.hist.unshift(n);
+  meter.hist.length = Math.min(meter.hist.length, 8);
+  const eqs = document.querySelectorAll<HTMLElement>(".eq");
+  for (let i = 0; i < 4; i++) {
+    const v = (meter.hist[BAR_DELAY[i]] ?? n) * BAR_GAIN[i];
+    meter.bars[i] = Math.max(v, meter.bars[i] * BAR_FALL[i]);
+  }
+  eqs.forEach((e) => {
+    e.classList.add("live");
+    e.querySelectorAll<HTMLElement>("i").forEach((b, i) =>
+      b.style.setProperty("--s", Math.max(0.18, meter.bars[i]).toFixed(3)),
+    );
+  });
+  clearTimeout(meterTimer);
+  meterTimer = window.setTimeout(() => document.querySelectorAll(".eq").forEach((e) => e.classList.remove("live")), 400);
 }
 
 /** Durchschnittsfarbe des Covers, etwas aufgehellt -> Akzent fuer Pegel und Schatten */
@@ -379,6 +414,38 @@ function renderVolume() {
     : `Windows-Standardausgang: ${volume.device ?? ""}`;
 }
 
+/**
+ * Fortschrittsbalken fluessig statt in Sekundenspruengen: Der Timer meldet sich einmal pro
+ * Sekunde. Aus den letzten zwei Meldungen ergibt sich das Tempo; bis zur naechsten Meldung
+ * laeuft der Balken linear weiter (hoechstens 1,2 s, falls keine Meldung mehr kommt).
+ */
+const progHist = new Map<string, { p: number; at: number; rate: number }>();
+function smoothProgress(a: Activity, s: HTMLElement) {
+  const cur = Math.min(1, Math.max(0, a.progress ?? 0));
+  const now = Date.now();
+  const prev = progHist.get(a.id);
+  const running = a.id === "notch:timer" && !a.subtitle && !a.title.includes("abgelaufen");
+  let h = prev;
+  if (!h || cur !== h.p || !running) {
+    const dt = h ? now - h.at : 0;
+    const d = h ? h.p - cur : 0;
+    const rate = running && d > 0 && d < 0.2 && dt >= 300 && dt <= 3000 ? d / dt : 0;
+    h = { p: cur, at: now, rate };
+    progHist.set(a.id, h);
+  }
+  const ANIM = 1200;
+  const left = h.at + ANIM - now;
+  const pos = (t: number) => Math.max(0, h!.p - h!.rate * t);
+  s.style.transition = "none";
+  s.style.width = `${pos(now - h.at) * 100}%`;
+  if (!h.rate || left <= 0) return;
+  const end = pos(ANIM);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    s.style.transition = `width ${left}ms linear`;
+    s.style.width = `${end * 100}%`;
+  }));
+}
+
 function renderActs() {
   const sig = JSON.stringify(acts.slice(0, 4));
   if (sig === actsSig) return;
@@ -408,7 +475,7 @@ function renderActs() {
       if (a.progress != null) {
         const p = el("div", "act-prog" + (a.progress < 0 ? " busy" : ""));
         const s = el("span");
-        s.style.width = `${Math.round(Math.min(1, Math.max(0, a.progress)) * 100)}%`;
+        smoothProgress(a, s);
         p.append(s);
         row.append(p);
       }
@@ -465,14 +532,12 @@ function selectClick(path: string, e: MouseEvent) {
     if (!only) sel.add(path);
     anchor = path;
   }
-  convertStatus = "";
   applySel();
 }
 
 /** Auswahl nur per Klasse umschalten — kein Neuaufbau, sonst geht der Doppelklick verloren */
 function applySel() {
   filesEl.querySelectorAll<HTMLElement>(".file").forEach((f) => f.classList.toggle("sel", sel.has(f.dataset.path!)));
-  void renderFileBar();
 }
 
 function renderShelf() {
@@ -489,7 +554,7 @@ function renderShelf() {
     ...shelf.map((it) => {
       const f = el("div", "file" + (sel.has(it.path) ? " sel" : ""));
       f.dataset.path = it.path;
-      f.title = it.path;
+      f.title = `${it.path}\nDoppelklick: öffnen · Rechtsklick: umwandeln & mehr`;
       f.append(fileThumb(it), el("div", "fname", it.name));
       f.addEventListener("click", (e) => selectClick(it.path, e));
       f.addEventListener("dblclick", () => { closeMenu(); invoke("open", { target: it.path }); });
@@ -515,7 +580,6 @@ function renderShelf() {
       return f;
     }),
   );
-  void renderFileBar();
 }
 
 /** Ziele, die fuer ALLE markierten Dateien gehen */
@@ -530,42 +594,58 @@ async function commonTargets(items: Item[]) {
 
 function convertSelected(target: Target) {
   const items = selectedItems();
+  if (!items.length) return;
+  conv = {
+    total: items.length,
+    since: Date.now() - 50,
+    label: `${items.length > 1 ? items.length + " Dateien" : items[0].name} → ${target.label}`,
+    done: new Map(),
+    failed: new Map(),
+    hideAt: 0,
+  };
   for (const it of items) invoke("convert", { path: it.path, target: target.id });
-  convertStatus = `${items.length > 1 ? items.length + " Dateien" : items[0]?.name} → ${target.label} …`;
   closeMenu();
-  void renderFileBar(); // in der Ablage bleiben; Ergebnis taucht hier auf
+  renderFileBar(); // in der Ablage bleiben; Fortschritt unten, Ergebnis landet in der Ablage
 }
 
 const ACTIONS = {
   open: () => selectedItems().forEach((i) => invoke("open", { target: i.path })),
   reveal: () => { const i = selectedItems()[0]; if (i) invoke("reveal", { path: i.path }); },
-  remove: () => { selectedItems().forEach((i) => invoke("shelf_remove", { path: i.path })); sel.clear(); convertStatus = ""; },
+  remove: () => { selectedItems().forEach((i) => invoke("shelf_remove", { path: i.path })); sel.clear(); },
 };
 
-let fbToken = 0;
-async function renderFileBar() {
-  const items = selectedItems();
-  fileBar.hidden = !items.length && !convertStatus;
-  const token = ++fbToken;
-  q(".fb-name", fileBar).textContent =
-    convertStatus || (items.length === 1 ? items[0].name : `${items.length} Dateien ausgewählt`);
-  q(".fb-row", fileBar).hidden = !items.length;
-  const box = q(".fb-formats", fileBar);
-  if (!items.length) { box.replaceChildren(); render(false); return; }
-  const targets = await commonTargets(items);
-  if (token !== fbToken) return; // inzwischen anders ausgewaehlt
-  box.replaceChildren();
-  if (!targets.length) {
-    const av = items.some((i) => i.kind === "audio" || i.kind === "video");
-    const ff = av ? await invoke<boolean>("ffmpeg_available") : true;
-    box.append(el("span", "none", !ff ? "Für Audio/Video fehlt ffmpeg" : items.length > 1 ? "kein gemeinsames Format" : ""));
+/** Unten in der Ablage: nur noch der Stand der Umwandlung (alle Aktionen sind im Rechtsklick-Menue). */
+function renderFileBar() {
+  if (conv?.hideAt && Date.now() > conv.hideAt) conv = null;
+  fileBar.hidden = !conv;
+  if (!conv) { render(false); return; }
+  // eigene Umwandlungen: notch:convert:*-Eintraege, die nach dem Start entstanden sind
+  for (const a of acts) {
+    if (!a.id.startsWith("notch:convert:") || a.updated < conv.since) continue;
+    if (a.subtitle === "fertig") conv.done.set(a.id, a.title);
+    else if (a.color === "#ff453a") conv.failed.set(a.id, a.subtitle ?? "Fehler");
   }
-  for (const t of targets) {
-    const b = el("button", "pill", t.label);
-    b.title = `In ${t.label} umwandeln — landet neben dem Original`;
-    b.addEventListener("click", () => convertSelected(t));
-    box.append(b);
+  const n = conv.done.size + conv.failed.size;
+  const finished = n >= conv.total;
+  const prog = q(".fb-prog", fileBar);
+  const bar = q<HTMLElement>("span", prog);
+  prog.classList.toggle("busy", !finished && n === 0);
+  prog.classList.toggle("ok", finished && !conv.failed.size);
+  prog.classList.toggle("err", finished && conv.failed.size > 0);
+  bar.style.width = `${Math.round((finished ? 1 : n / conv.total) * 100)}%`;
+  let text = conv.label + (conv.total > 1 ? ` — ${n}/${conv.total}` : " …");
+  if (finished) {
+    const [err] = conv.failed.values();
+    text = conv.failed.size
+      ? `Fehler: ${err}`
+      : conv.total > 1 ? `Fertig: ${conv.total} Dateien — liegen neben den Originalen` : `Fertig: ${[...conv.done.values()][0]}`;
+    if (!conv.hideAt) {
+      const ms = conv.failed.size ? 9000 : 5000;
+      conv.hideAt = Date.now() + ms;
+      setTimeout(renderFileBar, ms + 50);
+    }
   }
+  q(".fb-name", fileBar).textContent = text;
   render(false);
 }
 
@@ -597,6 +677,11 @@ async function openMenu(x: number, y: number) {
       row.append(b);
     }
     menu.append(row);
+  } else {
+    const av = items.some((i) => i.kind === "audio" || i.kind === "video");
+    const hint = av && !(await invoke<boolean>("ffmpeg_available")) ? "Für Audio/Video fehlt ffmpeg"
+      : n > 1 ? "Kein gemeinsames Zielformat" : "";
+    if (hint) { menu.append(el("div", "ctx-sep")); menu.append(el("div", "ctx-label", hint)); }
   }
   menu.append(el("div", "ctx-sep"));
   add(n > 1 ? `${n} aus der Ablage nehmen` : "Aus der Ablage nehmen", ACTIONS.remove, "danger");
@@ -748,15 +833,11 @@ async function main() {
   await listen<Activity[]>("activities", (e) => {
     acts = e.payload;
     // Stand der Umwandlung in der Ablage-Leiste zeigen (man bleibt in der Ablage)
-    if (convertStatus) {
-      const conv = acts.filter((a) => a.id.startsWith("notch:convert:")).sort((a, b) => b.updated - a.updated)[0];
-      if (conv?.subtitle === "fertig") convertStatus = `Fertig: ${conv.title}`;
-      else if (conv && conv.color === "#ff453a") convertStatus = `Fehler: ${conv.subtitle ?? ""}`;
-      void renderFileBar();
-    }
+    if (conv) renderFileBar();
     render();
   });
   await listen<Item[]>("shelf", (e) => { shelf = e.payload; render(); });
+  await listen<number>("level", (e) => onLevel(e.payload));
   await listen<string>("activity-alert", () => {
     peekUntil = Date.now() + 3500;
     render();
@@ -858,7 +939,8 @@ async function main() {
 
   let volTimer = 0;
   const sendVol = (f: number, now = false) => {
-    volume = { level: f, muted: f < 0.01 };
+    // Geraetename behalten — sonst verschwindet die Zeile kurz und der Player springt
+    volume = { ...volume, level: f, muted: f < 0.01 };
     renderVolume();
     clearTimeout(volTimer);
     const go = () => invoke<Volume>("volume_set", { level: f }).then((v) => { volume = v; renderVolume(); }).catch(() => {});
@@ -876,14 +958,11 @@ async function main() {
   }, { passive: false });
 
   // Ablage-Leiste
-  q(".fb-open").addEventListener("click", ACTIONS.open);
-  q(".fb-reveal").addEventListener("click", ACTIONS.reveal);
-  q(".fb-remove").addEventListener("click", ACTIONS.remove);
   // Rechtsklick-Menue: lebt in der Form, schliesst bei jedem Klick daneben
   q(".shape").append(menu);
   document.addEventListener("pointerdown", (e) => { if (!menu.contains(e.target as Node)) closeMenu(); }, true);
   // Klick ins Leere der Ablage hebt die Auswahl auf
-  filesEl.addEventListener("click", (e) => { if (e.target === filesEl) { sel.clear(); convertStatus = ""; applySel(); } });
+  filesEl.addEventListener("click", (e) => { if (e.target === filesEl) { sel.clear(); applySel(); } });
 
   // Die Form selbst (nicht Knoepfe/Regler/Dateien) mit gedrueckter Maus ziehen -> an eine andere Kante andocken
   const INTERACTIVE = "button, .slider, .file, .files, .file-bar, .ctx, .act, .preset, .drop";

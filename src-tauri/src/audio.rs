@@ -7,9 +7,11 @@
 //! gilt das Windows-Standardgeraet.
 
 use serde::Serialize;
+use std::time::Duration;
+use tauri::{AppHandle, Emitter};
 use windows::core::{Interface, GUID};
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
-use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+use windows::Win32::Media::Audio::Endpoints::{IAudioEndpointVolume, IAudioMeterInformation};
 use windows::Win32::Media::Audio::{
     eConsole, eRender, AudioSessionStateActive, IAudioSessionControl2, IAudioSessionManager2, IMMDevice,
     IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
@@ -100,6 +102,81 @@ fn read(e: &IAudioEndpointVolume, device: String, follows_player: bool) -> windo
             follows_player,
         })
     }
+}
+
+// ---------- Pegel fuer den Equalizer ----------
+
+/// Peak-Messer aller Audio-Sitzungen des Players (Spotify hat oft mehrere).
+fn player_meters(en: &IMMDeviceEnumerator, exe: &str) -> Vec<IAudioMeterInformation> {
+    let mut out = Vec::new();
+    unsafe {
+        let Ok(devices) = en.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) else { return out };
+        for i in 0..devices.GetCount().unwrap_or(0) {
+            let Ok(dev) = devices.Item(i) else { continue };
+            let Ok(mgr) = dev.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else { continue };
+            let Ok(list) = mgr.GetSessionEnumerator() else { continue };
+            for j in 0..list.GetCount().unwrap_or(0) {
+                let Ok(ctl) = list.GetSession(j) else { continue };
+                let Ok(ctl2) = ctl.cast::<IAudioSessionControl2>() else { continue };
+                let Ok(pid) = ctl2.GetProcessId() else { continue };
+                let name = crate::win::process_path(pid)
+                    .map(|p| p.rsplit('\\').next().unwrap_or("").to_lowercase())
+                    .unwrap_or_default();
+                if name == exe {
+                    if let Ok(m) = ctl.cast::<IAudioMeterInformation>() {
+                        out.push(m);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Misst ~30x pro Sekunde den Pegel des Players und schickt ihn als "level" ans Frontend —
+/// nur solange Musik laeuft und die Notch sichtbar ist. Findet sich keine Sitzung des Players,
+/// wird der Standardausgang gemessen.
+pub fn spawn_meter(app: AppHandle) {
+    std::thread::spawn(move || {
+        let Ok(en) = enumerator() else { return };
+        let mut meters: Vec<IAudioMeterInformation> = Vec::new();
+        let mut tick = 0u32;
+        let mut silent = 0u32;
+        loop {
+            let playing = crate::media::last().map(|m| m.playing).unwrap_or(false);
+            if !playing || crate::FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed) {
+                meters.clear();
+                std::thread::sleep(Duration::from_millis(250));
+                continue;
+            }
+            // Sitzungen alle ~2 s neu suchen (Player gewechselt, Geraet gewechselt)
+            if meters.is_empty() || tick % 60 == 0 {
+                meters = player_meters(&en, &player_exe().unwrap_or_default());
+                if meters.is_empty() {
+                    if let Ok(dev) = unsafe { en.GetDefaultAudioEndpoint(eRender, eConsole) } {
+                        if let Ok(m) = unsafe { dev.Activate::<IAudioMeterInformation>(CLSCTX_ALL, None) } {
+                            meters.push(m);
+                        }
+                    }
+                }
+            }
+            tick = tick.wrapping_add(1);
+            let peak = meters
+                .iter()
+                .filter_map(|m| unsafe { m.GetPeakValue().ok() })
+                .fold(0.0f32, f32::max);
+            // Stille nicht dauernd schicken
+            if peak < 0.001 {
+                silent += 1;
+            } else {
+                silent = 0;
+            }
+            if silent < 3 {
+                let _ = app.emit("level", (peak * 1000.0).round() / 1000.0);
+            }
+            std::thread::sleep(Duration::from_millis(33));
+        }
+    });
 }
 
 #[tauri::command]

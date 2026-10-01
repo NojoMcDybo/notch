@@ -346,6 +346,7 @@ pub fn run() {
             media::spawn(app.handle().clone());
             activities::spawn(app.handle().clone());
             timer::spawn(app.handle().clone());
+            audio::spawn_meter(app.handle().clone());
             spawn_pointer(w, hwnd);
             Ok(())
         })

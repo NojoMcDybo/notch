@@ -46,13 +46,15 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (erstes
 - Fortschrittsleiste → klicken oder ziehen = spulen
 - Zurück / Play-Pause / Weiter
 - Lautsprecher → stumm; Leiste daneben oder Mausrad über dem Player = Lautstärke
+- Pegel-Balken in der kleinen Notch folgen dem echten Ausgangspegel des Players (Core Audio Peak-Meter, ~30×/s)
 - Quellen-Chip (z. B. „Spotify ⇄") → zur nächsten Medienquelle, wenn mehrere laufen
 - Activity-Zeile → öffnet die zugehörige App (`open`), Knöpfe darunter (`actions`), × oder Rechtsklick = weg
 
 **Ablage** (Fach-Symbol)
 - Dateien auf die Notch ziehen → landen hier (nur Verweise, keine Kopien; bleiben über Neustarts)
-- Klick = auswählen, Doppelklick = öffnen, Ziehen = Datei wieder rausziehen, Rechtsklick = aus der Ablage
-- Auswahl-Leiste: Öffnen, Im Ordner zeigen, Konvertieren, Entfernen
+- Klick = auswählen (Strg/Umschalt = mehrere), Doppelklick = öffnen, Ziehen = Datei wieder rausziehen
+- Rechtsklick-Menü: Öffnen, Im Ordner zeigen, Umwandeln in …, Aus der Ablage nehmen
+- Unten erscheint nur noch während einer Umwandlung eine Statusleiste (läuft → grün fertig / rot Fehler)
 - Konvertieren: Bilder nativ (PNG, JPG, WEBP, GIF, BMP, TIFF, ICO, ≤ 1600 px). Audio (MP3, M4A, WAV, FLAC, OGG) und Video (MP4, GIF, MP3) über ffmpeg (`winget install Gyan.FFmpeg`, wird auch im winget-Paketordner gefunden). Ergebnis landet neben dem Original, nie überschrieben.
 
 **Timer** (Stoppuhr-Symbol)
