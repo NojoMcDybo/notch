@@ -1,0 +1,49 @@
+# Baut den Windows-Installer und haengt ihn an ein GitHub Release.
+# Ausloeser: Tag v<version> pushen (muss zur Version in tauri.conf.json passen),
+# oder manuell unter Actions > Release > Run workflow (baut die aktuelle Version).
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  installer:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Version pruefen
+        id: version
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $tag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $tag) {
+            throw "Tag $env:GITHUB_REF_NAME passt nicht zur Version $version in tauri.conf.json"
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+      - run: npm ci --include=dev
+      - run: npx tauri build --bundles nsis
+      - name: Release anlegen und Installer hochladen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:TAG --target $env:GITHUB_SHA --title "Notch $($env:TAG.TrimStart('v'))" --notes "Windows-Installer (x64, NSIS).`n`nSHA-256: ``$hash``"
+          }
+          gh release upload $env:TAG $exe.FullName --clobber
