@@ -179,12 +179,24 @@ pub fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
+/// Browser-Herkunft: nur eigene Tauri-Fenster und Seiten von genau localhost/127.0.0.1/[::1].
+/// Kein "null" (sandboxed iframes, data:-URLs — damit koennte jede Website schreiben) und kein
+/// Praefixvergleich (sonst kaeme http://localhost.angreifer.de durch).
 fn origin_ok(o: &str) -> bool {
-    o == "null"
-        || o.starts_with("http://localhost")
-        || o.starts_with("http://127.0.0.1")
-        || o.starts_with("tauri://")
-        || o.starts_with("http://tauri.localhost")
+    if matches!(o, "tauri://localhost" | "http://tauri.localhost" | "https://tauri.localhost") {
+        return true;
+    }
+    o.strip_prefix("http://").is_some_and(loopback_host)
+}
+
+/// "127.0.0.1", "localhost:5173", "[::1]:80" -> true; alles andere false.
+/// Auch fuer den Host-Header: schuetzt vor DNS-Rebinding (fremde Domain, die auf 127.0.0.1 zeigt).
+fn loopback_host(hostport: &str) -> bool {
+    let host = match hostport.rsplit_once(':') {
+        Some((h, p)) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => h,
+        _ => hostport,
+    };
+    matches!(host.to_ascii_lowercase().as_str(), "127.0.0.1" | "localhost" | "[::1]")
 }
 
 fn header(k: &str, v: &str) -> Header {
@@ -283,6 +295,15 @@ pub fn spawn(app: AppHandle) {
                 .iter()
                 .find(|h| h.field.equiv("Origin"))
                 .map(|h| h.value.to_string());
+            let host_ok = req
+                .headers()
+                .iter()
+                .find(|h| h.field.equiv("Host"))
+                .is_none_or(|h| loopback_host(h.value.as_str()));
+            if !host_ok {
+                let _ = req.respond(Response::from_string("forbidden host").with_status_code(403));
+                continue;
+            }
             if let Some(o) = &origin {
                 if !origin_ok(o) {
                     let _ = req.respond(Response::from_string("forbidden origin").with_status_code(403));
@@ -411,4 +432,31 @@ pub fn activity_action(app: AppHandle, id: String, action: String) -> Result<(),
         remove(&app, &id);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{loopback_host, origin_ok};
+
+    #[test]
+    fn origin_nur_eigene_fenster_und_loopback() {
+        for o in ["http://localhost", "http://localhost:5173", "http://127.0.0.1:8080", "http://[::1]:3000",
+                  "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"] {
+            assert!(origin_ok(o), "{o} sollte erlaubt sein");
+        }
+        for o in ["null", "http://localhost.angreifer.de", "http://127.0.0.1.nip.io", "http://localhost:80.evil.de",
+                  "https://localhost", "https://example.com", "tauri://evil", "http://127.0.0.1:abc", ""] {
+            assert!(!origin_ok(o), "{o} sollte abgewiesen werden");
+        }
+    }
+
+    #[test]
+    fn host_nur_loopback() {
+        for h in ["127.0.0.1", "127.0.0.1:47800", "localhost:47800", "LOCALHOST", "[::1]:47800"] {
+            assert!(loopback_host(h), "{h} sollte erlaubt sein");
+        }
+        for h in ["rebind.angreifer.de:47800", "localhost.angreifer.de", "192.168.0.5:47800", ""] {
+            assert!(!loopback_host(h), "{h} sollte abgewiesen werden");
+        }
+    }
 }
