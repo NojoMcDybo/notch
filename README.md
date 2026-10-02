@@ -182,12 +182,13 @@ Browser-Seiten dürfen nur von `localhost`/`127.0.0.1`/`tauri://` aus schreiben 
 
 ## Musik-Reaktion
 
-Einstellungen › Anzeige › Musik › **Notch reagiert auf Musik**: *Aus* (Standard) / *Auto* / *Zacken* / *Welle* / *Puls*, dazu **Stärke** (50–200 %). Die schwarze Kante verformt sich zur Musik, Bass in der Mitte, Höhen nach außen.
+Einstellungen › Anzeige › Musik › **Notch reagiert auf Musik**: *Aus* (Standard) / *Auto* / *Eigene*, dazu **Stärke** (50–200 %). Die schwarze Notch verformt sich an allen drei freien Seiten (oben angedockt: links, unten, rechts; seitlich entsprechend gedreht), unten in der Mitte der Bass, zu den Enden Mitten und Höhen bis ~2,7 kHz; an der Bildschirmkante läuft es auf 8 px aus. Maximaler Ausschlag bei 100 %: 26 px kompakt, 54 px aufgeklappt.
 
+- **Stile, die sich überlagern:** *Zacken* (scharfe Spitzen, Kick drückt weiter raus), *Welle* (weich, träge, wandernder Schwung), *Puls* (die ganze Kontur wölbt sich im Takt). Pro Punkt zählt der größte gewichtete Ausschlag.
+- **Auto:** Rust liefert Anteile je Stil (`music_style::weights`, weiche Übergänge aus Tempo, Taktdeutlichkeit, Schlagdichte, Bassanteil; z. B. Hardstyle ≈ Zacken 100 % + Puls 40 %), das Frontend blendet über ~1 s über. **Eigene:** Zacken, Welle, Puls frei kombinierbar (mindestens einer).
 - **Abgriff** (`spectrum.rs`): WASAPI-Loopback genau des Ausgangs, auf dem der Player spielt (z. B. „Sonar - Media“), sonst des Standardausgangs. Läuft nur, wenn die Einstellung an ist, Musik spielt und kein Vollbild-Programm vorne ist; sonst ist der Abgriff geschlossen.
-- **Analyse** (`music_style.rs`, getestet mit künstlichen Signalen): FFT (2048) alle 512 Samples, 24 logarithmische Bänder 40 Hz–16 kHz mit automatischer Aussteuerung; Schläge aus dem pegelrelativen spektralen Fluss (Bass doppelt) mit adaptiver Schwelle und Mindeststärke; Tempo aus der Autokorrelation der erkannten Schläge über 8 s (Halbtempo-Korrektur).
-- **Auto**: *Zacken* bei deutlichem Takt und ≥ 135 BPM oder dichten, basslastigen Schlägen; *Welle* ohne Takt und mit wenig Schlägen; sonst *Puls*. Ein Wechsel braucht drei Bestätigungen im Sekundenabstand, nach einem Songwechsel zählt die erste Einschätzung. Die Schwellen sind Startwerte; das Einstellungsfenster zeigt live, was erkannt wird.
-- **Zeichnen** (`src/music-react.ts`): Canvas an der Kante, ~30 Pakete/s, `requestAnimationFrame` nur solange Daten kommen; bei „Bewegung reduzieren“ aus.
+- **Analyse** (`music_style.rs`, getestet mit künstlichen Signalen): FFT (2048) alle 512 Samples, 24 logarithmische Bänder 40 Hz–16 kHz mit automatischer Aussteuerung; Schläge aus dem pegelrelativen spektralen Fluss (Bass doppelt) mit adaptiver Schwelle und Mindeststärke; Tempo aus der Autokorrelation der erkannten Schläge über 8 s (Halbtempo-Korrektur). Die Schwellen sind Startwerte; das Einstellungsfenster zeigt live Anteile, BPM und Takt.
+- **Zeichnen** (`src/music-react.ts`): fensterfüllender Canvas hinter der Form, Kontur aus der echten Form (inkl. runder Ecken), `requestAnimationFrame` nur solange Daten kommen; bei „Bewegung reduzieren“ aus.
 
 ## Updates
 

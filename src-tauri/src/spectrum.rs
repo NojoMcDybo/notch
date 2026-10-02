@@ -15,14 +15,14 @@ use windows::Win32::Media::Audio::{
 };
 use windows::Win32::System::Com::{CoTaskMemFree, CLSCTX_ALL};
 
-use crate::music_style::{classify, Analyzer, Style, StyleTracker, BANDS};
+use crate::music_style::{classify, weights, Analyzer, Style, StyleTracker, BANDS};
 
 const EMIT_EVERY: Duration = Duration::from_millis(33);
 const STYLE_EVERY: Duration = Duration::from_secs(1);
 /// Geraet des Players neu suchen (Player/Geraet gewechselt)
 const DEVICE_EVERY: Duration = Duration::from_secs(3);
 
-/// Einstellung compact.music.react: "off" | "auto" | "spikes" | "wave" | "pulse"
+/// Einstellung compact.music.react: "off" | "auto" | "manual"
 fn react_mode() -> String {
     crate::settings_value("/music/react").and_then(|v| v.as_str().map(String::from)).unwrap_or_else(|| "off".into())
 }
@@ -41,6 +41,8 @@ struct Payload {
     bpm: u16,
     /// wie deutlich der Takt ist, 0..100
     beat: u8,
+    /// Anteile Zacken / Welle / Puls, je 0..100 (duerfen sich ueberlappen)
+    w: [u8; 3],
 }
 
 struct Capture {
@@ -194,6 +196,8 @@ pub fn spawn(app: AppHandle) {
             if last_emit.elapsed() >= EMIT_EVERY {
                 last_emit = Instant::now();
                 let ch = character.unwrap_or_default();
+                // vor der ersten Einschaetzung: atmen
+                let w = character.map(|c| weights(&c)).unwrap_or([0.0, 0.0, 1.0]);
                 let _ = app.emit(
                     "spectrum",
                     Payload {
@@ -203,6 +207,7 @@ pub fn spawn(app: AppHandle) {
                         s: tracker.current(),
                         bpm: ch.bpm.round() as u16,
                         beat: (ch.beat * 100.0).round() as u8,
+                        w: w.map(|x| (x * 100.0).round() as u8),
                     },
                 );
                 acc = [0.0; BANDS];

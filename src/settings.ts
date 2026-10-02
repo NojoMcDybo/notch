@@ -10,7 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { build, bpmOf, needed, plan, planKey, PulseGate, sourceOf, TIMER_ID, type CAct, type Plan } from "./compact";
-import { clone, DEFAULTS, FULLSCREEN_MODES, MUSIC_REACT, normalize, SOURCES, type CompactSettings, type FullscreenMode, type MusicReact, type SourceId } from "./settings-model";
+import { clone, DEFAULTS, FULLSCREEN_MODES, LAYERS, MUSIC_REACT, normalize, SOURCES, type CompactSettings, type FullscreenMode, type Layer, type MusicReact, type SourceId } from "./settings-model";
 
 const q = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector(s) as T;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) {
@@ -269,10 +269,10 @@ function optRange(
 
 const secs = (v: number) => (v === 0 ? "sofort weg" : `${String(v).replace(".", ",")} s`);
 
-const REACT_TEXT: Record<MusicReact, string> = { off: "Aus", auto: "Auto", spikes: "Zacken", wave: "Welle", pulse: "Puls" };
-const STYLE_NAME: Record<string, string> = { spikes: "Zacken", wave: "Welle", pulse: "Puls" };
+const REACT_TEXT: Record<MusicReact, string> = { off: "Aus", auto: "Auto", manual: "Eigene" };
+const LAYER_NAME: Record<Layer, string> = { spikes: "Zacken", wave: "Welle", pulse: "Puls" };
 
-/** Musik-Reaktion: Auswahl + was gerade erkannt wird (live aus "spectrum") */
+/** Musik-Reaktion: Aus / Auto / Eigene, bei Eigene die Stile frei kombinierbar; darunter live, was erkannt wird */
 function reactField() {
   const field = el("div", "field");
   field.setAttribute("role", "group");
@@ -282,29 +282,46 @@ function reactField() {
   for (const m of MUSIC_REACT) {
     const b = el("button", "", REACT_TEXT[m]);
     b.dataset.react = m;
-    b.addEventListener("click", () => {
-      s.music.react = m;
-      syncDeps();
-      commit();
-      setSeg("button[data-react]", (x) => x.dataset.react === m);
-      showReactHint();
-    });
+    b.addEventListener("click", () => { s.music.react = m; syncDeps(); commit(); syncReact(); });
     seg.append(b);
+  }
+  // Eigene: mehrere gleichzeitig (sie ueberlagern sich), mindestens einer bleibt an
+  const mix = el("div", "segmented compact react-layers");
+  for (const l of LAYERS) {
+    const b = el("button", "", LAYER_NAME[l]);
+    b.dataset.layer = l;
+    b.addEventListener("click", () => {
+      const next = { ...s.music.layers, [l]: !s.music.layers[l] };
+      if (!next.spikes && !next.wave && !next.pulse) return;
+      s.music.layers = next;
+      commit();
+      syncReact();
+    });
+    mix.append(b);
   }
   const live = el("small", "react-live", reactHint());
   live.setAttribute("aria-live", "polite");
-  field.append(seg, live);
-  queueMicrotask(() => setSeg("button[data-react]", (b) => b.dataset.react === s.music.react));
+  field.append(seg, mix, live);
+  queueMicrotask(syncReact);
   return field;
 }
 
-let reactLast: { s: string; bpm: number; beat: number; at: number } | null = null;
+function syncReact() {
+  setSeg("button[data-react]", (b) => b.dataset.react === s.music.react);
+  setSeg("button[data-layer]", (b) => s.music.layers[b.dataset.layer as Layer]);
+  document.querySelectorAll<HTMLElement>(".react-layers").forEach((e) => { e.hidden = s.music.react !== "manual"; });
+  showReactHint();
+}
+
+let reactLast: { s: string; bpm: number; beat: number; w?: number[]; at: number } | null = null;
 const showReactHint = () => document.querySelectorAll(".react-live").forEach((e) => { e.textContent = reactHint(); });
 function reactHint() {
-  if (s.music.react === "off") return "Die schwarze Kante bewegt sich zur Musik: Zacken für harte, schnelle Musik, Welle für ruhige, Puls für alles dazwischen. „Auto“ erkennt den Stil selbst.";
+  if (s.music.react === "off") return "Die schwarze Notch bewegt sich an allen drei Seiten zur Musik: Zacken für harte, schnelle Musik, Welle für ruhige, Puls für alles dazwischen. „Auto“ mischt die drei selbst, bei „Eigene“ wählst du sie.";
   if (!reactLast || Date.now() - reactLast.at > 1500) return "Wartet auf Musik …";
   const tempo = reactLast.bpm ? ` · ${reactLast.bpm} BPM · Takt ${reactLast.beat} %` : " · Tempo wird ermittelt …";
-  return `Erkannt: ${STYLE_NAME[reactLast.s] ?? reactLast.s}${tempo}`;
+  const w = reactLast.w ?? [0, 0, 100];
+  const mix = LAYERS.map((l, i) => `${LAYER_NAME[l]} ${w[i]} %`).join(" · ");
+  return s.music.react === "auto" ? `Erkannt: ${mix}${tempo}` : `Musik: ${LAYER_NAME[reactLast.s as Layer] ?? reactLast.s}-artig${tempo}`;
 }
 
 function extras(id: SourceId): HTMLElement[] {
@@ -574,7 +591,7 @@ async function main() {
   // Live-Daten wie in der Notch
   // Musik-Reaktion: was gerade erkannt wird (hoechstens 4x pro Sekunde auffrischen)
   let reactShown = 0;
-  await listen<{ s: string; bpm: number; beat: number }>("spectrum", (e) => {
+  await listen<{ s: string; bpm: number; beat: number; w?: number[] }>("spectrum", (e) => {
     reactLast = { ...e.payload, at: Date.now() };
     if (Date.now() - reactShown > 250) { reactShown = Date.now(); showReactHint(); }
   });

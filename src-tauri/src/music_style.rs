@@ -57,11 +57,34 @@ pub struct Character {
     pub bass: f32,
 }
 
-/// Stil aus den Eigenschaften. Schwellen sind Startwerte und werden mit echter Musik nachgestellt.
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Anteile der drei Stile, je 0..1 — sie duerfen sich ueberlappen (Hardstyle: viel Zacken,
+/// etwas Puls). Weiche Uebergaenge statt harter Grenzen. Schwellen sind Startwerte und werden
+/// mit echter Musik nachgestellt.
+pub fn weights(c: &Character) -> [f32; 3] {
+    let beat = smoothstep(0.15, 0.4, c.beat);
+    let fast = smoothstep(120.0, 145.0, c.bpm);
+    let dense = smoothstep(1.8, 3.0, c.onsets) * smoothstep(0.3, 0.55, c.bass);
+    let spikes = beat * fast.max(dense);
+    let wave = (1.0 - beat) * (1.0 - smoothstep(0.8, 1.6, c.onsets));
+    let mut pulse = beat * (1.0 - 0.6 * spikes);
+    if spikes.max(wave).max(pulse) < 0.2 {
+        // nichts Eindeutiges: wenigstens atmen
+        pulse = 0.5;
+    }
+    [spikes, wave, pulse]
+}
+
+/// Vorherrschender Stil (fuer die Anzeige und den Wechsel-Schutz).
 pub fn classify(c: &Character) -> Style {
-    if c.beat >= 0.3 && (c.bpm >= 135.0 || (c.onsets >= 2.5 && c.bass >= 0.45)) {
+    let [s, w, p] = weights(c);
+    if s >= w && s >= p {
         Style::Spikes
-    } else if c.beat < 0.2 && c.onsets < 1.2 {
+    } else if w >= p {
         Style::Wave
     } else {
         Style::Pulse
@@ -454,6 +477,18 @@ mod tests {
         let c = a.character().unwrap();
         assert!((c.bpm - 174.0).abs() < 8.0, "{c:?}");
         assert_eq!(classify(&c), Style::Spikes, "{c:?}");
+    }
+
+    #[test]
+    fn anteile_ueberlappen_und_passen_zum_stil() {
+        let hard = weights(&Character { bpm: 150.0, beat: 0.8, onsets: 2.5, bass: 0.9 });
+        assert!(hard[0] > 0.9 && hard[2] > 0.2 && hard[2] < hard[0], "Hardstyle: viel Zacken, etwas Puls {hard:?}");
+        let pop = weights(&Character { bpm: 120.0, beat: 0.6, onsets: 2.0, bass: 0.3 });
+        assert!(pop[2] > 0.9 && pop[0] < 0.1 && pop[1] < 0.1, "Pop: Puls {pop:?}");
+        let klassik = weights(&Character { bpm: 0.0, beat: 0.05, onsets: 0.3, bass: 0.1 });
+        assert!(klassik[1] > 0.9 && klassik[0] < 0.05, "Klassik: Welle {klassik:?}");
+        let unklar = weights(&Character { bpm: 0.0, beat: 0.3, onsets: 1.5, bass: 0.2 });
+        assert!(unklar.iter().all(|w| (0.0..=1.0).contains(w)) && unklar.iter().cloned().fold(0.0, f32::max) >= 0.2, "{unklar:?}");
     }
 
     #[test]

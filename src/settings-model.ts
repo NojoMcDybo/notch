@@ -26,8 +26,9 @@ export type CompactSettings = {
   /** wie viele Dinge die kleine Notch gleichzeitig zeigt */
   slots: 1 | 2;
   glucose: { delta: boolean; outOfRangeTop: boolean };
-  /** react: Kante der Notch bewegt sich zur Musik (auto = Stil aus der Musik); strength 0.5..2 */
-  music: { eqBesideCover: boolean; lingerSec: number; react: MusicReact; strength: number };
+  /** react: Kante der Notch bewegt sich zur Musik — auto = Anteile aus der Musik, manual = layers;
+   *  strength 0.5..2 */
+  music: { eqBesideCover: boolean; lingerSec: number; react: MusicReact; layers: Layers; strength: number };
   timer: { expand: boolean };
   pulse: { boost: boolean; threshold: number };
   folio: { flash: boolean; flashSec: number };
@@ -36,8 +37,12 @@ export type CompactSettings = {
   fullscreen: { mode: FullscreenMode };
 };
 
-export type MusicReact = "off" | "auto" | "spikes" | "wave" | "pulse";
-export const MUSIC_REACT: MusicReact[] = ["off", "auto", "spikes", "wave", "pulse"];
+export type MusicReact = "off" | "auto" | "manual";
+export const MUSIC_REACT: MusicReact[] = ["off", "auto", "manual"];
+export type Layer = "spikes" | "wave" | "pulse";
+export const LAYERS: Layer[] = ["spikes", "wave", "pulse"];
+/** welche Stile bei „Eigene“ gleichzeitig laufen */
+export type Layers = Record<Layer, boolean>;
 
 export type FullscreenMode = "hide" | "peek" | "show";
 export const FULLSCREEN_MODES: FullscreenMode[] = ["hide", "peek", "show"];
@@ -48,7 +53,7 @@ export const DEFAULTS: CompactSettings = {
   hidden: [],
   slots: 2,
   glucose: { delta: true, outOfRangeTop: true },
-  music: { eqBesideCover: true, lingerSec: 30, react: "off", strength: 1 },
+  music: { eqBesideCover: true, lingerSec: 30, react: "off", layers: { spikes: true, wave: false, pulse: true }, strength: 1 },
   timer: { expand: true },
   pulse: { boost: true, threshold: 140 },
   folio: { flash: true, flashSec: 2 },
@@ -81,13 +86,23 @@ export function normalize(raw: unknown): CompactSettings {
     slots: r.slots === 1 ? 1 : 2,
     glucose: { delta: bool(g.delta, DEFAULTS.glucose.delta), outOfRangeTop: bool(g.outOfRangeTop, DEFAULTS.glucose.outOfRangeTop) },
     music: { eqBesideCover: bool(m.eqBesideCover, DEFAULTS.music.eqBesideCover), lingerSec: num(m.lingerSec, 0, 300, DEFAULTS.music.lingerSec),
-      react: MUSIC_REACT.includes(m.react as MusicReact) ? (m.react as MusicReact) : DEFAULTS.music.react,
+      // 0.1.5 kannte nur einen Stil: "spikes" -> Eigene mit Zacken
+      react: MUSIC_REACT.includes(m.react as MusicReact) ? (m.react as MusicReact) : LAYERS.includes(m.react as Layer) ? "manual" : DEFAULTS.music.react,
+      layers: LAYERS.includes(m.react as Layer)
+        ? { spikes: m.react === "spikes", wave: m.react === "wave", pulse: m.react === "pulse" }
+        : layers(obj(m.layers)),
       strength: num(m.strength, 0.5, 2, DEFAULTS.music.strength) },
     timer: { expand: bool(t.expand, DEFAULTS.timer.expand) },
     pulse: { boost: bool(p.boost, DEFAULTS.pulse.boost), threshold: Math.round(num(p.threshold, 60, 220, DEFAULTS.pulse.threshold)) },
     folio: { flash: bool(f.flash, DEFAULTS.folio.flash), flashSec: num(f.flashSec, 0.5, 8, DEFAULTS.folio.flashSec) },
     fullscreen: { mode: FULLSCREEN_MODES.includes(fs.mode as FullscreenMode) ? (fs.mode as FullscreenMode) : DEFAULTS.fullscreen.mode },
   };
+}
+
+/** mindestens ein Stil bleibt an */
+function layers(l: Record<string, unknown>): Layers {
+  const out = { spikes: bool(l.spikes, DEFAULTS.music.layers.spikes), wave: bool(l.wave, DEFAULTS.music.layers.wave), pulse: bool(l.pulse, DEFAULTS.music.layers.pulse) };
+  return out.spikes || out.wave || out.pulse ? out : { ...DEFAULTS.music.layers };
 }
 
 export const clone = (s: CompactSettings): CompactSettings => JSON.parse(JSON.stringify(s));

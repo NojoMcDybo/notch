@@ -1337,7 +1337,9 @@ async function main() {
   // Musik-Reaktion: Rust schickt nur, wenn sie an ist, Musik laeuft und kein Vollbild vorne ist
   const reactor = new MusicReactor(
     q<HTMLCanvasElement>("canvas.react"),
+    q(".shape"),
     () => settings.music.react,
+    () => settings.music.layers,
     () => settings.music.strength,
     () => state === "expanded",
     () => dock,
