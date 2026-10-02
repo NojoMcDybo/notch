@@ -1,6 +1,6 @@
 [package]
 name = "notch"
-version = "0.1.7"
+version = "0.2.0"
 description = "Notch - Dynamic-Island-artige Infoanzeige fuer Windows"
 authors = ["Nojo"]
 edition = "2021"
@@ -27,6 +27,8 @@ tauri-plugin-global-shortcut = "2"
 arboard = "3"
 tauri-plugin-updater = "2"
 rustfft = "6"
+socket2 = { version = "0.5", features = ["all"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 [dependencies.windows]
 version = "0.62"

@@ -6,7 +6,8 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-export type VoiceState = "off" | "connecting" | "listening" | "thinking" | "speaking" | "error";
+/** ready = Halten-zum-Sprechen: Antwort fertig, Verbindung steht noch, Mikro aus (wartet auf den naechsten Druck) */
+export type VoiceState = "off" | "connecting" | "listening" | "thinking" | "speaking" | "ready" | "error";
 
 type Tool = (args: Record<string, unknown>) => Promise<unknown>;
 
@@ -14,16 +15,22 @@ export type VoiceHooks = {
   onState: (s: VoiceState, detail?: string) => void;
   onTranscript: (text: string) => void;
   onLevel: (level: number) => void;
+  /** Pegel der Stimme des Assistenten (0..1) — fuer die Animation in der kleinen Notch */
+  onOutLevel?: (level: number) => void;
   tools: Record<string, Tool>;
 };
 
 const CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 /** ohne Gespraech nach so vielen ms automatisch auflegen (Kosten laufen pro Minute) */
 const IDLE_MS = 40_000;
+/** Antwort fertig, aber kein "Ausgabe gestoppt" vom Server: nach so langer Stille gilt sie als zu Ende */
+const QUIET_MS = 1200;
+/** Halten-zum-Sprechen: haengt "denkt nach" so lange, ohne dass etwas kommt, wird aufgegeben */
+const THINK_MAX_MS = 20_000;
 
 const INSTRUCTIONS = `Du bist der Sprachassistent in Nojos Notch auf seinem Windows-PC.
 Sprich Deutsch, locker und knapp: meist ein, hoechstens zwei Saetze, ausser er will ausdruecklich mehr.
-Mit den Werkzeugen steuerst du Musik, Lautstaerke, Timer und die Datei-Ablage und kannst nachsehen, was die Notch gerade zeigt.
+Mit den Werkzeugen steuerst du Musik, Lautstaerke, Timer und die Datei-Ablage, kannst nachsehen, was die Notch gerade zeigt, und kennst die laufenden Spielstaende (Werkzeug sport).
 Nutze die Werkzeuge, statt zu behaupten, du haettest etwas getan. Wenn etwas unklar ist, frag kurz nach.
 Blutzuckerwerte in der Notch stammen aktuell aus einer Demo: nenne sie nie als echte Messung und gib keine Therapie- oder Dosierungsempfehlungen.`;
 
@@ -65,6 +72,13 @@ const TOOLS = [
   },
   {
     type: "function",
+    name: "sport",
+    description:
+      "Live-Sport aus der Notch: laufende, kommende und gerade beendete Spiele der gewaehlten Wettbewerbe (Bundesliga, Laenderspiele …) mit Spielstand, Minute und den letzten Meldungen (Tore, Karten).",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    type: "function",
     name: "datei_oeffnen",
     description: "Eine Datei aus der Ablage der Notch mit dem passenden Programm oeffnen.",
     parameters: {
@@ -101,7 +115,25 @@ export class Voice {
   private ptt = false;
   /** gehalten = Mikro soll an sein (auch waehrend die Verbindung noch aufgebaut wird) */
   private held = false;
+  /** Server spielt gerade Stimme ab (output_audio_buffer.started … stopped) */
+  private playing = false;
+  /** letzte Antwort ist fertig erzeugt (response.done ohne Werkzeugaufruf) */
+  private answered = false;
+  private outCtx?: AudioContext;
+  private outRaf = 0;
+  private quietSince = 0;
+  private thinkTimer = 0;
   state: VoiceState = "off";
+
+  /** Sitzung laeuft per Halten-zum-Sprechen (Controller) */
+  get isPtt() {
+    return this.ptt;
+  }
+
+  /** Taste wird gerade gehalten */
+  get isHeld() {
+    return this.held;
+  }
 
   constructor(private h: VoiceHooks) {
     this.audio.autoplay = true;
@@ -117,7 +149,19 @@ export class Voice {
 
   private set(s: VoiceState, detail?: string) {
     this.state = s;
+    clearTimeout(this.thinkTimer);
+    // Halten-zum-Sprechen: kommt auf eine Frage gar nichts zurueck, nicht ewig "denkt nach" zeigen
+    if (s === "thinking" && this.ptt) this.thinkTimer = window.setTimeout(() => this.finish(), THINK_MAX_MS);
     this.h.onState(s, detail);
+  }
+
+  /** Halten-zum-Sprechen: Antwort ist zu Ende gesprochen -> Mikro aus, Notch darf wieder weg */
+  private finish() {
+    if (!this.ptt || !this.active || this.held) return;
+    this.answered = false;
+    this.playing = false;
+    this.set("ready");
+    this.bumpIdle();
   }
 
   private send(ev: unknown) {
@@ -144,10 +188,11 @@ export class Voice {
         this.configure();
       }
       // spricht der Assistent gerade: unterbrechen
-      if (this.state === "speaking" || this.state === "thinking") {
+      if (this.state === "speaking" || this.state === "thinking" || this.playing) {
         this.send({ type: "response.cancel" });
         this.send({ type: "output_audio_buffer.clear" });
       }
+      this.answered = this.playing = false;
       this.send({ type: "input_audio_buffer.clear" });
       this.setMic(true);
       this.text = "";
@@ -180,7 +225,10 @@ export class Voice {
     try {
       const token = await invoke<string>("voice_token");
       const pc = (this.pc = new RTCPeerConnection());
-      pc.ontrack = (e) => { this.audio.srcObject = e.streams[0]; };
+      pc.ontrack = (e) => {
+        this.audio.srcObject = e.streams[0];
+        this.outMeter(e.streams[0]);
+      };
       this.mic = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
@@ -212,15 +260,19 @@ export class Voice {
 
   stop() {
     clearTimeout(this.idle);
+    clearTimeout(this.thinkTimer);
     cancelAnimationFrame(this.raf);
+    cancelAnimationFrame(this.outRaf);
     this.dc?.close();
     this.pc?.close();
     this.mic?.getTracks().forEach((t) => t.stop());
     void this.ctx?.close().catch(() => {});
+    void this.outCtx?.close().catch(() => {});
     this.audio.srcObject = null;
-    this.dc = this.pc = this.mic = this.ctx = undefined;
-    this.ptt = this.held = false;
+    this.dc = this.pc = this.mic = this.ctx = this.outCtx = undefined;
+    this.ptt = this.held = this.playing = this.answered = false;
     this.h.onLevel(0);
+    this.h.onOutLevel?.(0);
     if (this.state !== "error") this.set("off");
   }
 
@@ -255,12 +307,27 @@ export class Voice {
       case "response.output_audio_transcript.delta":
         this.text += ev.delta ?? "";
         this.h.onTranscript(this.text);
-        if (this.state !== "speaking") this.set("speaking");
+        if (this.state !== "speaking" && !(this.ptt && this.held)) this.set("speaking");
+        break;
+      // WebRTC: wann die Stimme wirklich laeuft (die Antwort ist oft schon fertig erzeugt, waehrend sie noch spricht)
+      case "output_audio_buffer.started":
+        this.playing = true;
+        break;
+      case "output_audio_buffer.stopped":
+      case "output_audio_buffer.cleared":
+        this.playing = false;
+        if (this.answered) this.finish();
         break;
       case "response.done":
         void this.done(ev.response);
         break;
       case "error":
+        // Halten-zum-Sprechen ohne Gesagtes (leerer Puffer) o. Ae.: still zurueck auf bereit
+        if (this.ptt && !this.held && this.state === "thinking") {
+          this.answered = true;
+          if (!this.playing) this.finish();
+          break;
+        }
         // Fehler einer einzelnen Anfrage: anzeigen, Sitzung aber weiterlaufen lassen
         this.h.onTranscript(`Fehler: ${ev.error?.message ?? "unbekannt"}`);
         break;
@@ -268,11 +335,20 @@ export class Voice {
   }
 
   /** Antwort fertig: Werkzeugaufrufe ausfuehren und das Ergebnis zurueckgeben. */
-  private async done(resp: { output?: any[] } | undefined) {
+  private async done(resp: { output?: any[]; status?: string } | undefined) {
     this.bumpIdle();
     const calls = (resp?.output ?? []).filter((o) => o.type === "function_call");
     if (!calls.length) {
-      this.set("listening");
+      if (!this.ptt) {
+        this.set("listening");
+        return;
+      }
+      // abgebrochen, weil schon wieder gedrueckt wurde: nichts tun, es hoert bereits zu
+      if (this.held || resp?.status === "cancelled") return;
+      // Halten-zum-Sprechen: warten, bis die Stimme zu Ende ist (output_audio_buffer.stopped oder Stille)
+      this.answered = true;
+      this.quietSince = 0;
+      if (!this.playing && this.state !== "speaking") this.finish();
       return;
     }
     this.set("thinking");
@@ -291,6 +367,40 @@ export class Voice {
     }
     this.text = "";
     this.send({ type: "response.create" });
+  }
+
+  /**
+   * Pegel der Antwort-Stimme: treibt die Animation in der kleinen Notch und erkennt das Ende der
+   * Antwort, falls der Server kein output_audio_buffer.stopped schickt (Stille nach response.done).
+   */
+  private outMeter(stream: MediaStream) {
+    cancelAnimationFrame(this.outRaf);
+    try {
+      const ctx = (this.outCtx = new AudioContext());
+      const an = ctx.createAnalyser();
+      an.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      let smooth = 0;
+      const loop = () => {
+        an.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (const v of buf) sum += ((v - 128) / 128) ** 2;
+        const lvl = Math.min(1, Math.sqrt(sum / buf.length) * 5);
+        smooth = Math.max(lvl, smooth * 0.82);
+        this.h.onOutLevel?.(smooth);
+        if (this.answered && this.ptt && !this.held) {
+          const now = performance.now();
+          if (lvl > 0.03) this.quietSince = 0;
+          else if (!this.quietSince) this.quietSince = now;
+          else if (now - this.quietSince > QUIET_MS) this.finish();
+        }
+        this.outRaf = requestAnimationFrame(loop);
+      };
+      loop();
+    } catch {
+      /* ohne Pegel: Ende kommt ueber output_audio_buffer.stopped */
+    }
   }
 
   /** Mikrofonpegel fuer die Animation */

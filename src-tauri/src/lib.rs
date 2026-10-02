@@ -6,8 +6,10 @@ mod gamepad;
 mod media;
 mod music_style;
 mod open;
+mod share;
 mod shelf;
 mod spectrum;
+mod sport;
 mod timer;
 mod update;
 mod voice;
@@ -25,7 +27,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Webview
 
 /// Fenster ist eine unsichtbare Leinwand; die Notch wird darin gezeichnet.
 const WIN_W: f64 = 640.0;
-const WIN_H: f64 = 560.0; // Platz fuer Player + Blutzucker-Graph + weitere Zeilen
+const WIN_H: f64 = 700.0; // Platz fuer Player + Blutzucker-Graph + Sport + weitere Zeilen
 
 /// Bereich der Notch im Fenster (CSS-Pixel), meldet das Frontend.
 /// Nur dort faengt das Fenster die Maus ab, ueberall sonst klickt man durch.
@@ -83,6 +85,7 @@ fn snapshot() -> serde_json::Value {
         "hover": HOVER.load(Ordering::Relaxed),
         "dock": dock(),
         "voice_key": VOICE_KEY.lock().unwrap().clone(),
+        "sport": sport::last(),
     })
 }
 
@@ -189,6 +192,20 @@ fn settings_get() -> serde_json::Value {
     SETTINGS.lock().unwrap().clone()
 }
 
+/// Einstellung aus Rust aendern (z. B. Geraet als vertrauenswuerdig merken), speichern und verteilen
+pub(crate) fn settings_update(app: &AppHandle, f: impl FnOnce(&mut serde_json::Value)) {
+    let v = {
+        let mut s = SETTINGS.lock().unwrap();
+        if !s.is_object() {
+            *s = serde_json::json!({});
+        }
+        f(&mut s);
+        s.clone()
+    };
+    save_config(app);
+    let _ = app.emit("settings", v);
+}
+
 /// Speichern und an alle Fenster schicken (Notch + Einstellungsfenster)
 #[tauri::command]
 fn settings_set(app: AppHandle, settings: serde_json::Value) {
@@ -203,11 +220,11 @@ fn settings_set(app: AppHandle, settings: serde_json::Value) {
 /// Einstellungen in einem eigenen, normalen Fenster (nicht in der Notch).
 /// async, weil Fenster aus synchronen Befehlen unter Windows haengen bleiben koennen.
 #[tauri::command]
-async fn open_settings(app: AppHandle) -> Result<(), String> {
+async fn open_settings(app: AppHandle, tab: Option<String>) -> Result<(), String> {
     // Klick kam aus der Notch: Polling soll den Fokus nicht ans vorige Programm zurueckgeben,
     // waehrend das neue Fenster nach vorn kommt
     FOCUS_HOLD.store(activities::now_ms() + 1500, Ordering::Relaxed);
-    show_settings(&app, None).map_err(|e| e.to_string())
+    show_settings(&app, tab.as_deref()).map_err(|e| e.to_string())
 }
 
 /// `tab`: Reiter, der vorn sein soll (z. B. "app" fuer den OpenAI-Schluessel)
@@ -488,7 +505,14 @@ pub fn run() {
             shelf::drag_icon,
             convert::convert_targets,
             convert::convert,
-            convert::ffmpeg_available
+            convert::ffmpeg_available,
+            sport::sport_watch,
+            sport::sport_leagues,
+            sport::sport_teams,
+            share::share_status,
+            share::share_qr,
+            share::share_offer,
+            share::share_send
         ])
         .setup(|app| {
             shelf::load(app.handle());
@@ -558,6 +582,8 @@ pub fn run() {
             update::spawn(app.handle().clone());
             spectrum::spawn(app.handle().clone());
             gamepad::spawn(app.handle().clone());
+            sport::spawn(app.handle().clone());
+            share::spawn(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -147,6 +147,7 @@ Optionaler Feldblock an `POST /activity` — sobald `chart` da ist, zeichnet die
 - **Veraltet:** Maßgeblich ist der Zeitstempel des letzten Punkts, nicht die letzte Sendung. Ab 12 Min. ohne neuen Messwert grau, kein Pfeil, keine Änderung, „vor X Min“. Läuft die `ttl` ab, bleibt der Eintrag stehen und zeigt „keine Daten“ (verschwindet nur per `DELETE` oder ×).
 - **Alarme** entscheidet die App (`alert`), die Notch klappt dann nur kurz auf.
 - **Doppelklick auf den Graphen:** Die Notch ruft `AllowSetForegroundWindow(pid)` auf, legt `{"activity":"haze:bg","action":"open"}` in `GET /events` und gibt den Fokus 1,2 s lang nicht an das vorige Fenster zurück. Die App pollt `/events` (200 ms) und holt sich selbst nach vorn (Restore/Show/Focus) — klappt so auch aus dem Tray. Bewusste Ausnahme zu „ein Klick klaut nie den Fokus“.
+- **Doppelklick auf den Wert** (die große Zahl im Kopf, nur bei `app: "Haze"`): Ereignis `{"activity":"haze:bg","action":"widget"}` in `GET /events` — Haze blendet sein Widget ein oder aus (ab Haze 1.3.2). Ein einfacher Klick auf die Zahl tut nichts.
 - Zum Testen ohne Haze: `.\tools\bg-demo.ps1` (Optionen `-AgeMin 15`, `-Ttl 20`, `-Alert`, `-Remove`).
 
 Eingabefeld: Tippen landet (entprellt) als Ereignis `input`, Enter als `submit`, Umschalt+Enter als `submit-prev`,
@@ -177,7 +178,7 @@ Browser-Seiten dürfen nur von `localhost`/`127.0.0.1`/`tauri://` aus schreiben 
 ## Angebunden
 
 - **Folio** (`D:\Dev\folio\src\notch.ts` + `src-tauri\src\notch.rs`): jedes offene Dokument erscheint mit Deckelbild und „Seite x von y“ — beim Scrollen höchstens alle 80 ms nachgeführt, in fester Reihenfolge über einen Rust-Faden. Aufgeklappt steht darunter dauerhaft **Folios Suchfeld**: Tippen sucht im Dokument (Treffer stehen in der Zeile), Enter/Umschalt+Enter springt zum nächsten/vorigen Treffer und holt das Fenster nach vorn. Folio holt die Eingaben alle 200 ms über `GET /events` ab. Klick auf die Zeile holt genau dieses Dokumentfenster nach vorn. Auffrischen jede Minute, ttl 180 s, Entfernen beim Schließen. `notchShelf(paths)` legt Dateien in die Ablage.
-- **Haze** (Electron-App, `D:\Dev\haze`, Repo NojoMcDybo/Haze): Nightscout-Dashboard (Dexcom Share über Nightscout als Brücke), hält selbst bis zu 600 Messwerte (~2 Tage). `desktop/notch-bridge.cjs` schickt bei jedem neuen Messwert `haze:bg` mit Wert, Trend (Sensor, sonst Dexcom-Schwellen), Änderung und 24 h Verlauf, `ttl` 900 s + Auffrischen jede Minute, `alert` beim Wechsel in hoch/tief; beim Beenden wird der Eintrag gelöscht. Doppelklick auf den Graphen holt das Dashboard nach vorn (Haze pollt `/events`). Seit Haze-PR #4/#5 in `main`; einen Haze-Branch testen: `tools\haze-branch-start.cmd` per Explorer starten.
+- **Haze** (Electron-App, `D:\Dev\haze`, Repo NojoMcDybo/Haze): Nightscout-Dashboard (Dexcom Share über Nightscout als Brücke), hält selbst bis zu 600 Messwerte (~2 Tage). `desktop/notch-bridge.cjs` schickt bei jedem neuen Messwert `haze:bg` mit Wert, Trend (Sensor, sonst Dexcom-Schwellen), Änderung und 24 h Verlauf, `ttl` 900 s + Auffrischen jede Minute, `alert` beim Wechsel in hoch/tief; beim Beenden wird der Eintrag gelöscht. Doppelklick auf den Graphen holt das Dashboard nach vorn, Doppelklick auf den Wert blendet das Haze-Widget ein/aus (Haze pollt `/events`). Seit Haze-PR #4/#5 in `main`; einen Haze-Branch testen: `tools\haze-branch-start.cmd` per Explorer starten.
 - Der ältere C#-Prototyp (jetzt `D:\Dev\_archiv\haze-widget-lab`) (Widget Lab, nur Demowerte, id `haze-bz`) ist nicht mehr die angebundene App.
 
 ## Controller
@@ -188,9 +189,40 @@ Xbox-Controller und alles, was sich per XInput meldet (GameSir, Steam Input …)
 |---|---|
 | Steuerkreuz links + RB (R1) | Notch klein heraus – nur im Vollbild mit *Im Vollbild: Am Rand*; nochmal = weg, sonst nach 10 s |
 | Steuerkreuz links + RT (R2) | Notch aufgeklappt heraus – ebenso |
-| Steuerkreuz links + R3 halten | Sprachassistent hört zu, solange gedrückt; loslassen = er antwortet (Sitzung startet bei Bedarf, ohne automatische Spracherkennung; erneutes Drücken unterbricht ihn) |
+| Steuerkreuz links + R3 halten | Nach **1,5 s** Halten hört der Sprachassistent zu (ab 0,25 s füllt sich ein Ring in der Mitte der kleinen Notch; früher loslassen = nichts passiert). Solange gedrückt: aufgeklappt mit „Hört zu“. Loslassen: Notch wird klein, in der Mitte zeigt eine Animation Nachdenken und Sprechen (die Balken folgen seiner Stimme). Ist er fertig, verschwindet die Notch wieder an den Rand bzw. zeigt wieder ihren normalen Inhalt. Erneutes Drücken unterbricht ihn. |
 
 Herausgeholt bleibt die Notch durchklickbar, Klicks gehen weiter ans Spiel. **Grenze:** XInput kann nur mitlesen – das Spiel sieht dieselben Tasten. Wer das nicht will, legt die Kombination z. B. in Steam Input auf eine Taste, die das Spiel nicht nutzt.
+
+## Live-Sport
+
+Einstellungen › **Sport**: Wettbewerbe wählen (Bundesliga, 2. Bundesliga, 3. Liga, DFB-Pokal, Frauen-Bundesliga, Länderspiele Deutschland, WM/EM, Champions/Europa/Conference League, Premier League, LaLiga, Serie A, Ligue 1, NFL, NBA, NHL, MLB), Lieblingsteams suchen und antippen (stehen immer vorn und in der Mitte), *Alle Spiele* oder *Nur Lieblingsteams*.
+
+- **Kleine Notch:** In der Mitte steht der Spielstand (`BMG 2:2 M05 • 68'`, Unterstrich in Teamfarbe). Laufen mehrere Spiele, wechseln sie sich alle 8 s ab (Konferenz); nach einem Tor steht dieses Spiel eine Minute vorn und leuchtet kurz in der Farbe des Torschützen. Lieblingsteams zusätzlich eine Stunde vor Anpfiff und kurz nach Abpfiff.
+- **Meldungen:** Bei Toren (einstellbar: Toren / Wichtigem / Allem / Nie) klappt die Notch 6,5 s auf; die Meldung steht ganz oben unter der Leiste („Tor für Gladbach! · Machino (Elfmeter) · 68'“). Im Vollbild klappt nichts auf; bei *Am Rand* / *Nur anzeigen* zeigt sie 7 s den Spielstand klein (abschaltbar).
+- **Aufgeklappt:** Karte mit Logos, Spielstand und Minute, Ticker (Tore, Karten, Wechsel, Halbzeit, bei angesehenen Spielen auch Chancen, Ecken, Abseits, Videobeweis), weitere laufende Spiele zum Antippen, „Spielseite“ öffnet das Spiel im Browser.
+- **Spielfeld mit Ballverlauf** (nur Fußball über ESPN): Echte Positionsdaten aller Spieler gibt es live nirgends frei. Die Notch nimmt stattdessen jede Ballaktion mit Feldposition und Uhrzeit (Pass von wo nach wo, Flanke, Schuss, Zweikampf, Ballgewinn …) und spielt sie im echten Takt nach: der Ball wandert, beteiligte Spieler erscheinen mit Rückennummer in Teamfarbe und gleiten zu ihrer neuen Position, Schüsse als Linie aufs Tor. Beim Aufklappen laufen die letzten acht Aktionen als Zusammenfassung — klappt die Notch für ein Tor auf, sieht man den Angriff. Geladen wird nur, solange die Karte zu sehen ist (alle ~6 s, etwa 10–15 MB pro Stunde Zuschauen).
+- **Sprachassistent** kennt die Spielstände (Werkzeug `sport`): „Wie steht es bei Gladbach?“
+
+Quellen (`src-tauri/src/sport.rs`), alle ohne Konto und Schlüssel:
+
+| Quelle | Wofür | Status |
+|---|---|---|
+| ESPN `site.api.espn.com` | Spielstände, Minute, Tore, Karten (alle Ligen außer 3. Liga/Frauen) | frei abrufbar, aber **inoffiziell** – keine Zusage, kann sich ändern; nur privat nutzen |
+| ESPN `sports.core.api.espn.com` | jede Ballaktion mit Feldposition (Spielfeld) | wie oben |
+| OpenLigaDB `api.openligadb.de` | 3. Liga, Frauen-Bundesliga; Ersatz für Bundesliga, 2. Liga, DFB-Pokal, wenn ESPN 3× hintereinander ausfällt | offiziell frei, Community-gepflegt; nur Tore, Minute geschätzt |
+
+Abfragen: laufendes Spiel alle 15 s, kurz vor Anpfiff alle 30 s, sonst alle 5–20 Min (eine kleine Anfrage pro Wettbewerb). Live-Tracking (Spielerpositionen) haben nur kostenpflichtige Anbieter (DFL/Sportec, Opta, Second Spectrum); freie Tracking-Daten gibt es nur für alte Spiele (z. B. StatsBomb Open Data, Metrica Sports, DFL-Open-Data).
+
+## iPhone ↔ PC (wie AirDrop)
+
+Echtes AirDrop geht unter Windows nicht – Apple funkt dafür über ein eigenes WLAN-Protokoll (AWDL) mit Apple-Zertifikaten. Die Notch bietet zwei Wege, die sich fast genauso anfühlen (`src-tauri/src/share.rs`). Einschalten: Einstellungen › **iPhone** (aus, bis man es einschaltet; dann lauscht die Notch im lokalen Netz auf Port 53317 – beim ersten Mal fragt die Windows-Firewall: „Private Netzwerke“ erlauben).
+
+1. **LocalSend** (kostenlos, Open Source, App Store): Die Notch spricht das offene [LocalSend-Protokoll v2](https://github.com/localsend/protocol) und taucht in der App als Gerät „Notch · PC-Name“ auf.
+   - iPhone → PC: Foto/Datei › Teilen › LocalSend › Notch. Die Notch klappt auf wie bei einem Anruf: **Annehmen** / **Ablehnen** / **Immer annehmen** (Gerät merken). Fortschritt als Zeile, danach „3 Fotos von Nojos iPhone“; die Dateien liegen in der Ablage und in `Downloads\Notch` (einstellbar). Text und Links aus LocalSend erscheinen zum **Kopieren** bzw. **Öffnen**.
+   - PC → iPhone: LocalSend auf dem iPhone offen lassen, dann Ablage › Rechtsklick › **An iPhone senden** › Gerät; auf dem iPhone annehmen.
+2. **Ohne App (Browser):** iPhone-Knopf in der Ablage zeigt einen QR-Code. Mit der Kamera scannen → Seite in Safari zum Hochladen (Fotos/Dateien wählen) und zum Laden von Dateien, die man am PC über Rechtsklick › An iPhone senden › **Per QR-Code** anbietet (Fotos: gedrückt halten › Zu Fotos hinzufügen).
+
+Sicherheit: Fremde Geräte werden jedes Mal gefragt (60 s, sonst abgelehnt); Uploads nur mit dem Einmal-Schlüssel aus der Zusage und von derselben Adresse; Dateinamen werden bereinigt (kein Pfad, keine reservierten Namen), nichts wird überschrieben; höchstens angekündigte Größe. Die Browser-Seite braucht den zufälligen Schlüssel aus dem QR-Code (30 Min gültig). Übertragen wird unverschlüsselt (HTTP) wie LocalSend mit ausgeschalteter Verschlüsselung – gedacht fürs Heim-WLAN, nicht für öffentliche Netze.
 
 ## Musik-Reaktion
 
@@ -218,6 +250,9 @@ Neue Version veröffentlichen: Version in `package.json`, `src-tauri/Cargo.toml`
 - `src-tauri/src/open.rs` — öffnen / nach vorn holen / localhost-Rückmeldung
 - `src-tauri/src/timer.rs` — Timer als Activity
 - `src-tauri/src/update.rs` — Update-Prüfung und -Installation als Activity
+- `src-tauri/src/sport.rs`, `src/sport.ts` — Live-Sport: Quellen, Ticker, Ballverlauf, Anzeige
+- `src-tauri/src/share.rs`, `share-page.html` — iPhone-Austausch: LocalSend-Protokoll, Browser-Seite, QR-Code
+- `src-tauri/src/gamepad.rs` — Controller-Kürzel (XInput)
 - `src-tauri/src/shelf.rs`, `convert.rs` — Ablage und Konvertieren
 - `src-tauri/src/win.rs` — Win32: Cursor, Vollbild, Fensterstile, Fenster nach vorn holen
 - `src/main.ts`, `src/styles.css` — Form, Federanimation, Ansichten

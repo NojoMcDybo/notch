@@ -8,6 +8,7 @@ import { fillCard, isBg, type ChartData } from "./glucose";
 import { build, needed, plan, planKey, planSig, PulseGate, sourceOf, type Plan } from "./compact";
 import { DEFAULTS, normalize, type CompactSettings } from "./settings-model";
 import { MusicReactor, type Spectrum } from "./music-react";
+import { bannerEl, cardEl, cardSig, kickoff, midEl, midSig as sportSig, Pitch, type SportMatch, type SportNews, type SportPlay, type SportState } from "./sport";
 
 // ---------- Typen ----------
 
@@ -56,7 +57,7 @@ type Dock = "top" | "left" | "right";
 
 const EAR = 10;
 const EAR_X = 14;
-const MAX_H = 540; // Fenster ist 560 hoch (lib.rs WIN_H)
+const MAX_H = 680; // Fenster ist 700 hoch (lib.rs WIN_H)
 /** oben: waagerecht wie die Mac-Notch */
 const SIZE = {
   idle: { w: 190, h: 30, r: 10 },
@@ -98,6 +99,7 @@ const filesEl = q(".files");
 const fileBar = q(".file-bar");
 const badge = q(".badge");
 const clearTray = q(".clear-tray");
+const shareBtn = q(".share-btn");
 
 // ---------- Zustand ----------
 
@@ -122,12 +124,21 @@ let fullscreen = false;
 let peek = false;
 /** Controller (gamepad.rs): Steuerkreuz links + RB/RT holt die Notch im Vollbild klein/aufgeklappt heraus */
 let padMode: "off" | "compact" | "expanded" = "off";
-/** Sprachassistent per Controller gestartet: im Vollbild sichtbar, solange er laeuft (ausser „Ausblenden“) */
+/** Sprachassistent per Controller (Halten zum Sprechen): aufgeklappt nur beim Sprechen, danach klein, dann weg */
 let padVoice = false;
+/** Steuerkreuz links + R3 wird gehalten, aber die 1,5 s sind noch nicht um: Ladering in der Mitte */
+let armUntil = 0;
+let armMs = 0;
+let armTimer = 0;
+const arming = () => armUntil > 0;
+/** Fehler/fehlender Schluessel beim Controller-Sprechen: so lange sichtbar, dann wieder weg */
+let padErrUntil = 0;
+/** Controller-Sprachassistent braucht die Notch gerade (Ladering, Zuhoeren, Antwort, Fehler) */
+const padVisible = () => arming() || (padVoice && voiceMode() !== "off") || Date.now() < padErrUntil;
 /** Vollbild: versteckt, ausser „Sichtbar, nicht anklickbar“, per Kante/Controller herausgeholt oder Sprachassistent per Controller */
 const hiddenByFullscreen = () =>
   fullscreen && !peek && padMode === "off" && settings.fullscreen.mode !== "show" &&
-  !(padVoice && voice.active && settings.fullscreen.mode !== "hide");
+  !((padVisible() || sportFlash()) && settings.fullscreen.mode !== "hide");
 /** Vollbild: Klicks gehen durch die Notch ans Programm (versteckt oder „nicht anklickbar“) */
 const passiveInFullscreen = () => fullscreen && !peek;
 let dragOver = false;
@@ -137,7 +148,8 @@ let view: View = "home";
 let hoverTimer = 0;
 let dragIcon = "";
 let dock: Dock = "top";
-let voiceShown = false;
+/** zuletzt gemeldeter Zustand des Sprachassistenten (oder "nokey") */
+let voiceUi: VoiceState | "nokey" = "off";
 let voiceKey = "";
 
 // ---------- Sprachassistent ----------
@@ -154,9 +166,34 @@ const V_LABEL: Record<string, string> = {
   nokey: "OpenAI-Schlüssel fehlt",
 };
 
+/**
+ * Wie zeigt sich der Assistent gerade?
+ * - panel: aufgeklappt mit Orb und Text (normales Gespraech; beim Controller nur, solange gehalten wird)
+ * - mini:  Controller losgelassen, Antwort laeuft -> kleine Notch mit Animation in der Mitte
+ * - off:   nichts (auch "ready": Verbindung steht noch, Notch darf wieder weg)
+ */
+function voiceMode(): "off" | "panel" | "mini" {
+  const s = voiceUi;
+  if (s === "off" || s === "ready") return "off";
+  if (s === "error" || s === "nokey") return padVoiceErr && Date.now() >= padErrUntil ? "off" : "panel";
+  if (!voice.isPtt) return "panel";
+  if (voice.isHeld) return "panel";
+  return s === "thinking" || s === "speaking" || s === "connecting" ? "mini" : "off";
+}
+/** Fehler kam vom Controller-Sprechen (verschwindet von selbst) */
+let padVoiceErr = false;
+const PAD_ERR_MS = 6000;
+
 function showVoice(s: VoiceState | "nokey", detail = "") {
-  voiceShown = s !== "off";
-  voiceEl.hidden = !voiceShown;
+  voiceUi = s;
+  if (s === "error" || s === "nokey") {
+    padVoiceErr = padVoice || arming();
+    if (padVoiceErr) {
+      padErrUntil = Date.now() + PAD_ERR_MS;
+      setTimeout(() => render(), PAD_ERR_MS + 30);
+    }
+  } else padVoiceErr = false;
+  voiceEl.hidden = voiceMode() !== "panel";
   voiceEl.dataset.s = s;
   q(".v-state", voiceEl).textContent = V_LABEL[s] ?? "";
   if (detail || s === "error" || s === "nokey") {
@@ -166,7 +203,7 @@ function showVoice(s: VoiceState | "nokey", detail = "") {
   q(".v-setup", voiceEl).hidden = s !== "nokey";
   micBtn.classList.toggle("on", voice.active);
   if (s === "listening" || s === "connecting") { view = "home"; notch.dataset.view = "home"; }
-  render(false);
+  render();
 }
 
 const findShelf = (name: string) => {
@@ -175,9 +212,13 @@ const findShelf = (name: string) => {
 };
 
 const voice = new Voice({
-  onState: (s, detail) => { if (s === "off" || s === "error") padVoice = false; showVoice(s, detail); },
+  onState: (s, detail) => {
+    showVoice(s, detail);
+    if (s === "off" || s === "error") padVoice = false;
+  },
   onTranscript: (t) => { q(".v-text", voiceEl).textContent = t; render(false); },
   onLevel: (l) => orb.style.setProperty("--lvl", l.toFixed(3)),
+  onOutLevel: (l) => vminiLevel(l),
   // Werkzeuge, mit denen der Assistent die Notch bedient — alles ueber die vorhandenen Befehle
   tools: {
     musik: async (a) => { await invoke("media_control", { action: String(a.aktion) }); return { ok: true }; },
@@ -201,6 +242,15 @@ const voice = new Voice({
       await invoke("open", { target: it.path });
       return { geoeffnet: it.name };
     },
+    sport: async () => ({
+      spiele: sport.matches.map((m) => ({
+        wettbewerb: m.league_name, heim: m.home.name, gast: m.away.name, lieblingsteam: m.fav,
+        stand: m.state === "pre" ? null : `${m.home.score}:${m.away.score}`,
+        status: m.state === "pre" ? `Anstoß ${kickoff(m)}` : m.clock,
+        letzte_meldungen: m.events.slice(-4).map((e) => [e.minute, e.title, e.text].filter(Boolean).join(" ")),
+      })),
+      hinweis: settings.sport.on ? undefined : "Live-Sport ist in den Einstellungen aus",
+    }),
     datei_konvertieren: async (a) => {
       const it = findShelf(String(a.name ?? ""));
       if (!it) return { fehler: "nicht in der Ablage", ablage: shelf.map((i) => i.name) };
@@ -214,7 +264,9 @@ const voice = new Voice({
 });
 
 async function toggleVoice() {
-  if (voice.active) { voice.stop(); return; }
+  if (voice.active && voiceUi !== "ready") { voice.stop(); return; }
+  // unsichtbar wartende Controller-Sitzung: beenden und als normales Gespraech neu starten
+  if (voice.active) voice.stop();
   if (!(await invoke<boolean>("voice_ready"))) { showVoice("nokey"); return; }
   void voice.start();
 }
@@ -479,11 +531,252 @@ function currentPlan(): Plan {
 const timerAlarm = () => acts.some((a) => a.id === "notch:timer" && a.title.includes("abgelaufen"));
 
 function wanted(): State {
-  if (hover || dragOver || holding > 0 || typing || voiceShown || timerAlarm() || Date.now() < peekUntil || padMode === "expanded") return "expanded";
+  if (hover || dragOver || holding > 0 || typing || voiceMode() === "panel" || timerAlarm() || Date.now() < peekUntil || padMode === "expanded") return "expanded";
+  // iPhone: Anfrage offen oder QR-Code sichtbar (nicht im Vollbild)
+  if (!fullscreen && (shareAsk() || Date.now() < qrUntil)) return "expanded";
+  // Sportmeldung: kurz aufklappen (nicht im Vollbild — da reicht der Spielstand in der kleinen Notch)
+  if (Date.now() < newsUntil && !fullscreen) return "expanded";
   if (Date.now() < clipPeekUntil) return "clip";
+  if (midKind()) return "compact";
   const p = currentPlan();
   if (p.slots.length || p.timer) return "compact";
   return "idle";
+}
+
+// ---------- Mitte der kleinen Notch: Ladering, Antwort-Animation, Spielstand ----------
+
+const mid = q(".c-mid");
+type MidKind = "" | "arm" | "voice" | "sport";
+
+function midKind(): MidKind {
+  if (arming()) return "arm";
+  if (voiceMode() === "mini") return "voice";
+  if (sportMid()) return "sport";
+  return "";
+}
+
+/** Ladering: fuellt sich in der Restzeit bis zum Zuhoeren */
+function armEl() {
+  const box = el("div", "arm");
+  box.style.setProperty("--arm", `${armMs}ms`);
+  box.innerHTML =
+    '<svg viewBox="0 0 24 24" class="arm-ring"><circle class="t" cx="12" cy="12" r="10"/><circle class="p" cx="12" cy="12" r="10"/></svg>' +
+    '<svg viewBox="0 0 24 24" class="arm-mic"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zm-7 9h2a5 5 0 0 0 10 0h2a7 7 0 0 1-6 6.9V21h-2v-2.1A7 7 0 0 1 5 12z"/></svg>';
+  return box;
+}
+
+/** Antwort des Assistenten: fuenf Balken, die mit seiner Stimme gehen (beim Nachdenken eine ruhige Welle) */
+function vminiEl() {
+  const box = el("div", "vmini");
+  box.dataset.s = voiceUi;
+  for (let i = 0; i < 5; i++) box.append(el("i"));
+  return box;
+}
+const VBAR = [0.55, 0.85, 1, 0.8, 0.5];
+let vbarPhase = 0;
+function vminiLevel(l: number) {
+  const box = mid.querySelector<HTMLElement>(".vmini");
+  if (!box) return;
+  box.dataset.s = voiceUi;
+  if (voiceUi !== "speaking") return;
+  vbarPhase += 0.35;
+  box.querySelectorAll<HTMLElement>("i").forEach((b, i) => {
+    const wob = 0.75 + 0.25 * Math.sin(vbarPhase + i * 1.3);
+    b.style.setProperty("--s", Math.max(0.16, Math.min(1, l * 1.6 * VBAR[i] * wob)).toFixed(3));
+  });
+}
+
+function midSig() {
+  const k = midKind();
+  return k === "sport" ? "sport:" + sportMidSig() : k === "arm" ? `arm:${armUntil}` : k;
+}
+
+function fillMid() {
+  const k = midKind();
+  mid.dataset.kind = k;
+  mid.replaceChildren();
+  if (k === "arm") mid.append(armEl());
+  else if (k === "voice") mid.append(vminiEl());
+  else if (k === "sport") mid.append(sportMidEl());
+}
+
+// ---------- iPhone-Austausch (share.rs) ----------
+
+type ShareDev = { fp: string; alias: string; model: string; recent: boolean };
+type ShareState = { on: boolean; running: boolean; error: string; ip: string; port: number; alias: string; devices: ShareDev[] };
+type ShareQr = { url: string; svg: string; minutes: number };
+let shareState: ShareState | null = null;
+/** QR-Code in der Ablage: Notch bleibt so lange offen (man greift ja zum iPhone) */
+let qrUntil = 0;
+const QR_MS = 120_000;
+const qrPanel = q(".share-qr");
+/** Anfrage vom iPhone wartet auf Annehmen/Ablehnen: Notch bleibt offen wie bei einem Anruf */
+const shareAsk = () => acts.some((a) => a.id === "notch:share:ask");
+
+function showQr(r: ShareQr, offered = 0) {
+  q<HTMLImageElement>(".sq-img", qrPanel).src = `data:image/svg+xml;utf8,${encodeURIComponent(r.svg)}`;
+  q(".sq-what", qrPanel).textContent = offered
+    ? `${offered === 1 ? "1 Datei" : `${offered} Dateien`} zum Laden – oder Fotos hochladen`
+    : "Öffnet eine Seite zum Hochladen auf diesen PC";
+  q(".sq-alt", qrPanel).textContent = shareState?.alias ? `Mit LocalSend: „${shareState.alias}“ wählen` : "";
+  q(".sq-url", qrPanel).textContent = `${r.url} · ${r.minutes} Min gültig`;
+  qrPanel.classList.remove("err");
+  qrPanel.hidden = false;
+  qrUntil = Date.now() + QR_MS;
+  setView("tray");
+  setTimeout(() => { if (Date.now() >= qrUntil) closeQr(); }, QR_MS + 50);
+}
+
+function closeQr() {
+  qrUntil = 0;
+  qrPanel.hidden = true;
+  if (!hoverRaw) setHover(false); else render();
+}
+
+/** Fehler (aus, kein WLAN, Geraet weg) kurz an derselben Stelle zeigen */
+function shareError(msg: string) {
+  q<HTMLImageElement>(".sq-img", qrPanel).removeAttribute("src");
+  qrPanel.classList.add("err");
+  q(".sq-what", qrPanel).textContent = msg;
+  q(".sq-alt", qrPanel).textContent = "";
+  q(".sq-url", qrPanel).textContent = "";
+  qrPanel.hidden = false;
+  qrUntil = Date.now() + 8000;
+  setView("tray");
+  setTimeout(() => { if (Date.now() >= qrUntil) closeQr(); }, 8050);
+}
+
+// ---------- Live-Sport (sport.rs / sport.ts) ----------
+
+let sport: SportState = { matches: [] };
+/** vom Nutzer gewaehltes Spiel (Klick auf ein anderes laufendes Spiel) */
+let sportFocus = "";
+/** letzte Meldung: ihr Spiel steht eine Minute lang im Mittelpunkt */
+let hot: { n: SportNews; until: number } | null = null;
+/** Meldung oben in der aufgeklappten Notch */
+let news: SportNews | null = null;
+let newsUntil = 0;
+const NEWS_MS = 6500;
+/** Vollbild („Am Rand“/„Nur anzeigen“): nach einem Tor kurz der Spielstand in der kleinen Notch */
+let sportFlashUntil = 0;
+const sportFlash = () => Date.now() < sportFlashUntil;
+let rotate = 0;
+const pitch = new Pitch();
+const sportMatch = (key: string) => sport.matches.find((m) => m.key === key);
+const hotNews = () => (hot && Date.now() < hot.until ? hot.n : null);
+
+/** Kandidaten fuer die Mitte: laufende Spiele (Lieblingsteams zuerst), sonst Lieblingsteams kurz vor/nach dem Spiel */
+function centerCandidates(): SportMatch[] {
+  const sp = settings.sport;
+  if (!sp.on || !sp.center) return [];
+  const live = sport.matches.filter((m) => m.state === "in");
+  const favLive = live.filter((m) => m.fav);
+  if (favLive.length) return favLive;
+  if (live.length) return live;
+  const now = Date.now();
+  return sport.matches.filter((m) => m.fav && (
+    (m.state === "pre" && m.start - now < 60 * 60_000) || (m.state === "post" && now - m.start < 150 * 60_000)));
+}
+
+/** Spiel in der Mitte der kleinen Notch (mehrere laufende: alle 8 s das naechste, Konferenz) */
+function sportMid(): SportMatch | null {
+  const h = hotNews();
+  const hm = h ? sportMatch(h.key) : undefined;
+  if (hm && (sportFlash() || (settings.sport.center && Date.now() - h!.at < 60_000))) return hm;
+  const c = centerCandidates();
+  return c.length ? c[rotate % c.length] : null;
+}
+/** Tor-Leuchten nur in den ersten Sekunden nach der Meldung */
+const glowNews = () => { const h = hotNews(); return h && Date.now() - h.at < 8000 ? h : null; };
+const sportMidSig = () => { const m = sportMid(); return m ? sportSig(m, glowNews()) : ""; };
+const sportMidEl = () => midEl(sportMid()!, glowNews());
+
+/** Spiel fuer die Karte: gewaehlt > letzte Meldung > Lieblingsteam live > erstes laufendes; sonst nur Lieblingsteams in der Naehe */
+function cardFocus(): SportMatch | undefined {
+  if (!settings.sport.on || !sport.matches.length) return undefined;
+  const pick = sportMatch(sportFocus) ?? (hotNews() ? sportMatch(hotNews()!.key) : undefined);
+  if (pick) return pick;
+  const live = sport.matches.filter((m) => m.state === "in");
+  if (live.length) return live.find((m) => m.fav) ?? live[0];
+  const now = Date.now();
+  return sport.matches.find((m) => m.fav && Math.abs(m.start - now) < 3 * 3600_000);
+}
+
+const sportSlot = q(".sport-slot");
+const bannerSlot = q(".sport-banner");
+let sportCardSig = "";
+let bannerSig = "";
+
+function renderSport() {
+  const f = cardFocus();
+  const usePitch = !!f && f.pitch && f.source === "espn" && settings.sport.pitch && f.state !== "pre";
+  const others = f ? sport.matches.filter((m) => m.key !== f.key && m.state === "in") : [];
+  const sig = f ? cardSig(f, others, dock !== "top", usePitch) : "";
+  if (sig !== sportCardSig) {
+    sportCardSig = sig;
+    if (f && usePitch) pitch.setMatch(f);
+    sportSlot.replaceChildren(...(f ? [cardEl(f, others, {
+      pitch: usePitch ? pitch : null,
+      side: dock !== "top",
+      onOpen: (m) => { if (m.link) invoke("open", { target: m.link }).catch(() => {}); },
+      onFocus: (key) => { sportFocus = key; hot = null; render(); },
+    })] : []));
+  }
+  sportSlot.hidden = !f;
+  // Meldung oben (unter der Leiste), solange sie frisch ist
+  const show = news && Date.now() < newsUntil ? news : null;
+  const bsig = show ? show.ev.id + show.score : "";
+  if (bsig !== bannerSig) {
+    bannerSig = bsig;
+    bannerSlot.replaceChildren(...(show ? [bannerEl(show, sportMatch(show.key))] : []));
+  }
+  bannerSlot.hidden = !show;
+}
+
+/** Bei welchen Meldungen die Notch von selbst aufklappt */
+function expandFor(big: number) {
+  switch (settings.sport.expand) {
+    case "off": return false;
+    case "goals": return big >= 3;
+    case "important": return big >= 2;
+    default: return big >= 1;
+  }
+}
+
+function onSportNews(n: SportNews) {
+  if (!settings.sport.on || !sportMatch(n.key)) return;
+  const now = Date.now();
+  if (n.ev.big >= 2) { hot = { n, until: now + 60_000 }; sportFocus = ""; }
+  if (!expandFor(n.ev.big)) { render(); return; }
+  if (fullscreen) {
+    if (settings.sport.fullscreen && settings.fullscreen.mode !== "hide" && n.ev.big >= 3) {
+      sportFlashUntil = now + 7000;
+      setTimeout(() => render(), 7050);
+    }
+  } else {
+    news = n;
+    newsUntil = now + NEWS_MS;
+    if (!hover && view !== "home") { view = "home"; notch.dataset.view = "home"; }
+    setTimeout(() => render(), NEWS_MS + 50);
+  }
+  setTimeout(() => render(), 8050); // Tor-Leuchten in der Mitte wieder aus
+  render();
+}
+
+/** Ballverlauf nur holen und zeichnen, solange die Karte mit Spielfeld zu sehen ist */
+let watching = "";
+let watchAt = 0;
+function tickWatch() {
+  const f = cardFocus();
+  const visible = state === "expanded" && (view === "home" || dock !== "top") && !!f && pitch.el.isConnected &&
+    settings.sport.pitch && f.state !== "pre";
+  const key = visible ? f!.key : "";
+  if (key !== watching || (key && Date.now() - watchAt > 8000)) {
+    watching = key;
+    watchAt = Date.now();
+    invoke("sport_watch", { key: key || null }).catch(() => {});
+  }
+  pitch.run(!!key);
 }
 
 let compactSig = "";
@@ -493,12 +786,14 @@ let shelfSig = "";
 
 /** Platzbedarf der kleinen Notch (waechst z. B. mit laufendem Timer) */
 let compactSize = 0;
+/** nur die Mitte belegt (Ladering, Antwort, Spielstand): Notch darf schmaler sein als sonst */
+let midOnly = false;
 
 function renderCompact() {
   const p = currentPlan();
   // nur neu bauen, wenn sich etwas Sichtbares aendert (sonst startet der Pegel jede Sekunde neu)
   const s = settings;
-  const sig = planSig(p, [media?.playing, coverSrc?.length, s.glucose.delta, s.music.eqBesideCover, dock]);
+  const sig = planSig(p, [media?.playing, coverSrc?.length, s.glucose.delta, s.music.eqBesideCover, dock, midSig()]);
   if (sig === compactSig) return;
   compactSig = sig;
   // wechselt die Quelle auf einem Platz, blenden die Elemente weich ein (nicht bei jeder neuen Zahl)
@@ -506,8 +801,11 @@ function renderCompact() {
   const animate = compactKey !== "" && key !== compactKey;
   compactKey = key;
   build(lead, trail, p, s, { coverSrc, musicPlaying: !!media?.playing, iconEl: (a) => iconEl(a as Activity), eq }, animate);
+  fillMid();
   const side = dock !== "top";
-  const measure = () => { compactSize = needed(lead, trail, side, side ? SIDE.compact.h : SIZE.compact.w); };
+  midOnly = !!midKind() && !lead.childElementCount && !trail.childElementCount;
+  const base = midOnly ? (side ? 90 : 120) : side ? SIDE.compact.h : SIZE.compact.w;
+  const measure = () => { compactSize = needed(lead, trail, side, base, mid); };
   measure();
   // Cover/Deckel haben erst nach dem Laden eine Breite -> dann nachmessen
   for (const img of [...lead.querySelectorAll("img"), ...trail.querySelectorAll("img")]) {
@@ -533,7 +831,7 @@ function fitCover() {
 function renderPlayer() {
   const show = !!media;
   player.hidden = !show;
-  idleInfo.hidden = show || acts.length > 0;
+  idleInfo.hidden = show || acts.length > 0 || !sportSlot.hidden;
   if (!media) return;
   q(".title", player).textContent = media.title;
   const app = appName(media.source);
@@ -682,6 +980,8 @@ function fillRow(row: HTMLElement, a: Activity) {
     const rebuilt = fillCard(row, a, {
       width: bgWidth(),
       onDouble: () => invoke("activity_focus_app", { id: a.id }),
+      // Haze: Doppelklick auf die Zahl blendet das Widget ein/aus (Haze liest das Ereignis aus GET /events)
+      onValueDouble: a.app === "Haze" ? () => { invoke("activity_action", { id: a.id, action: "widget" }).catch(() => {}); } : undefined,
       onChange: () => { const cur = rowAct.get(row); if (cur) fillRow(row, cur); render(false); },
     });
     if (rebuilt) {
@@ -753,6 +1053,7 @@ function fillRow(row: HTMLElement, a: Activity) {
 
 function newRow(id: string) {
   const row = el("div", "act");
+  row.dataset.id = id;
   row.addEventListener("click", () => {
     if (rowAct.get(row)?.open) invoke("activity_open", { id });
   });
@@ -1096,6 +1397,20 @@ async function openMenu(x: number, y: number) {
   };
   add(n > 1 ? `${n} Dateien öffnen` : "Öffnen", ACTIONS.open);
   add("Im Ordner zeigen", ACTIONS.reveal);
+  // iPhone: per LocalSend an ein Geraet in der Naehe, sonst per QR-Code im Browser
+  menu.append(el("div", "ctx-sep"));
+  menu.append(el("div", "ctx-label", "An iPhone senden"));
+  if (!shareState?.on) {
+    add("iPhone-Austausch einschalten …", () => { invoke("open_settings", { tab: "share" }).catch(() => {}); });
+  } else {
+    const files = items.filter((i) => i.kind !== "folder").map((i) => i.path);
+    for (const d of (shareState.devices ?? []).filter((x) => x.recent)) {
+      add(`📱 ${d.alias}`, () => { invoke("share_send", { fp: d.fp, paths: files }).catch((e) => shareError(String(e))); });
+    }
+    add("Per QR-Code (Browser) …", () => {
+      invoke<ShareQr>("share_offer", { paths: files }).then((r) => showQr(r, files.length)).catch((e) => shareError(String(e)));
+    });
+  }
   const targets = await commonTargets(items);
   if (targets.length) {
     menu.append(el("div", "ctx-sep"));
@@ -1189,8 +1504,10 @@ function setView(v: View) {
 }
 
 function render(full = true) {
+  // kleine Notch immer pruefen (baut nur bei Aenderung neu): die Mitte wechselt auch ohne neue Daten
+  renderCompact();
+  renderSport();
   if (full) {
-    renderCompact();
     renderPlayer();
     renderActs();
     renderShelf();
@@ -1210,9 +1527,10 @@ function render(full = true) {
   const side = dock !== "top";
   const s = { ...(side ? SIDE : SIZE)[state] };
   // kompakt: so breit (seitlich: so hoch) wie der Inhalt braucht, mindestens die Grundgroesse
+  // (nur die Mitte belegt: so klein wie die Mitte es zulaesst)
   if (state === "compact" && compactSize) {
-    if (side) s.h = Math.min(Math.floor(innerHeight * 0.8), Math.max(s.h, compactSize));
-    else s.w = Math.min(innerWidth - 2 * EAR - 8, Math.max(s.w, compactSize));
+    if (side) s.h = Math.min(Math.floor(innerHeight * 0.8), midOnly ? compactSize : Math.max(s.h, compactSize));
+    else s.w = Math.min(innerWidth - 2 * EAR - 8, midOnly ? compactSize : Math.max(s.w, compactSize));
   }
   if (state === "expanded") {
     expanded.style.setProperty("--xw", `${s.w}px`);
@@ -1227,6 +1545,7 @@ function render(full = true) {
   notch.style.setProperty("--r", `${s.r}px`);
   notch.style.setProperty("--e", `${e}px`);
   clearTray.hidden = !((side || view === "tray") && shelf.length > 0);
+  shareBtn.hidden = !(side || view === "tray");
 
   // Wo die Form im Fenster liegt -> nur dort faengt das Fenster die Maus
   let rect: Rect =
@@ -1360,11 +1679,26 @@ async function main() {
   settings = normalize(await invoke<unknown>("settings_get").catch(() => null));
   await listen<Spectrum>("spectrum", (e) => { if (!hiddenByFullscreen()) reactor.feed(e.payload); });
   q(".settings-btn").addEventListener("click", () => { invoke("open_settings").catch(() => {}); });
+  // iPhone: Knopf in der Ablage zeigt den QR-Code (aus: Einstellungen oeffnen)
+  shareState = await invoke<ShareState>("share_status").catch(() => null);
+  await listen<ShareState>("share-state", (e) => { shareState = e.payload; render(false); });
+  shareBtn.addEventListener("click", () => {
+    if (!qrPanel.hidden) { closeQr(); return; }
+    if (!shareState?.on) { invoke("open_settings", { tab: "share" }).catch(() => {}); return; }
+    invoke<ShareQr>("share_qr").then((r) => showQr(r)).catch((e) => shareError(String(e)));
+  });
+  q(".sq-x", qrPanel).addEventListener("click", (e) => { e.stopPropagation(); closeQr(); });
+  // Neue Dateien vom iPhone: aufgeklappt gleich die Ablage zeigen
+  await listen<{ files: string[] }>("share-received", (e) => {
+    if (e.payload.files.length && state === "expanded" && view !== "tray") setView("tray");
+    if (!qrPanel.hidden) closeQr();
+  });
 
   const snap = await invoke<{
     media: Media; cover: string | null; activities: Activity[]; shelf: Item[]; clips: Clip[]; fullscreen: boolean; peek?: boolean; hover: boolean;
-    dock: Dock; voice_key: string;
+    dock: Dock; voice_key: string; sport?: SportState;
   }>("snapshot");
+  if (snap.sport) sport = snap.sport;
   dock = snap.dock;
   voiceKey = snap.voice_key;
   micBtn.title = voiceKey ? `Sprachassistent (${voiceKey})` : "Sprachassistent";
@@ -1393,16 +1727,33 @@ async function main() {
   // Sprachassistent: Mikrofon-Knopf, Strg+Alt+Leertaste, Beenden, Schluessel eintragen
   micBtn.addEventListener("click", () => void toggleVoice());
   await listen("voice-toggle", () => void toggleVoice());
-  // Controller: Steuerkreuz links + R3 halten = zuhoeren, loslassen = antworten
+  // Controller: Steuerkreuz links + R3 — nach 250 ms Ladering, nach 1,5 s zuhoeren, loslassen = antworten
+  await listen<number>("voice-arm", (e) => {
+    clearTimeout(armTimer);
+    armMs = e.payload;
+    armUntil = e.payload > 0 ? Date.now() + e.payload : 0;
+    // Sicherheitsnetz: kommt das Ende nicht an, Ring trotzdem wegnehmen
+    if (armUntil) armTimer = window.setTimeout(() => { armUntil = 0; render(); }, e.payload + 1500);
+    render();
+  });
   await listen<boolean>("voice-ptt", async (e) => {
     if (e.payload) {
-      if (!voice.active && !(await invoke<boolean>("voice_ready"))) { showVoice("nokey"); return; }
+      if (!voice.active && !(await invoke<boolean>("voice_ready"))) { padVoice = true; showVoice("nokey"); padVoice = false; return; }
       padVoice = true;
-    }
+    } else if (!padVoice) return;
     void voice.hold(e.payload);
     render();
   });
   await listen<"off" | "compact" | "expanded">("pad", (e) => { padMode = e.payload; render(); });
+
+  // Live-Sport: Spielstaende, neue Meldungen, Ballverlauf des angesehenen Spiels
+  await listen<SportState>("sport", (e) => { sport = e.payload; render(); });
+  await listen<SportNews>("sport-news", (e) => onSportNews(e.payload));
+  await listen<{ key: string; reset: boolean; plays: SportPlay[] }>("sport-plays", (e) => {
+    const p = e.payload;
+    if (p.key !== pitch.matchKey) return;
+    if (p.reset) pitch.reset(p.plays); else pitch.add(p.plays);
+  });
   q(".v-stop").addEventListener("click", () => { voice.stop(); showVoice("off"); });
   q(".v-setup").addEventListener("click", () => { invoke("voice_setup"); showVoice("off"); });
 
@@ -1462,7 +1813,7 @@ async function main() {
   filesEl.addEventListener("click", (e) => { if (e.target === filesEl) { sel.clear(); applySel(); } });
 
   // Die Form selbst (nicht Knoepfe/Regler/Dateien) mit gedrueckter Maus ziehen -> an eine andere Kante andocken
-  const INTERACTIVE = "button, .slider, .file, .files, .file-bar, .ctx, .act, .wheel, .timer-pick, .clips, .drop";
+  const INTERACTIVE = "button, .slider, .file, .files, .file-bar, .ctx, .act, .wheel, .timer-pick, .clips, .drop, .share-qr, .sport, .sp-news";
   q(".shape").addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || (e.target as Element).closest(INTERACTIVE)) return;
     const x0 = e.clientX, y0 = e.clientY;
@@ -1479,6 +1830,9 @@ async function main() {
 
   let bgTick = 0;
   setInterval(() => {
+    tickWatch();
+    // Konferenz: mehrere laufende Spiele wechseln sich in der Mitte alle 8 s ab
+    if (bgTick % 16 === 0 && centerCandidates().length > 1) { rotate++; render(false); }
     if (state === "expanded") { tickProgress(); tickClock(); tickAges(); }
     // Verlaufs-Eintraege altern auch ohne neue Meldung: "vor X Min", grau ab 12 Min (alle 10 s pruefen)
     if (++bgTick % 20 === 0 && acts.some(isBg)) {

@@ -225,11 +225,19 @@ export function build(lead: HTMLElement, trail: HTMLElement, p: Plan, s: Compact
   trail.append(...R);
 }
 
-/** Breite (oben) bzw. Hoehe (seitlich), die der Inhalt braucht */
-export function needed(lead: HTMLElement, trail: HTMLElement, side: boolean, base: number) {
+/**
+ * Breite (oben) bzw. Hoehe (seitlich), die der Inhalt braucht.
+ * `mid`: Element genau in der Mitte (Notch: Ladering, Antwort, Spielstand) — links und rechts
+ * bekommen dann je gleich viel Platz, damit nichts darunter rutscht.
+ */
+export function needed(lead: HTMLElement, trail: HTMLElement, side: boolean, base: number, mid?: HTMLElement) {
   const GAP = 56; // Luft in der Mitte, damit links und rechts als zwei Dinge lesbar bleiben
   const PAD = 22;
-  const n = side ? lead.offsetHeight + trail.offsetHeight + PAD + GAP / 2 : lead.offsetWidth + trail.offsetWidth + PAD + GAP;
+  const sz = (e: HTMLElement) => (side ? e.offsetHeight : e.offsetWidth);
+  const m = mid?.childElementCount ? sz(mid) : 0;
+  const n = m
+    ? 2 * Math.max(sz(lead), sz(trail)) + m + PAD + (lead.childElementCount || trail.childElementCount ? 2 * 14 : 24)
+    : side ? lead.offsetHeight + trail.offsetHeight + PAD + GAP / 2 : lead.offsetWidth + trail.offsetWidth + PAD + GAP;
   // laufender Timer neben anderem Inhalt: die Notch wird sichtbar um sein Stueck groesser
   const t = trail.querySelector<HTMLElement>(".c-timer");
   const extra = t ? (side ? t.offsetHeight : t.offsetWidth) + 14 : 0;

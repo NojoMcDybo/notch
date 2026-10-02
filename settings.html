@@ -24,6 +24,8 @@
       <nav class="settings-tabs" role="tablist" data-tauri-drag-region>
         <button role="tab" data-tab="display">Anzeige</button>
         <button role="tab" data-tab="dock">Andocken</button>
+        <button role="tab" data-tab="sport">Sport</button>
+        <button role="tab" data-tab="share">iPhone</button>
         <button role="tab" data-tab="app">App</button>
       </nav>
 
@@ -74,6 +76,16 @@
             </div>
           </div>
           <div class="dock-options"></div>
+        </div>
+
+        <!-- Live-Sport: Wettbewerbe, Lieblingsteams, Aufklappen (settings.ts -> renderSport) -->
+        <div class="pane" data-pane="sport" hidden>
+          <div class="sport-options"></div>
+        </div>
+
+        <!-- iPhone: Dateien senden und empfangen (LocalSend, Browser) -->
+        <div class="pane" data-pane="share" hidden>
+          <div class="share-options"></div>
         </div>
 
         <!-- App -->

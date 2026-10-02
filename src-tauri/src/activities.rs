@@ -390,6 +390,10 @@ pub fn dismiss_activity(app: AppHandle, id: String) {
     if id == crate::timer::ID {
         crate::timer::action(&app, "stop");
     }
+    // Wegklicken einer Anfrage vom iPhone = ablehnen
+    if id == crate::share::ASK_ID {
+        crate::share::action(&app, &id, "decline");
+    }
     remove(&app, &id);
     push_event(&id, "dismiss");
 }
@@ -422,6 +426,10 @@ pub fn activity_action(app: AppHandle, id: String, action: String) -> Result<(),
     }
     if id == crate::update::ID {
         crate::update::action(&app, &action);
+        return Ok(());
+    }
+    if id.starts_with("notch:share:") {
+        crate::share::action(&app, &id, &action);
         return Ok(());
     }
     let Some(act) = get(&id) else { return Ok(()) };

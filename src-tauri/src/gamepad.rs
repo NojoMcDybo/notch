@@ -3,9 +3,10 @@
 //!
 //!   Steuerkreuz links + RB   Notch klein heraus   } nur im Vollbild mit "Im Vollbild: Am Rand";
 //!   Steuerkreuz links + RT   Notch aufgeklappt    } nochmal = weg, sonst nach 10 s von selbst
-//!   Steuerkreuz links + R3   Sprachassistent: hoert zu, solange gedrueckt (immer)
+//!   Steuerkreuz links + R3   Sprachassistent: nach 1,5 s Halten hoert er zu, solange gedrueckt (immer)
 //!
-//! Schickt "pad" ("off" | "compact" | "expanded") und "voice-ptt" (true/false) an die Notch.
+//! Schickt "pad" ("off" | "compact" | "expanded"), "voice-arm" (ms bis zum Zuhoeren, 0 = abgebrochen)
+//! und "voice-ptt" (true/false) an die Notch.
 
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -18,6 +19,11 @@ use windows::Win32::UI::Input::XboxController::{
 const SHOW_FOR: Duration = Duration::from_secs(10);
 /// ab hier zaehlt der Trigger als gedrueckt (0..255)
 const TRIGGER: u8 = 100;
+/// so lange muss Steuerkreuz links + R3 gehalten werden, bevor der Assistent zuhoert
+/// (ein kurzer Druck im Spiel startet ihn nicht)
+pub const TALK_AFTER: Duration = Duration::from_millis(1500);
+/// ab hier zeigt die Notch den Ladering — ganz kurze Druecke bleiben unsichtbar
+const ARM_AFTER: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -98,10 +104,61 @@ impl Toggle {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Talk {
+    /// Ladering zeigen: noch so viele ms bis zum Zuhoeren (0 = weg)
+    Arm(u64),
+    /// Zuhoeren an/aus
+    Ptt(bool),
+}
+
+/// Halten zum Sprechen mit Vorlauf: erst nach TALK_AFTER geht es los, Loslassen davor bricht ab.
+pub struct TalkGate {
+    since: Option<Instant>,
+    armed: bool,
+    on: bool,
+}
+
+impl TalkGate {
+    pub fn new() -> Self {
+        Self { since: None, armed: false, on: false }
+    }
+
+    pub fn update(&mut self, held: bool, now: Instant) -> Vec<Talk> {
+        let mut out = Vec::new();
+        if !held {
+            if self.armed {
+                out.push(Talk::Arm(0));
+            }
+            if self.on {
+                out.push(Talk::Ptt(false));
+            }
+            *self = Self::new();
+            return out;
+        }
+        let t = now.saturating_duration_since(*self.since.get_or_insert(now));
+        if self.on {
+            return out;
+        }
+        if t >= TALK_AFTER {
+            if self.armed {
+                self.armed = false;
+                out.push(Talk::Arm(0));
+            }
+            self.on = true;
+            out.push(Talk::Ptt(true));
+        } else if t >= ARM_AFTER && !self.armed {
+            self.armed = true;
+            out.push(Talk::Arm((TALK_AFTER - t).as_millis() as u64));
+        }
+        out
+    }
+}
+
 pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
         let mut toggle = Toggle::new();
-        let mut talking = false;
+        let mut talk = TalkGate::new();
         let mut connected = [false; 4];
         let mut last_scan: Option<Instant> = None;
         loop {
@@ -126,10 +183,12 @@ pub fn spawn(app: AppHandle) {
                 }
             }
 
-            // Sprachassistent: Druecken und Loslassen weitergeben
-            if pressed.talk != talking {
-                talking = pressed.talk;
-                let _ = app.emit("voice-ptt", talking);
+            // Sprachassistent: erst nach 1,5 s Halten zuhoeren, Loslassen weitergeben
+            for t in talk.update(pressed.talk, Instant::now()) {
+                let _ = match t {
+                    Talk::Arm(ms) => app.emit("voice-arm", ms),
+                    Talk::Ptt(on) => app.emit("voice-ptt", on),
+                };
             }
 
             // Notch herausholen: nur im Vollbild mit "Am Rand"
@@ -187,5 +246,34 @@ mod tests {
         assert_eq!(t.update(Mode::Off, t0 + Duration::from_millis(300) + SHOW_FOR), Some(Mode::Off), "nach 10 s weg");
         assert_eq!(t.mode(), Mode::Off);
         assert_eq!(t.reset(), None);
+    }
+
+    #[test]
+    fn sprechen_erst_nach_anderthalb_sekunden() {
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let mut g = TalkGate::new();
+        assert!(g.update(true, t0).is_empty(), "kurzer Druck: noch nichts");
+        assert!(g.update(true, ms(100)).is_empty());
+        assert_eq!(g.update(true, ms(300)), vec![Talk::Arm(1200)], "Ladering mit Restzeit");
+        assert!(g.update(true, ms(800)).is_empty(), "Ring nur einmal");
+        assert_eq!(g.update(true, ms(1500)), vec![Talk::Arm(0), Talk::Ptt(true)]);
+        assert!(g.update(true, ms(4000)).is_empty(), "Halten bleibt an");
+        assert_eq!(g.update(false, ms(4100)), vec![Talk::Ptt(false)]);
+    }
+
+    #[test]
+    fn zu_frueh_losgelassen_bricht_ab() {
+        let t0 = Instant::now();
+        let mut g = TalkGate::new();
+        assert!(g.update(true, t0).is_empty());
+        assert!(g.update(false, t0 + Duration::from_millis(120)).is_empty(), "Antippen: gar nichts");
+        g.update(true, t0 + Duration::from_millis(200));
+        assert_eq!(g.update(true, t0 + Duration::from_millis(700)), vec![Talk::Arm(1000)]);
+        assert_eq!(g.update(false, t0 + Duration::from_millis(900)), vec![Talk::Arm(0)], "Ring weg, kein Zuhoeren");
+        // neuer Anlauf zaehlt von vorn
+        g.update(true, t0 + Duration::from_millis(1000));
+        assert!(!g.update(true, t0 + Duration::from_millis(2000)).contains(&Talk::Ptt(true)));
+        assert!(g.update(true, t0 + Duration::from_millis(2500)).contains(&Talk::Ptt(true)));
     }
 }

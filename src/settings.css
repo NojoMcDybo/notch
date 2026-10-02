@@ -186,3 +186,24 @@ input[type="range"] { margin: 0; accent-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* ---------- Sport ---------- */
+.sport-rest.dim { opacity: 0.45; }
+.chip-group { margin-top: 4px; text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px !important; }
+.chips .fav-logo { width: 16px; height: 16px; object-fit: contain; flex: none; }
+.chips button.fav .x { margin-left: 2px; opacity: 0.6; font-size: 14px; line-height: 1; }
+.chips button.fav:hover .x { opacity: 1; }
+.team-pick { display: grid; grid-template-columns: 180px 1fr; gap: 8px; }
+.team-pick .text-input { padding: 10px 12px; font-family: inherit; }
+.team-pick select.text-input { appearance: auto; }
+.team-results { max-height: 210px; overflow-y: auto; }
+.sport-status { color: var(--text) !important; }
+
+/* ---------- iPhone ---------- */
+.share-status { color: var(--text) !important; }
+.qr-box { display: flex; align-items: center; gap: 16px; }
+.qr-box:empty { display: none; }
+.qr-box img.qr { width: 160px; height: 160px; border-radius: 12px; background: #fff; padding: 6px; flex: none; image-rendering: pixelated; }
+.qr-box small { word-break: break-all; }
+.qr-box .error, .field small.error { color: var(--low); }
+.howto ol.steps { margin: 12px 0 8px 18px; padding: 0; display: grid; gap: 10px; font-size: 12px; line-height: 1.6; color: var(--text); }

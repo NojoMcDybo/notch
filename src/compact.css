@@ -71,3 +71,55 @@
 @media (prefers-reduced-motion: reduce) {
   .compact .in, .compact .flash { animation: none; }
 }
+
+/* ---------- Mitte (nur Notch): Ladering, Antwort, Spielstand ---------- */
+.c-mid { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.c-mid:empty { display: none; }
+.c-mid > * { animation: chip-in 0.42s var(--settle, ease-out) both; }
+
+/* Ladering: Steuerkreuz links + R3 wird gehalten, nach 1,5 s hoert der Assistent zu */
+.arm { position: relative; width: 24px; height: 24px; display: grid; place-items: center; }
+.arm-ring { position: absolute; inset: 0; width: 24px; height: 24px; transform: rotate(-90deg); }
+.arm-ring circle { fill: none; stroke-width: 2.2; }
+.arm-ring .t { stroke: rgba(255, 255, 255, 0.14); }
+.arm-ring .p { stroke: #8fa8ff; stroke-linecap: round; stroke-dasharray: 62.84; stroke-dashoffset: 62.84; animation: arm-fill var(--arm, 1250ms) linear forwards; filter: drop-shadow(0 0 3px rgba(120, 150, 255, 0.8)); }
+.arm-mic { width: 12px; height: 12px; fill: #dfe6ff; }
+@keyframes arm-fill { to { stroke-dashoffset: 0; } }
+
+/* Antwort: fuenf Balken in den Farben des Orbs */
+.vmini { display: flex; align-items: center; gap: 3px; height: 18px; padding: 0 2px; filter: drop-shadow(0 0 5px rgba(130, 120, 255, 0.55)); }
+.vmini i { width: 3px; height: 100%; border-radius: 2px; background: linear-gradient(180deg, #d9c8ff, #7f8dff); transform: scaleY(var(--s, 0.2)); transition: transform 70ms linear; }
+.vmini[data-s="thinking"] i, .vmini[data-s="connecting"] i { animation: vmini-think 1.1s ease-in-out infinite; transition: none; }
+.vmini[data-s="thinking"] i:nth-child(2), .vmini[data-s="connecting"] i:nth-child(2) { animation-delay: 0.12s; }
+.vmini[data-s="thinking"] i:nth-child(3), .vmini[data-s="connecting"] i:nth-child(3) { animation-delay: 0.24s; }
+.vmini[data-s="thinking"] i:nth-child(4), .vmini[data-s="connecting"] i:nth-child(4) { animation-delay: 0.36s; }
+.vmini[data-s="thinking"] i:nth-child(5), .vmini[data-s="connecting"] i:nth-child(5) { animation-delay: 0.48s; }
+@keyframes vmini-think { 0%, 100% { transform: scaleY(0.2); opacity: 0.55; } 40% { transform: scaleY(0.75); opacity: 1; } }
+[data-dock="left"] .vmini, [data-dock="right"] .vmini { flex-direction: column; height: auto; width: 18px; }
+[data-dock="left"] .vmini i, [data-dock="right"] .vmini i { width: 100%; height: 3px; transform: scaleX(var(--s, 0.2)); }
+[data-dock="left"] .vmini[data-s="thinking"] i, [data-dock="right"] .vmini[data-s="thinking"] i { animation-name: vmini-think-x; }
+@keyframes vmini-think-x { 0%, 100% { transform: scaleX(0.2); opacity: 0.55; } 40% { transform: scaleX(0.75); opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .c-mid > *, .arm-ring .p, .vmini i { animation: none !important; }
+  .arm-ring .p { stroke-dashoffset: 0; }
+}
+
+/* Spielstand in der Mitte (sport.ts): Kuerzel mit Teamfarbe, Tore, Minute; nach einem Tor leuchtet er kurz */
+.sm { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sm-t { font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; padding-bottom: 1px; }
+.sm-t.h { box-shadow: inset 0 -2px 0 var(--hc); }
+.sm-t.a { box-shadow: inset 0 -2px 0 var(--ac); }
+.sm-s { font-size: 14px; font-weight: 700; min-width: 2.3em; text-align: center; }
+.sm.pre .sm-s { color: var(--fg2); min-width: 1em; }
+.sm-c { font-size: 10.5px; color: var(--fg2); font-weight: 500; display: flex; align-items: center; gap: 4px; }
+.sm.in .sm-c::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #ff453a; animation: live-dot 1.6s ease-in-out infinite; }
+@keyframes live-dot { 50% { opacity: 0.25; } }
+.sm.hot { animation: sm-hot 1.1s var(--spring, ease-out) 3; }
+.sm.hot .sm-s { color: var(--hot); text-shadow: 0 0 12px var(--hot); }
+@keyframes sm-hot { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.14); } }
+[data-dock="left"] .sm, [data-dock="right"] .sm { flex-direction: column; height: auto; gap: 3px; }
+[data-dock="left"] .sm-s, [data-dock="right"] .sm-s { font-size: 13px; min-width: 0; }
+[data-dock="left"] .sm-t, [data-dock="right"] .sm-t { font-size: 10px; }
+[data-dock="left"] .sm-c, [data-dock="right"] .sm-c { font-size: 9px; flex-direction: column; gap: 2px; }
+@media (prefers-reduced-motion: reduce) { .sm.hot, .sm.in .sm-c::before { animation: none; } }

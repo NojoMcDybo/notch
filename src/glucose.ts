@@ -1,6 +1,7 @@
 /**
  * Verlaufs-Activities (Blutzucker aus Haze): Wert + Trendpfeil + Aenderung, Graph mit Zielbereich,
- * Zeitbereiche 3/6/12/24 Std., Punkt antippen = Zeit und Wert, Doppelklick = App nach vorn.
+ * Zeitbereiche 3/6/12/24 Std., Punkt antippen = Zeit und Wert, Doppelklick auf den Graphen = App nach vorn,
+ * Doppelklick auf den Wert = Widget der App ein/aus (Ereignis "widget").
  *
  * Grundregel: alte Werte duerfen nie wie aktuelle aussehen. Ab STALE_MS ohne neuen Messwert wird
  * alles grau, Pfeil und Aenderung verschwinden, dafuer steht "vor X Min" da. Laeuft die ttl ab,
@@ -93,7 +94,7 @@ export function bgOutOfRange(a: BgActivity) {
 const ui = new Map<string, { range?: number; sel?: number }>();
 let pendingClick = 0;
 
-export type BgOpts = { width: number; onDouble: () => void; onChange: () => void };
+export type BgOpts = { width: number; onDouble: () => void; onChange: () => void; onValueDouble?: () => void };
 
 /** Baut die Karte in `row` (nur wenn sich etwas Sichtbares geaendert hat). Das ×-Element bleibt Sache von main. */
 export function fillCard(row: HTMLElement, a: BgActivity, o: BgOpts) {
@@ -124,6 +125,17 @@ export function fillCard(row: HTMLElement, a: BgActivity, o: BgOpts) {
   meta.textContent = s.expired
     ? `keine Daten · letzter Wert ${agoText(s.mins)}`
     : `${a.unit ?? "mg/dL"} · ${agoText(s.mins)}${s.stale ? " · veraltet" : ""}`;
+  if (o.onValueDouble) {
+    // Doppelklick auf den Wert: Widget der App ein/aus. Einzelklick tut hier nichts (oeffnet nicht die App).
+    line.classList.add("toggle");
+    line.title = `Doppelklick: ${a.app || "App"}-Widget ein/aus`;
+    line.addEventListener("click", (e) => e.stopPropagation());
+    line.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      line.classList.remove("ping"); void line.offsetWidth; line.classList.add("ping");
+      o.onValueDouble?.();
+    });
+  }
   left.append(mk("div", "bg-title", a.title), line, meta);
   const pills = mk("div", "bg-pills");
   for (const r of ranges) {

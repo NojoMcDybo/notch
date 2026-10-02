@@ -35,6 +35,41 @@ export type CompactSettings = {
   /** Vollbild-Programm vorn: hide = weg; peek = weg, Maus an die Kante holt sie kurz raus;
    *  show = bleibt sichtbar, aber durchklickbar (Klicks gehen ans Programm) */
   fullscreen: { mode: FullscreenMode };
+  /** Live-Sport (sport.rs): Wettbewerbe, Lieblingsteams, wann die Notch aufklappt */
+  sport: SportSettings;
+  /** iPhone-Austausch (share.rs): LocalSend + Browser-Seite im WLAN */
+  share: ShareSettings;
+};
+
+export type ShareSettings = {
+  /** aus, bis man es einschaltet: dann lauscht die Notch im lokalen Netz (Port 53317) */
+  on: boolean;
+  /** Name, unter dem die Notch in LocalSend erscheint (leer = „Notch · PC-Name“) */
+  name: string;
+  /** Zielordner (leer = Downloads\Notch) */
+  folder: string;
+  /** Geraete, deren Sendungen ohne Nachfrage angenommen werden */
+  trusted: { fp: string; alias: string }[];
+};
+
+export type SportExpand = "off" | "goals" | "important" | "all";
+export const SPORT_EXPAND: SportExpand[] = ["off", "goals", "important", "all"];
+export type SportTeam = { key: string; name: string; logo?: string };
+export type SportSettings = {
+  on: boolean;
+  /** Wettbewerbe (ids aus sport.rs, z. B. "bl1", "dfbteam") */
+  leagues: string[];
+  teams: SportTeam[];
+  /** all = alle Spiele der Wettbewerbe, fav = nur Spiele der Lieblingsteams */
+  scope: "all" | "fav";
+  /** bei welchen Meldungen die Notch kurz aufklappt (Tore / Wichtiges / alles / nie) */
+  expand: SportExpand;
+  /** Spielstand in der Mitte der kleinen Notch */
+  center: boolean;
+  /** Ballverlauf auf dem Spielfeld (laedt beim Ansehen jede Ballaktion nach) */
+  pitch: boolean;
+  /** im Vollbild bei einem Tor kurz den Spielstand zeigen (nicht bei „Ausblenden“) */
+  fullscreen: boolean;
 };
 
 export type MusicReact = "off" | "auto" | "manual";
@@ -58,6 +93,8 @@ export const DEFAULTS: CompactSettings = {
   pulse: { boost: true, threshold: 140 },
   folio: { flash: true, flashSec: 2 },
   fullscreen: { mode: "hide" },
+  sport: { on: true, leagues: ["bl1", "dfbteam"], teams: [], scope: "all", expand: "goals", center: true, pitch: true, fullscreen: true },
+  share: { on: false, name: "", folder: "", trusted: [] },
 };
 
 /** Puls faellt erst so viele bpm unter der Schwelle wieder zurueck (kein Hin- und Herspringen) */
@@ -78,7 +115,7 @@ export function normalize(raw: unknown): CompactSettings {
   const uniq = [...new Set(order)];
   // neue Quellen (spaetere Versionen) an ihrer Standardstelle einfuegen
   for (const id of DEFAULTS.order) if (!uniq.includes(id)) uniq.splice(Math.min(DEFAULTS.order.indexOf(id), uniq.length), 0, id);
-  const g = obj(r.glucose), m = obj(r.music), t = obj(r.timer), p = obj(r.pulse), f = obj(r.folio), fs = obj(r.fullscreen);
+  const g = obj(r.glucose), m = obj(r.music), t = obj(r.timer), p = obj(r.pulse), f = obj(r.folio), fs = obj(r.fullscreen), sp = obj(r.sport), sh = obj(r.share);
   return {
     v: 1,
     order: uniq,
@@ -96,6 +133,35 @@ export function normalize(raw: unknown): CompactSettings {
     pulse: { boost: bool(p.boost, DEFAULTS.pulse.boost), threshold: Math.round(num(p.threshold, 60, 220, DEFAULTS.pulse.threshold)) },
     folio: { flash: bool(f.flash, DEFAULTS.folio.flash), flashSec: num(f.flashSec, 0.5, 8, DEFAULTS.folio.flashSec) },
     fullscreen: { mode: FULLSCREEN_MODES.includes(fs.mode as FullscreenMode) ? (fs.mode as FullscreenMode) : DEFAULTS.fullscreen.mode },
+    sport: sport(sp),
+    share: {
+      on: bool(sh.on, DEFAULTS.share.on),
+      name: typeof sh.name === "string" ? sh.name.slice(0, 40) : "",
+      folder: typeof sh.folder === "string" ? sh.folder.slice(0, 260) : "",
+      trusted: (Array.isArray(sh.trusted) ? sh.trusted : []).map(obj)
+        .filter((t) => typeof t.fp === "string" && t.fp)
+        .map((t) => ({ fp: String(t.fp).slice(0, 80), alias: typeof t.alias === "string" ? t.alias.slice(0, 40) : "Gerät" }))
+        .slice(0, 20),
+    },
+  };
+}
+
+function sport(sp: Record<string, unknown>): SportSettings {
+  const d = DEFAULTS.sport;
+  const id = (x: unknown) => typeof x === "string" && /^[a-z0-9]{2,12}$/.test(x);
+  const teams = (Array.isArray(sp.teams) ? sp.teams : [])
+    .map(obj)
+    .filter((t) => typeof t.key === "string" && t.key && typeof t.name === "string")
+    .map((t) => ({ key: String(t.key).slice(0, 40), name: String(t.name).slice(0, 60), ...(typeof t.logo === "string" ? { logo: t.logo.slice(0, 300) } : {}) }));
+  return {
+    on: bool(sp.on, d.on),
+    leagues: Array.isArray(sp.leagues) ? [...new Set(sp.leagues.filter(id) as string[])] : [...d.leagues],
+    teams: teams.filter((t, i) => teams.findIndex((x) => x.key === t.key) === i).slice(0, 20),
+    scope: sp.scope === "fav" ? "fav" : "all",
+    expand: SPORT_EXPAND.includes(sp.expand as SportExpand) ? (sp.expand as SportExpand) : d.expand,
+    center: bool(sp.center, d.center),
+    pitch: bool(sp.pitch, d.pitch),
+    fullscreen: bool(sp.fullscreen, d.fullscreen),
   };
 }
 
