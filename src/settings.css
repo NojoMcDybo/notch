@@ -44,7 +44,9 @@ code { font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; color
 
 /* ---------- Fenster wie das Haze-Panel ---------- */
 .settings-panel { height: 100%; display: flex; flex-direction: column; background: var(--bg); }
-.panel-head { display: flex; align-items: center; justify-content: space-between; padding: 32px 30px 24px; }
+/* ohne Windows-Titelleiste: der Kopf ist die Zieh-Fläche (data-tauri-drag-region) */
+.panel-head { display: flex; align-items: center; justify-content: space-between; padding: 24px 24px 20px 30px; cursor: default; }
+.notch-preview { margin-top: 2px; }
 .panel-head h2 { font-size: 28px; margin-top: 8px; }
 .icon-button { display: grid; place-items: center; border: 1px solid var(--border); width: 38px; height: 38px; border-radius: 12px; color: var(--muted); }
 .icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
@@ -141,7 +143,7 @@ input[type="range"] { margin: 0; accent-color: var(--accent); }
 .chips button[aria-pressed="true"] { background: var(--primary); color: var(--primary-text); }
 
 /* ---------- Rangliste: jede Quelle eine Gruppe wie in Haze ---------- */
-.rank { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; position: relative; }
+.rank { color: var(--text); font-size: 13px; list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; position: relative; }
 .row { position: relative; margin: 0; transition: transform 0.22s var(--settle), box-shadow 0.2s, opacity 0.2s; }
 .rank.sorting .row { transition: transform 0.22s var(--settle); }
 .rank.sorting .row.dragging { transition: none; z-index: 5; box-shadow: 0 16px 50px #0006; border-color: var(--muted); }

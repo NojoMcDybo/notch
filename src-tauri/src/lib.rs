@@ -193,7 +193,11 @@ fn show_settings(app: &AppHandle) -> tauri::Result<()> {
         .center()
         .resizable(true)
         .maximizable(false)
-        .background_color(tauri::window::Color(24, 24, 26, 255))
+        // keine Windows-Titelleiste: Schließen-Knopf und Ziehen übernimmt der Kopf der Seite
+        // (data-tauri-drag-region); shadow gibt unter Windows 11 Schatten + runde Ecken zurück
+        .decorations(false)
+        .shadow(true)
+        .background_color(tauri::window::Color(14, 20, 20, 255))
         .additional_browser_args(
             "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required",
         )

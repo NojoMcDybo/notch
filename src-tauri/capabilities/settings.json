@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
-  "description": "Einstellungsfenster: darf sich selbst schliessen (Knopf oben rechts / Esc)",
+  "description": "Einstellungsfenster ohne Titelleiste: sich selbst schliessen und am Kopf ziehen",
   "windows": ["settings"],
-  "permissions": ["core:window:allow-close"]
+  "permissions": ["core:window:allow-close", "core:window:allow-start-dragging"]
 }

@@ -9,18 +9,19 @@
     <script type="module" src="/src/settings.ts" defer></script>
   </head>
   <body>
-    <!-- Aufbau wie das Einstellungsfenster von Haze: Eyebrow + Titel, Reiter, Gruppen -->
+    <!-- Aufbau wie das Einstellungsfenster von Haze. Keine Windows-Titelleiste:
+         der Kopf ist die Zieh-Fläche, Schließen oben rechts. -->
     <section class="settings-panel" aria-label="Einstellungen">
-      <div class="panel-head">
-        <div>
-          <div class="eyebrow">DEINE NOTCH</div>
-          <h2>Einstellungen</h2>
+      <div class="panel-head" data-tauri-drag-region>
+        <div data-tauri-drag-region>
+          <div class="eyebrow" data-tauri-drag-region>DEINE NOTCH</div>
+          <h2 data-tauri-drag-region>Einstellungen</h2>
         </div>
         <button class="icon-button close" aria-label="Schließen" title="Schließen (Esc)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
         </button>
       </div>
-      <nav class="settings-tabs" role="tablist">
+      <nav class="settings-tabs" role="tablist" data-tauri-drag-region>
         <button role="tab" data-tab="display">Anzeige</button>
         <button role="tab" data-tab="dock">Andocken</button>
         <button role="tab" data-tab="app">App</button>
@@ -29,9 +30,6 @@
       <div class="panel-body">
         <!-- Anzeige: kleine Notch + Rangliste -->
         <div class="pane" data-pane="display">
-          <h3>Das Wichtigste zuerst.</h3>
-          <p class="muted">Was die Notch zeigt, wenn sie zu ist. Änderungen gelten sofort.</p>
-
           <div class="notch-preview stage" data-dock="top">
             <div class="pv-notch"><div class="compact"><div class="c-lead"></div><div class="c-trail"></div></div></div>
             <div class="pv-empty">Gerade nichts zu zeigen</div>
@@ -42,10 +40,9 @@
               <button data-mode="demo">Ausprobieren</button>
             </div>
           </div>
-          <p class="fine tight pv-note"></p>
 
           <details class="settings-group demo" open>
-            <summary><span>Ausprobieren</span><small>Beispielwerte, ändern nichts</small></summary>
+            <summary><span>Ausprobieren</span></summary>
             <div class="group-body">
               <div class="field">Was gerade läuft<div class="chips demo-chips"></div></div>
               <label class="field"><span class="d-bpm-label"></span><input type="range" class="d-bpm" min="60" max="200" step="1" value="96" aria-label="Puls" /></label>
@@ -59,29 +56,23 @@
               <button data-slots="1">Eins</button>
               <button data-slots="2">Zwei</button>
             </div>
-            <small class="slots-hint"></small>
           </div>
 
-          <div class="divider"></div>
-          <h3>Rangliste</h3>
-          <p class="muted">Oben gewinnt. Am Griff <span class="kbd">⠿</span> ziehen oder den Griff anklicken und mit <span class="kbd">↑</span> <span class="kbd">↓</span> verschieben. Der Schalter blendet etwas aus der kleinen Notch aus – aufgeklappt bleibt es da.</p>
-          <ol class="rank" aria-label="Rangliste"></ol>
+          <div class="field rank-field">Rangliste
+            <ol class="rank" aria-label="Rangliste"></ol>
+          </div>
           <p class="fine"><button class="link-button reset">Auf Standard zurücksetzen</button></p>
         </div>
 
         <!-- Andocken -->
         <div class="pane" data-pane="dock" hidden>
-          <h3>Wo die Notch sitzt.</h3>
-          <p class="muted">Oder die Notch mit gedrückter Maus an eine Kante ziehen.</p>
           <div class="field" role="group" aria-label="Kante">Kante
             <div class="segmented compact">
               <button data-dock="top">Oben</button>
               <button data-dock="left">Links</button>
               <button data-dock="right">Rechts</button>
             </div>
-            <small>Seitlich ist sie eine senkrechte Pille und zeigt aufgeklappt alles auf einmal.</small>
           </div>
-          <p class="fine">Nur auf dem Hauptmonitor. Bei Vollbild-Programmen fährt die Notch aus dem Bild.</p>
         </div>
 
         <!-- App -->
@@ -92,13 +83,8 @@
               <h3 class="app-version">Version</h3>
             </div>
           </div>
-          <h3 class="sub">Sprachassistent</h3>
-          <div class="field">Tastenkürzel<div class="value-box voice-key">–</div><small>Nochmal drücken legt auf. Nach 40 s Stille legt er selbst auf.</small></div>
+          <div class="field">Sprachassistent · Tastenkürzel<div class="value-box voice-key">–</div></div>
           <button class="button secondary full voice-setup">OpenAI-Schlüssel eintragen</button>
-          <p class="fine">Der Schlüssel bleibt auf diesem PC und wird nur in der Notch-App benutzt.</p>
-          <div class="divider"></div>
-          <h3 class="sub">Eigene Apps</h3>
-          <p class="fine tight">Apps schicken Live Activities an <code>127.0.0.1:47800</code>. Blutzucker (Haze), Puls (Helio) und Folio erkennt die Rangliste automatisch, alles andere landet unter „Andere Apps“.</p>
         </div>
       </div>
     </section>

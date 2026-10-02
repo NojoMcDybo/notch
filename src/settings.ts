@@ -10,7 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { build, bpmOf, needed, plan, planKey, PulseGate, sourceOf, TIMER_ID, type CAct, type Plan } from "./compact";
-import { clone, DEFAULTS, normalize, PULSE_HYST, SOURCES, type CompactSettings, type SourceId } from "./settings-model";
+import { clone, DEFAULTS, normalize, SOURCES, type CompactSettings, type SourceId } from "./settings-model";
 
 const q = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector(s) as T;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) {
@@ -149,12 +149,6 @@ function renderPreview(c: ReturnType<typeof current>) {
   for (const img of pvNotch.querySelectorAll("img")) if (!img.complete) img.addEventListener("load", fit, { once: true });
 }
 
-function renderNote(c: ReturnType<typeof current>) {
-  const note = q(".pv-note");
-  if (mode === "demo") { note.textContent = "Schalte an, was gerade laufen soll."; return; }
-  const names = [...c.plan.active].map((id) => SOURCES[id].name);
-  note.textContent = names.length ? `Gerade aktiv: ${names.join(", ")}` : "Gerade läuft nichts – „Ausprobieren“ zeigt, wie es aussähe.";
-}
 
 // ---------- Zeilen: Status und Markierungen ----------
 
@@ -203,7 +197,6 @@ function updateRows(c: ReturnType<typeof current>) {
 function refresh() {
   const c = current();
   renderPreview(c);
-  renderNote(c);
   updateRows(c);
 }
 
@@ -226,11 +219,10 @@ function switchEl(checked: boolean, label: string, onChange: (on: boolean) => vo
   return l;
 }
 
-/** Haze-Toggle-Zeile: Text links, kleine Erklärung darunter, Schalter rechts */
-function optToggle(label: string, sub: string, get: () => boolean, set: (v: boolean) => void) {
+/** Haze-Toggle-Zeile: Text links, Schalter rechts */
+function optToggle(label: string, get: () => boolean, set: (v: boolean) => void) {
   const row = el("label", "toggle-row");
   const text = el("span", "", label);
-  text.append(el("small", "", sub));
   const inp = el("input");
   inp.type = "checkbox";
   inp.checked = get();
@@ -280,31 +272,25 @@ const secs = (v: number) => (v === 0 ? "sofort weg" : `${String(v).replace(".", 
 function extras(id: SourceId): HTMLElement[] {
   switch (id) {
     case "glucose": return [
-      optToggle("Außerhalb des Zielbereichs ganz nach oben", "Zu niedrig oder zu hoch schlägt alles andere – auch hohen Puls.",
-        () => s.glucose.outOfRangeTop, (v) => { s.glucose.outOfRangeTop = v; }),
-      optToggle("Änderung anzeigen", "Die Zahl neben dem Pfeil, z. B. +3.", () => s.glucose.delta, (v) => { s.glucose.delta = v; }),
+      optToggle("Außerhalb des Zielbereichs ganz nach oben", () => s.glucose.outOfRangeTop, (v) => { s.glucose.outOfRangeTop = v; }),
+      optToggle("Änderung anzeigen", () => s.glucose.delta, (v) => { s.glucose.delta = v; }),
     ];
     case "music": return [
-      optToggle("Pegel neben das Cover", "Steht rechts etwas anderes, wandern die Balken nach links statt zu verschwinden.",
-        () => s.music.eqBesideCover, (v) => { s.music.eqBesideCover = v; }),
+      optToggle("Pegel neben das Cover statt ausblenden", () => s.music.eqBesideCover, (v) => { s.music.eqBesideCover = v; }),
       optRange("Nach Pause noch zeigen", 0, 120, 5, DEFAULTS.music.lingerSec, secs, () => s.music.lingerSec, (v) => { s.music.lingerSec = v; }),
     ];
     case "timer": return [
-      optToggle("Notch verbreitern, solange ein Timer läuft", "Der Timer hängt sich rechts an und verdrängt nichts. Aus: Er reiht sich hier in die Rangliste ein.",
-        () => s.timer.expand, (v) => { s.timer.expand = v; }),
+      optToggle("Notch verbreitern statt Platz nehmen", () => s.timer.expand, (v) => { s.timer.expand = v; }),
     ];
     case "pulse": return [
-      optToggle("Bei hohem Puls nach oben rücken", "Ab der Schwelle steht der Puls ganz oben – nur Blutzucker außerhalb des Bereichs bleibt davor.",
-        () => s.pulse.boost, (v) => { s.pulse.boost = v; }),
-      optRange("Ab", 90, 200, 5, DEFAULTS.pulse.threshold, (v) => `${v} bpm`, () => s.pulse.threshold, (v) => { s.pulse.threshold = v; },
-        () => s.pulse.boost, () => `Unter ${s.pulse.threshold - PULSE_HYST} bpm geht er zurück auf Platz ${s.order.indexOf("pulse") + 1}.`),
+      optToggle("Bei hohem Puls nach oben", () => s.pulse.boost, (v) => { s.pulse.boost = v; }),
+      optRange("Ab", 90, 200, 5, DEFAULTS.pulse.threshold, (v) => `${v} bpm`, () => s.pulse.threshold, (v) => { s.pulse.threshold = v; }, () => s.pulse.boost),
     ];
     case "folio": return [
-      optToggle("Seitenzahl beim Blättern einblenden", "Liegt etwas anderes oben, übernimmt die Seitenzahl kurz den letzten Platz.",
-        () => s.folio.flash, (v) => { s.folio.flash = v; }),
+      optToggle("Seitenzahl beim Blättern einblenden", () => s.folio.flash, (v) => { s.folio.flash = v; }),
       optRange("Wie lange", 1, 5, 0.5, DEFAULTS.folio.flashSec, secs, () => s.folio.flashSec, (v) => { s.folio.flashSec = v; }, () => s.folio.flash),
     ];
-    case "other": return [el("p", "note", "Apps, die eine Live Activity schicken (z. B. Umwandlungen). Untereinander entscheidet die Priorität, die die App selbst mitschickt.")];
+    case "other": return [];
   }
 }
 
@@ -347,7 +333,10 @@ function rowEl(id: SourceId, i: number) {
   const ex = el("div", "extras");
   const exIn = el("div", "extras-in");
   const pad = el("div", "extras-pad");
-  pad.append(...extras(id));
+  const items = extras(id);
+  pad.append(...items);
+  // ohne Extras (Andere Apps) gibt es nichts aufzuklappen
+  more.style.visibility = items.length ? "" : "hidden";
   exIn.append(pad);
   ex.append(exIn);
   // eingeklappt nicht per Tab erreichbar
@@ -355,6 +344,7 @@ function rowEl(id: SourceId, i: number) {
   row.append(main, ex);
 
   const toggle = () => {
+    if (!items.length) return;
     const on = !open.has(id);
     if (on) open.add(id); else open.delete(id);
     row.classList.toggle("open", on);
@@ -474,9 +464,6 @@ function syncSegs() {
   setSeg("[data-slots]", (b) => Number(b.dataset.slots) === s.slots);
   setSeg("[data-mode]", (b) => b.dataset.mode === mode);
   setSeg("button[data-dock]", (b) => b.dataset.dock === dock);
-  q(".slots-hint").textContent = s.slots === 2
-    ? "Zwei Dinge nebeneinander – z. B. das Cover links und der Blutzucker rechts."
-    : "Nur das Wichtigste. Ruhiger, dafür steht immer nur eine Sache da.";
   q(".demo").hidden = mode !== "demo";
 }
 
