@@ -84,7 +84,15 @@
             </div>
           </div>
           <div class="field">Sprachassistent · Tastenkürzel<div class="value-box voice-key">–</div></div>
-          <button class="button secondary full voice-setup">OpenAI-Schlüssel eintragen</button>
+          <label class="field">OpenAI-API-Schlüssel
+            <input class="text-input key-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
+            <small class="key-status" role="status">–</small>
+          </label>
+          <div class="button-row">
+            <button class="button secondary key-save">Prüfen &amp; speichern</button>
+            <button class="button secondary key-remove" hidden>Entfernen</button>
+          </div>
+          <p class="fine">Der Schlüssel wird bei OpenAI geprüft und mit Windows verschlüsselt nur auf diesem PC gespeichert. Die Notch zeigt ihn danach nie wieder vollständig an. Schlüssel anlegen: platform.openai.com › API keys.</p>
         </div>
       </div>
     </section>

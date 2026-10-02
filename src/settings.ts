@@ -558,7 +558,11 @@ async function main() {
   document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab!)));
   let startTab = "display";
   try { startTab = localStorage.getItem("settings-tab") || "display"; } catch { /* egal */ }
+  // settings.html#app: aus der Notch geoeffnet, um den OpenAI-Schluessel einzutragen
+  if (location.hash.length > 1) startTab = location.hash.slice(1);
   setTab(q(`[data-pane="${startTab}"]`) ? startTab : "display");
+  (window as any).notchTab = (t: string) => { if (q(`[data-pane="${t}"]`)) setTab(t); if (t === "app") q<HTMLInputElement>(".key-input").focus(); };
+  if (startTab === "app") q<HTMLInputElement>(".key-input").focus();
 
   // Andocken: gleiche Befehle wie Tray und Ziehen
   dock = snap?.dock ?? "top";
@@ -569,7 +573,40 @@ async function main() {
   // App
   getVersion().then((v) => { q(".app-version").textContent = `Version ${v}`; }).catch(() => {});
   q(".voice-key").textContent = snap?.voice_key || "kein freies Kürzel gefunden";
-  q(".voice-setup").addEventListener("click", () => { invoke("voice_setup").catch(() => {}); });
+  // OpenAI-Schluessel: wird nur hingeschickt (Rust prueft und verschluesselt), nie zurueckgelesen
+  type KeyStatus = { source: "env" | "app" | "none"; hint: string | null };
+  const keyInput = q<HTMLInputElement>(".key-input"), keyStatus = q(".key-status");
+  const keySave = q<HTMLButtonElement>(".key-save"), keyRemove = q<HTMLButtonElement>(".key-remove");
+  const showKey = (st: KeyStatus, msg?: string, error = false) => {
+    keyStatus.textContent = msg ?? (st.source === "env" ? `Aus der Umgebungsvariable OPENAI_API_KEY (${st.hint}) – hat Vorrang.`
+      : st.source === "app" ? `Gespeichert: ${st.hint}` : "Noch kein Schlüssel hinterlegt.");
+    keyStatus.classList.toggle("error", error);
+    keyRemove.hidden = st.source !== "app";
+  };
+  let keyState: KeyStatus = { source: "none", hint: null };
+  invoke<KeyStatus>("voice_key_status").then((st) => { keyState = st; showKey(st); }).catch(() => {});
+  const saveKey = async () => {
+    if (!keyInput.value.trim()) { keyInput.focus(); return; }
+    keySave.disabled = true;
+    showKey(keyState, "Wird bei OpenAI geprüft …");
+    try {
+      keyState = await invoke<KeyStatus>("voice_key_save", { key: keyInput.value });
+      keyInput.value = "";
+      showKey(keyState, `Gespeichert: ${keyState.hint} – der Sprachassistent ist bereit.`);
+      announce("OpenAI-Schlüssel gespeichert");
+    } catch (e) {
+      showKey(keyState, String(e), true);
+    } finally {
+      keySave.disabled = false;
+    }
+  };
+  keySave.addEventListener("click", () => void saveKey());
+  keyInput.addEventListener("keydown", (e) => { if (e.key === "Enter") void saveKey(); });
+  keyRemove.addEventListener("click", async () => {
+    keyState = await invoke<KeyStatus>("voice_key_remove");
+    showKey(keyState, keyState.source === "env" ? undefined : "Schlüssel entfernt.");
+    announce("OpenAI-Schlüssel entfernt");
+  });
 
   // Schließen wie in Haze: Knopf oben rechts oder Esc
   const close = () => { getCurrentWindow().close().catch(() => {}); };

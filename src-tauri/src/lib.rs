@@ -175,19 +175,28 @@ async fn open_settings(app: AppHandle) -> Result<(), String> {
     // Klick kam aus der Notch: Polling soll den Fokus nicht ans vorige Programm zurueckgeben,
     // waehrend das neue Fenster nach vorn kommt
     FOCUS_HOLD.store(activities::now_ms() + 1500, Ordering::Relaxed);
-    show_settings(&app).map_err(|e| e.to_string())
+    show_settings(&app, None).map_err(|e| e.to_string())
 }
 
-fn show_settings(app: &AppHandle) -> tauri::Result<()> {
+/// `tab`: Reiter, der vorn sein soll (z. B. "app" fuer den OpenAI-Schluessel)
+pub(crate) fn show_settings(app: &AppHandle, tab: Option<&str>) -> tauri::Result<()> {
+    let tab = tab.filter(|t| t.chars().all(|c| c.is_ascii_alphanumeric()));
     if let Some(w) = app.get_webview_window("settings") {
+        if let Some(t) = tab {
+            let _ = w.eval(format!("window.notchTab && window.notchTab('{t}')"));
+        }
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
         return Ok(());
     }
+    let url = match tab {
+        Some(t) => format!("settings.html#{t}"),
+        None => "settings.html".into(),
+    };
     // gleiche Browser-Argumente wie das Notch-Fenster — sonst lehnt WebView2 die zweite
     // Umgebung ab (alle Fenster teilen sich einen Datenordner)
-    let w = tauri::WebviewWindowBuilder::new(app, "settings", tauri::WebviewUrl::App("settings.html".into()))
+    let w = tauri::WebviewWindowBuilder::new(app, "settings", tauri::WebviewUrl::App(url.into()))
         .title("Notch – Einstellungen")
         .inner_size(560.0, 780.0)
         .min_inner_size(460.0, 560.0)
@@ -378,6 +387,9 @@ pub fn run() {
             voice::voice_ready,
             voice::voice_setup,
             voice::voice_token,
+            voice::voice_key_status,
+            voice::voice_key_save,
+            voice::voice_key_remove,
             media::media_control,
             media::media_seek,
             media::media_focus,
@@ -456,7 +468,7 @@ pub fn run() {
                         // nicht direkt im Menue-Handler bauen (WebView2 haengt sonst, wry#583)
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
-                            let _ = show_settings(&app);
+                            let _ = show_settings(&app, None);
                         });
                     } else if id == "updates" {
                         let app = app.clone();

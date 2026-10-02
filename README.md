@@ -47,7 +47,7 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (erstes
 
 - Modell `gpt-realtime-2.1`, Stimme `marin`, Sprache rein/raus über WebRTC direkt zu OpenAI
 - Der API-Schlüssel bleibt in Rust (`src-tauri/src/voice.rs`); das Frontend bekommt nur einen kurzlebigen Sitzungsschlüssel
-- Schlüssel: Umgebungsvariable `OPENAI_API_KEY` oder Datei `%APPDATA%\de.nojo.notch\openai-key.txt` (eine Zeile `sk-…`). Ohne Schlüssel zeigt die Notch „Schlüssel eintragen“ und öffnet die Datei im Editor.
+- Schlüssel: in **Einstellungen › App** eintragen. Die Notch prüft ihn bei OpenAI und speichert ihn mit Windows (DPAPI, nur dieses Benutzerkonto) verschlüsselt in `%APPDATA%\de.nojo.notch\openai-key.bin`; angezeigt wird danach nur `sk-…` plus die letzten vier Zeichen. Ohne Schlüssel zeigt die Notch „Schlüssel eintragen“ und öffnet genau diese Einstellung. Die Umgebungsvariable `OPENAI_API_KEY` hat Vorrang; eine alte Klartextdatei `openai-key.txt` wird beim ersten Start übernommen und gelöscht.
 - Werkzeuge des Assistenten: Musik steuern, Lautstärke, Timer starten/stoppen, Status der Notch lesen, Datei aus der Ablage öffnen oder konvertieren
 - Mikrofonfreigabe wird für das Notch-Fenster automatisch erteilt (nur Mikrofon)
 - Kosten: API-Abrechnung pro Audiominute, getrennt von einem ChatGPT-Abo
