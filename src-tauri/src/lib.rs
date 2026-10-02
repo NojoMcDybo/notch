@@ -124,6 +124,10 @@ fn config_file(app: &AppHandle) -> Option<PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join("config.json"))
 }
 
+/// Einstellungen der kompakten Anzeige (Rangliste, Extras). Das Schema gehoert dem Frontend
+/// (src/settings-model.ts) — Rust speichert es nur und verteilt Aenderungen an alle Fenster.
+static SETTINGS: Mutex<serde_json::Value> = Mutex::new(serde_json::Value::Null);
+
 fn load_config(app: &AppHandle) {
     let Some(f) = config_file(app) else { return };
     let Ok(bytes) = std::fs::read(f) else { return };
@@ -133,6 +137,9 @@ fn load_config(app: &AppHandle) {
             *DOCK.lock().unwrap() = d.into();
         }
     }
+    if let Some(c) = v.get("compact").filter(|c| c.is_object()) {
+        *SETTINGS.lock().unwrap() = c.clone();
+    }
 }
 
 fn save_config(app: &AppHandle) {
@@ -140,7 +147,59 @@ fn save_config(app: &AppHandle) {
     if let Some(dir) = f.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let _ = std::fs::write(f, serde_json::json!({ "dock": dock() }).to_string());
+    let compact = SETTINGS.lock().unwrap().clone();
+    let _ = std::fs::write(f, serde_json::json!({ "dock": dock(), "compact": compact }).to_string());
+}
+
+#[tauri::command]
+fn settings_get() -> serde_json::Value {
+    SETTINGS.lock().unwrap().clone()
+}
+
+/// Speichern und an alle Fenster schicken (Notch + Einstellungsfenster)
+#[tauri::command]
+fn settings_set(app: AppHandle, settings: serde_json::Value) {
+    if !settings.is_object() {
+        return;
+    }
+    *SETTINGS.lock().unwrap() = settings.clone();
+    save_config(&app);
+    let _ = app.emit("settings", settings);
+}
+
+/// Einstellungen in einem eigenen, normalen Fenster (nicht in der Notch).
+/// async, weil Fenster aus synchronen Befehlen unter Windows haengen bleiben koennen.
+#[tauri::command]
+async fn open_settings(app: AppHandle) -> Result<(), String> {
+    // Klick kam aus der Notch: Polling soll den Fokus nicht ans vorige Programm zurueckgeben,
+    // waehrend das neue Fenster nach vorn kommt
+    FOCUS_HOLD.store(activities::now_ms() + 1500, Ordering::Relaxed);
+    show_settings(&app).map_err(|e| e.to_string())
+}
+
+fn show_settings(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(w) = app.get_webview_window("settings") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    // gleiche Browser-Argumente wie das Notch-Fenster — sonst lehnt WebView2 die zweite
+    // Umgebung ab (alle Fenster teilen sich einen Datenordner)
+    let w = tauri::WebviewWindowBuilder::new(app, "settings", tauri::WebviewUrl::App("settings.html".into()))
+        .title("Notch – Einstellungen")
+        .inner_size(560.0, 780.0)
+        .min_inner_size(460.0, 560.0)
+        .center()
+        .resizable(true)
+        .maximizable(false)
+        .background_color(tauri::window::Color(24, 24, 26, 255))
+        .additional_browser_args(
+            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required",
+        )
+        .build()?;
+    let _ = w.set_focus();
+    Ok(())
 }
 
 fn set_dock(app: &AppHandle, d: &str) {
@@ -307,6 +366,9 @@ pub fn run() {
             snapshot,
             dock_set,
             dock_drag_start,
+            settings_get,
+            settings_set,
+            open_settings,
             voice::voice_ready,
             voice::voice_setup,
             voice::voice_token,
@@ -367,12 +429,14 @@ pub fn run() {
                 }
             }
 
+            let settings = MenuItem::with_id(app, "settings", "Einstellungen …", true, None::<&str>)?;
+            let sep0 = PredefinedMenuItem::separator(app)?;
             let top = MenuItem::with_id(app, "dock:top", "Oben andocken", true, None::<&str>)?;
             let left = MenuItem::with_id(app, "dock:left", "Links andocken", true, None::<&str>)?;
             let right = MenuItem::with_id(app, "dock:right", "Rechts andocken", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             let quit = MenuItem::with_id(app, "quit", "Notch beenden", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&top, &left, &right, &sep, &quit])?;
+            let menu = Menu::with_items(app, &[&settings, &sep0, &top, &left, &right, &sep, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("Notch")
@@ -381,6 +445,12 @@ pub fn run() {
                     let id = e.id().as_ref();
                     if id == "quit" {
                         app.exit(0);
+                    } else if id == "settings" {
+                        // nicht direkt im Menue-Handler bauen (WebView2 haengt sonst, wry#583)
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = show_settings(&app);
+                        });
                     } else if let Some(d) = id.strip_prefix("dock:") {
                         set_dock(app, d);
                     }

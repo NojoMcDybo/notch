@@ -64,7 +64,7 @@ export function bgSig(a: BgActivity) {
 }
 
 /** Kompakt (zu): nur Wert + Pfeil + Aenderung. Veraltet: grau + "vor X Min". Abgelaufen: "keine Daten". */
-export function fillCompact(trail: HTMLElement, a: BgActivity) {
+export function fillCompact(trail: HTMLElement, a: BgActivity, o: { delta?: boolean } = {}) {
   const s = bgStatus(a);
   trail.style.setProperty("--accent", s.color);
   trail.classList.add("bg");
@@ -75,8 +75,17 @@ export function fillCompact(trail: HTMLElement, a: BgActivity) {
   trail.append(mk("span", "bg-v", a.value ?? "—"));
   if (s.stale) { trail.append(mk("small", "", agoText(s.mins))); return; }
   if (a.trend && ARROWS[a.trend]) trail.append(mk("b", "arrow", ARROWS[a.trend]));
-  const d = fmtDelta(a.delta);
+  const d = o.delta === false ? "" : fmtDelta(a.delta);
   if (d) trail.append(mk("small", "bg-d", d));
+}
+
+/** Messwert ausserhalb des Zielbereichs (und aktuell, nicht veraltet)? */
+export function bgOutOfRange(a: BgActivity) {
+  const s = bgStatus(a);
+  if (s.stale) return false;
+  const v = Number(a.value);
+  const lo = a.chart?.low ?? 70, hi = a.chart?.high ?? 180;
+  return Number.isFinite(v) && (v < lo || v > hi);
 }
 
 // ---------- Aufgeklappt: Kopf + Graph ----------

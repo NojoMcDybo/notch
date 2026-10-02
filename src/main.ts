@@ -4,7 +4,9 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { Voice, type VoiceState } from "./voice";
 import { Wheel } from "./wheel";
-import { bgSig, fillCard, fillCompact, isBg, type ChartData } from "./glucose";
+import { fillCard, isBg, type ChartData } from "./glucose";
+import { build, needed, plan, planKey, planSig, PulseGate, sourceOf, type Plan } from "./compact";
+import { DEFAULTS, normalize, type CompactSettings } from "./settings-model";
 
 // ---------- Typen ----------
 
@@ -69,8 +71,10 @@ const SIDE = {
   clip: { w: 250, h: 54, r: 18 },
   expanded: { w: 400, h: 0, r: 28 },
 };
-/** so lange bleibt die Notch nach Pause noch kompakt */
-const PAUSE_LINGER = 30_000;
+/** Einstellungen der kompakten Anzeige (Rangliste + Extras), siehe settings-model.ts */
+let settings: CompactSettings = normalize(DEFAULTS);
+/** so lange bleibt die Musik nach Pause noch in der kleinen Notch */
+const pauseLinger = () => settings.music.lingerSec * 1000;
 
 // ---------- DOM ----------
 
@@ -419,7 +423,43 @@ function makeSlider(s: HTMLElement, onMove: (f: number) => void, onEnd: (f: numb
 
 function musicVisible() {
   if (!media) return false;
-  return media.playing || Date.now() - pausedAt < PAUSE_LINGER;
+  return media.playing || Date.now() - pausedAt < pauseLinger();
+}
+
+// ---------- Kompakt: Rangliste (compact.ts) ----------
+
+const pulseGate = new PulseGate();
+/** Folio: zuletzt gemeldete Seite pro Eintrag; aendert sie sich, blendet die Seitenzahl kurz ein */
+const folioPages = new Map<string, string | undefined>();
+let folioFlash = { id: "", until: 0 };
+let flashTimer = 0;
+
+function watchFolio(list: Activity[]) {
+  const seen = new Set<string>();
+  for (const a of list) {
+    if (sourceOf(a) !== "folio") continue;
+    seen.add(a.id);
+    const had = folioPages.has(a.id);
+    const before = folioPages.get(a.id);
+    folioPages.set(a.id, a.value);
+    if (had && before !== a.value && settings.folio.flash) {
+      const ms = settings.folio.flashSec * 1000;
+      folioFlash = { id: a.id, until: Date.now() + ms };
+      clearTimeout(flashTimer);
+      flashTimer = window.setTimeout(() => render(), ms + 30);
+    }
+  }
+  for (const id of [...folioPages.keys()]) if (!seen.has(id)) folioPages.delete(id);
+}
+
+function currentPlan(): Plan {
+  return plan({
+    acts,
+    music: musicVisible(),
+    s: settings,
+    gate: pulseGate,
+    folioFlash: Date.now() < folioFlash.until ? folioFlash.id : null,
+  });
 }
 
 /** Timer abgelaufen und noch nicht bestaetigt? Dann bleibt die Notch offen und pulsiert. */
@@ -428,42 +468,37 @@ const timerAlarm = () => acts.some((a) => a.id === "notch:timer" && a.title.incl
 function wanted(): State {
   if (hover || dragOver || holding > 0 || typing || voiceShown || timerAlarm() || Date.now() < peekUntil) return "expanded";
   if (Date.now() < clipPeekUntil) return "clip";
-  if (musicVisible() || acts.length) return "compact";
+  const p = currentPlan();
+  if (p.slots.length || p.timer) return "compact";
   return "idle";
 }
 
 let compactSig = "";
+let compactKey = "";
 let actsSig = "";
 let shelfSig = "";
 
+/** Platzbedarf der kleinen Notch (waechst z. B. mit laufendem Timer) */
+let compactSize = 0;
+
 function renderCompact() {
-  const top = acts[0];
+  const p = currentPlan();
   // nur neu bauen, wenn sich etwas Sichtbares aendert (sonst startet der Pegel jede Sekunde neu)
-  const sig = [musicVisible(), media?.playing, coverSrc?.length, top?.id, top?.value, top?.unit, top?.color, top?.icon, top && isBg(top) ? bgSig(top) : ""].join("|");
+  const s = settings;
+  const sig = planSig(p, [media?.playing, coverSrc?.length, s.glucose.delta, s.music.eqBesideCover, dock]);
   if (sig === compactSig) return;
   compactSig = sig;
-  lead.replaceChildren();
-  trail.replaceChildren();
-  trail.className = "c-trail";
-
-  if (musicVisible()) {
-    if (coverSrc) {
-      const img = new Image();
-      img.src = coverSrc;
-      lead.append(img);
-    } else lead.append(el("div", "icon", "♪"));
-  } else if (top) lead.append(iconEl(top));
-
-  if (top && isBg(top)) {
-    // Blutzucker: zu nur Wert + Pfeil + Aenderung (Graph gehoert ins aufgeklappte Panel)
-    fillCompact(trail, top);
-  } else if (top?.value) {
-    trail.style.setProperty("--accent", top.color ?? "");
-    trail.append(el("span", "", top.value));
-    if (top.unit) trail.append(el("small", "", top.unit));
-  } else if (musicVisible()) {
-    trail.style.removeProperty("--accent");
-    trail.append(eq(!!media?.playing));
+  // wechselt die Quelle auf einem Platz, blenden die Elemente weich ein (nicht bei jeder neuen Zahl)
+  const key = planKey(p);
+  const animate = compactKey !== "" && key !== compactKey;
+  compactKey = key;
+  build(lead, trail, p, s, { coverSrc, musicPlaying: !!media?.playing, iconEl: (a) => iconEl(a as Activity), eq }, animate);
+  const side = dock !== "top";
+  const measure = () => { compactSize = needed(lead, trail, side, side ? SIDE.compact.h : SIZE.compact.w); };
+  measure();
+  // Cover/Deckel haben erst nach dem Laden eine Breite -> dann nachmessen
+  for (const img of [...lead.querySelectorAll("img"), ...trail.querySelectorAll("img")]) {
+    if (!img.complete) img.addEventListener("load", () => { measure(); render(false); }, { once: true });
   }
 }
 
@@ -1159,6 +1194,11 @@ function render(full = true) {
   notch.dataset.dock = dock;
   const side = dock !== "top";
   const s = { ...(side ? SIDE : SIZE)[state] };
+  // kompakt: so breit (seitlich: so hoch) wie der Inhalt braucht, mindestens die Grundgroesse
+  if (state === "compact" && compactSize) {
+    if (side) s.h = Math.min(Math.floor(innerHeight * 0.8), Math.max(s.h, compactSize));
+    else s.w = Math.min(innerWidth - 2 * EAR - 8, Math.max(s.w, compactSize));
+  }
   if (state === "expanded") {
     expanded.style.setProperty("--xw", `${s.w}px`);
     const max = side ? Math.floor(innerHeight * 0.92) : MAX_H;
@@ -1234,6 +1274,7 @@ async function main() {
   await listen<{ key: string; src: string }>("media-cover", (e) => { setCover(e.payload.src); render(); });
   await listen<Activity[]>("activities", (e) => {
     acts = e.payload;
+    watchFolio(acts);
     // Stand der Umwandlung in der Ablage-Leiste zeigen (man bleibt in der Ablage)
     if (conv) renderFileBar();
     render();
@@ -1283,6 +1324,11 @@ async function main() {
   });
   window.addEventListener("resize", () => render(false));
 
+  // Einstellungen (Rangliste der kleinen Notch) — aendern sich live aus dem Einstellungsfenster
+  await listen<unknown>("settings", (e) => { settings = normalize(e.payload); compactSig = ""; render(); });
+  settings = normalize(await invoke<unknown>("settings_get").catch(() => null));
+  q(".settings-btn").addEventListener("click", () => { invoke("open_settings").catch(() => {}); });
+
   const snap = await invoke<{
     media: Media; cover: string | null; activities: Activity[]; shelf: Item[]; clips: Clip[]; fullscreen: boolean; hover: boolean;
     dock: Dock; voice_key: string;
@@ -1295,6 +1341,7 @@ async function main() {
   setMedia(snap.media);
   setCover(snap.cover);
   acts = snap.activities;
+  watchFolio(acts);
   shelf = snap.shelf;
   clips = snap.clips ?? [];
   clips.forEach((c) => seenClips.add(c.id));
@@ -1394,9 +1441,10 @@ async function main() {
     if (++bgTick % 20 === 0 && acts.some(isBg)) {
       for (const [, row] of rows) { const a = rowAct.get(row); if (a && isBg(a)) fillRow(row, a); }
       renderCompact();
+      render(false);
     }
     // Pause-Nachlauf abgelaufen -> zurueck auf idle
-    if (media && !media.playing && pausedAt && Date.now() - pausedAt > PAUSE_LINGER && state === "compact") {
+    if (media && !media.playing && pausedAt && Date.now() - pausedAt > pauseLinger() && state === "compact") {
       pausedAt = 0;
       render();
     }

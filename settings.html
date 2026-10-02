@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Notch – Einstellungen</title>
+    <link rel="stylesheet" href="/src/compact.css" />
+    <link rel="stylesheet" href="/src/settings.css" />
+    <script type="module" src="/src/settings.ts" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="head">
+        <h1>Kleine Notch</h1>
+        <p>Was die Notch zeigt, wenn sie zu ist. Änderungen gelten sofort.</p>
+      </header>
+
+      <!-- Vorschau: dieselbe Logik wie die echte Notch -->
+      <section class="card preview">
+        <div class="stage" data-dock="top">
+          <div class="pv-notch"><div class="compact"><div class="c-lead"></div><div class="c-trail"></div></div></div>
+          <div class="pv-empty">Gerade nichts zu zeigen</div>
+        </div>
+        <div class="pv-bar">
+          <div class="seg" role="radiogroup" aria-label="Vorschau">
+            <button role="radio" data-mode="live">Live</button>
+            <button role="radio" data-mode="demo">Ausprobieren</button>
+          </div>
+          <span class="pv-note"></span>
+        </div>
+        <div class="demo" hidden>
+          <div class="demo-chips" aria-label="Was gerade läuft"></div>
+          <div class="demo-sliders">
+            <label class="mini"><span>Puls</span><input type="range" class="d-bpm" min="60" max="200" step="1" value="96" /><output class="d-bpm-out"></output></label>
+            <label class="mini"><span>Blutzucker</span><input type="range" class="d-bg" min="40" max="300" step="1" value="112" /><output class="d-bg-out"></output></label>
+            <button class="btn d-flip" title="Simuliert eine neue Seite in Folio">Umblättern</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="block">
+        <div class="block-head">
+          <h2>Gleichzeitig zeigen</h2>
+          <div class="seg" role="radiogroup" aria-label="Gleichzeitig zeigen">
+            <button role="radio" data-slots="1">Eins</button>
+            <button role="radio" data-slots="2">Zwei</button>
+          </div>
+        </div>
+        <p class="hint slots-hint"></p>
+      </section>
+
+      <section class="block">
+        <div class="block-head">
+          <h2>Rangliste</h2>
+          <span class="hint">Oben gewinnt</span>
+        </div>
+        <p class="hint">Am Griff <span class="kbd">⠿</span> ziehen oder den Griff anklicken und mit <span class="kbd">↑</span> <span class="kbd">↓</span> verschieben. Der Schalter blendet etwas aus der kleinen Notch aus – aufgeklappt bleibt es da.</p>
+        <ol class="rank" aria-label="Rangliste"></ol>
+      </section>
+
+      <footer class="foot">
+        <button class="link reset">Auf Standard zurücksetzen</button>
+      </footer>
+      <div class="sr" aria-live="polite"></div>
+    </main>
+  </body>
+</html>

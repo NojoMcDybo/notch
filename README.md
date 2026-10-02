@@ -17,8 +17,21 @@ Beenden über das Tray-Symbol → „Notch beenden".
 | Zustand   | wann                                         |
 |-----------|----------------------------------------------|
 | idle      | nichts los: kleine schwarze Form             |
-| compact   | Musik läuft (bis 30 s nach Pause) oder Activity vorhanden |
+| compact   | Musik läuft (Nachlauf nach Pause einstellbar, Standard 30 s) oder eine sichtbare Quelle hat etwas |
 | expanded  | Maus drauf, Datei wird draufgezogen, oder Activity mit `alert: true` (3,5 s) |
+
+## Kleine Notch: Rangliste (Einstellungsfenster)
+
+Was die zugeklappte Notch zeigt, entscheidet eine Rangliste (`src/compact.ts`, Schema in `src/settings-model.ts`, gespeichert unter `compact` in `config.json`). Einstellungen öffnen: Zahnrad in der aufgeklappten Notch oder Tray → „Einstellungen …“ — eigenes Fenster, nicht in der Notch.
+
+- Quellen: Blutzucker (Haze / Activity mit `chart`), Musik, Timer (`notch:timer`), Puls (Activity mit `pulse` / Helio), Folio (`app: "Folio"`), Andere Apps.
+- Standard: Blutzucker, Musik, Timer, Puls, Folio, Andere — zwei Plätze gleichzeitig.
+- Musik + etwas anderes: Pegel-Balken wandern neben das Cover statt zu verschwinden.
+- Timer läuft: die Notch wird breiter, der Timer hängt sich rechts an und verdrängt nichts (abschaltbar → reiht sich ein).
+- Puls ab Schwelle (Standard 140 bpm) ganz nach oben, zurück erst unter Schwelle − 5.
+- Blutzucker außerhalb des Zielbereichs ganz nach oben (schlägt auch hohen Puls).
+- Folio blättert, liegt aber nicht in der Notch: Seitenzahl übernimmt kurz (Standard 2 s) den letzten Platz.
+- Pro Quelle ausblendbar (nur kompakt; aufgeklappt bleibt alles da).
 
 Bei Vollbild-Programmen auf dem Hauptmonitor fährt die Notch nach oben weg.
 

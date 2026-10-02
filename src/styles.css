@@ -81,42 +81,15 @@ svg { display: block; }
 
 /* ---------- Kompakt ---------- */
 
+/* Aufbau, Symbole, Pegel und Chips: compact.css (teilt sich die Notch mit der Vorschau im Einstellungsfenster) */
 .compact {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 11px;
   opacity: 0;
   transition: opacity 0.15s;
   pointer-events: none;
 }
 #notch[data-state="compact"] .compact { opacity: 1; transition: opacity 0.25s 0.18s; }
-
-.c-lead, .c-trail { display: flex; align-items: center; gap: 5px; min-width: 22px; height: 100%; }
-.c-lead img { width: auto; max-width: 40px; height: 22px; border-radius: 4px; object-fit: contain; }
-.c-trail { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
-.c-trail small { color: var(--fg2); font-weight: 400; font-size: 10px; }
-.c-trail .arrow { font-weight: 600; }
-
-.icon { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; font-size: 13px; background: color-mix(in srgb, var(--accent) 18%, transparent); overflow: hidden; }
-.icon img { width: 70%; height: 70%; object-fit: contain; }
-.icon img.full { width: 100%; height: 100%; object-fit: cover; }
-/* Bild-Symbole (PDF-Deckel usw.): eigenes Seitenverhaeltnis, kein Kreis */
-.icon.pic { width: auto; max-width: 40px; border-radius: 4px; background: none; }
-.icon.pic img { width: auto; height: 100%; max-width: 40px; object-fit: contain; border-radius: 4px; }
-
-/* Pegel-Balken */
-.eq { display: flex; align-items: center; gap: 2.5px; height: 14px; }
-.eq i { width: 3px; height: 100%; border-radius: 2px; background: var(--accent); transform-origin: center; animation: eq 0.9s ease-in-out infinite alternate; }
-.eq i:nth-child(2) { animation-duration: 0.7s; animation-delay: -0.3s; }
-.eq i:nth-child(3) { animation-duration: 1.1s; animation-delay: -0.6s; }
-.eq i:nth-child(4) { animation-duration: 0.8s; animation-delay: -0.2s; }
-.eq.paused i { animation-play-state: paused; transform: scaleY(0.25); }
-@keyframes eq { from { transform: scaleY(0.25); } to { transform: scaleY(1); } }
-/* echter Pegel aus Rust (siehe onLevel) */
-.eq.live i { animation: none; transform: scaleY(var(--s, 0.2)); transition: transform 50ms linear; }
 
 /* ---------- Aufgeklappt ---------- */
 
@@ -318,11 +291,6 @@ svg { display: block; }
 #notch[data-dock="right"] .ear.l { right: 0; left: auto; top: calc(-1 * var(--e) + 0.5px); background: radial-gradient(circle at 0 0, transparent calc(var(--e) - 0.6px), #000 var(--e)); }
 #notch[data-dock="right"] .ear.r { right: 0; left: auto; top: auto; bottom: calc(-1 * var(--e) + 0.5px); background: radial-gradient(circle at 0 100%, transparent calc(var(--e) - 0.6px), #000 var(--e)); }
 
-/* kompakt senkrecht: oben Cover/Symbol, unten Wert/Pegel */
-#notch[data-dock="left"] .compact, #notch[data-dock="right"] .compact { flex-direction: column; padding: 11px 0; }
-#notch[data-dock="left"] .c-lead, #notch[data-dock="right"] .c-lead,
-#notch[data-dock="left"] .c-trail, #notch[data-dock="right"] .c-trail { height: auto; flex-direction: column; gap: 2px; font-size: 12px; }
-#notch[data-dock="left"] .c-trail small, #notch[data-dock="right"] .c-trail small { font-size: 8.5px; }
 
 /* aufgeklappt seitlich: alles auf einmal statt Reitern */
 #notch[data-dock="left"] .expanded, #notch[data-dock="right"] .expanded { padding: 14px 20px 18px; overflow-y: auto; max-height: 100%; scrollbar-width: none; }
@@ -477,12 +445,7 @@ svg { display: block; }
 }
 
 /* ---------- Blutzucker (Verlaufs-Activity, glucose.ts) ---------- */
-/* zu: Wert + Pfeil + Aenderung in der Farbe des Bereichs */
-.c-trail.bg { gap: 4px; }
-.c-trail.bg .bg-v { font-size: 15px; }
-.c-trail.bg .arrow { font-size: 14px; line-height: 1; }
-.c-trail.bg .bg-d { color: var(--fg2); font-size: 11px; font-weight: 500; }
-#notch[data-dock="left"] .c-trail.bg .bg-d, #notch[data-dock="right"] .c-trail.bg .bg-d { display: none; }
+/* zu: siehe compact.css */
 
 /* auf: Kopf + Graph */
 .act.bg { display: block; padding: 8px 8px 4px; cursor: default; }
