@@ -9,59 +9,99 @@
     <script type="module" src="/src/settings.ts" defer></script>
   </head>
   <body>
-    <main class="page">
-      <header class="head">
-        <h1>Kleine Notch</h1>
-        <p>Was die Notch zeigt, wenn sie zu ist. Änderungen gelten sofort.</p>
-      </header>
-
-      <!-- Vorschau: dieselbe Logik wie die echte Notch -->
-      <section class="card preview">
-        <div class="stage" data-dock="top">
-          <div class="pv-notch"><div class="compact"><div class="c-lead"></div><div class="c-trail"></div></div></div>
-          <div class="pv-empty">Gerade nichts zu zeigen</div>
+    <!-- Aufbau wie das Einstellungsfenster von Haze: Eyebrow + Titel, Reiter, Gruppen -->
+    <section class="settings-panel" aria-label="Einstellungen">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">DEINE NOTCH</div>
+          <h2>Einstellungen</h2>
         </div>
-        <div class="pv-bar">
-          <div class="seg" role="radiogroup" aria-label="Vorschau">
-            <button role="radio" data-mode="live">Live</button>
-            <button role="radio" data-mode="demo">Ausprobieren</button>
+        <button class="icon-button close" aria-label="Schließen" title="Schließen (Esc)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+        </button>
+      </div>
+      <nav class="settings-tabs" role="tablist">
+        <button role="tab" data-tab="display">Anzeige</button>
+        <button role="tab" data-tab="dock">Andocken</button>
+        <button role="tab" data-tab="app">App</button>
+      </nav>
+
+      <div class="panel-body">
+        <!-- Anzeige: kleine Notch + Rangliste -->
+        <div class="pane" data-pane="display">
+          <h3>Das Wichtigste zuerst.</h3>
+          <p class="muted">Was die Notch zeigt, wenn sie zu ist. Änderungen gelten sofort.</p>
+
+          <div class="notch-preview stage" data-dock="top">
+            <div class="pv-notch"><div class="compact"><div class="c-lead"></div><div class="c-trail"></div></div></div>
+            <div class="pv-empty">Gerade nichts zu zeigen</div>
           </div>
-          <span class="pv-note"></span>
-        </div>
-        <div class="demo" hidden>
-          <div class="demo-chips" aria-label="Was gerade läuft"></div>
-          <div class="demo-sliders">
-            <label class="mini"><span>Puls</span><input type="range" class="d-bpm" min="60" max="200" step="1" value="96" /><output class="d-bpm-out"></output></label>
-            <label class="mini"><span>Blutzucker</span><input type="range" class="d-bg" min="40" max="300" step="1" value="112" /><output class="d-bg-out"></output></label>
-            <button class="btn d-flip" title="Simuliert eine neue Seite in Folio">Umblättern</button>
+          <div class="pv-bar">
+            <div class="segmented compact pv-mode" role="group" aria-label="Vorschau">
+              <button data-mode="live">Live</button>
+              <button data-mode="demo">Ausprobieren</button>
+            </div>
           </div>
-        </div>
-      </section>
+          <p class="fine tight pv-note"></p>
 
-      <section class="block">
-        <div class="block-head">
-          <h2>Gleichzeitig zeigen</h2>
-          <div class="seg" role="radiogroup" aria-label="Gleichzeitig zeigen">
-            <button role="radio" data-slots="1">Eins</button>
-            <button role="radio" data-slots="2">Zwei</button>
+          <details class="settings-group demo" open>
+            <summary><span>Ausprobieren</span><small>Beispielwerte, ändern nichts</small></summary>
+            <div class="group-body">
+              <div class="field">Was gerade läuft<div class="chips demo-chips"></div></div>
+              <label class="field"><span class="d-bpm-label"></span><input type="range" class="d-bpm" min="60" max="200" step="1" value="96" aria-label="Puls" /></label>
+              <label class="field"><span class="d-bg-label"></span><input type="range" class="d-bg" min="40" max="300" step="1" value="112" aria-label="Blutzucker" /></label>
+              <button class="button secondary full d-flip">Folio: umblättern</button>
+            </div>
+          </details>
+
+          <div class="field" role="group" aria-label="Gleichzeitig zeigen">Gleichzeitig zeigen
+            <div class="segmented compact">
+              <button data-slots="1">Eins</button>
+              <button data-slots="2">Zwei</button>
+            </div>
+            <small class="slots-hint"></small>
           </div>
-        </div>
-        <p class="hint slots-hint"></p>
-      </section>
 
-      <section class="block">
-        <div class="block-head">
-          <h2>Rangliste</h2>
-          <span class="hint">Oben gewinnt</span>
+          <div class="divider"></div>
+          <h3>Rangliste</h3>
+          <p class="muted">Oben gewinnt. Am Griff <span class="kbd">⠿</span> ziehen oder den Griff anklicken und mit <span class="kbd">↑</span> <span class="kbd">↓</span> verschieben. Der Schalter blendet etwas aus der kleinen Notch aus – aufgeklappt bleibt es da.</p>
+          <ol class="rank" aria-label="Rangliste"></ol>
+          <p class="fine"><button class="link-button reset">Auf Standard zurücksetzen</button></p>
         </div>
-        <p class="hint">Am Griff <span class="kbd">⠿</span> ziehen oder den Griff anklicken und mit <span class="kbd">↑</span> <span class="kbd">↓</span> verschieben. Der Schalter blendet etwas aus der kleinen Notch aus – aufgeklappt bleibt es da.</p>
-        <ol class="rank" aria-label="Rangliste"></ol>
-      </section>
 
-      <footer class="foot">
-        <button class="link reset">Auf Standard zurücksetzen</button>
-      </footer>
-      <div class="sr" aria-live="polite"></div>
-    </main>
+        <!-- Andocken -->
+        <div class="pane" data-pane="dock" hidden>
+          <h3>Wo die Notch sitzt.</h3>
+          <p class="muted">Oder die Notch mit gedrückter Maus an eine Kante ziehen.</p>
+          <div class="field" role="group" aria-label="Kante">Kante
+            <div class="segmented compact">
+              <button data-dock="top">Oben</button>
+              <button data-dock="left">Links</button>
+              <button data-dock="right">Rechts</button>
+            </div>
+            <small>Seitlich ist sie eine senkrechte Pille und zeigt aufgeklappt alles auf einmal.</small>
+          </div>
+          <p class="fine">Nur auf dem Hauptmonitor. Bei Vollbild-Programmen fährt die Notch aus dem Bild.</p>
+        </div>
+
+        <!-- App -->
+        <div class="pane" data-pane="app" hidden>
+          <div class="profile-card">
+            <div>
+              <div class="eyebrow">NOTCH</div>
+              <h3 class="app-version">Version</h3>
+            </div>
+          </div>
+          <h3 class="sub">Sprachassistent</h3>
+          <div class="field">Tastenkürzel<div class="value-box voice-key">–</div><small>Nochmal drücken legt auf. Nach 40 s Stille legt er selbst auf.</small></div>
+          <button class="button secondary full voice-setup">OpenAI-Schlüssel eintragen</button>
+          <p class="fine">Der Schlüssel bleibt auf diesem PC und wird nur in der Notch-App benutzt.</p>
+          <div class="divider"></div>
+          <h3 class="sub">Eigene Apps</h3>
+          <p class="fine tight">Apps schicken Live Activities an <code>127.0.0.1:47800</code>. Blutzucker (Haze), Puls (Helio) und Folio erkennt die Rangliste automatisch, alles andere landet unter „Andere Apps“.</p>
+        </div>
+      </div>
+    </section>
+    <div class="sr" aria-live="polite"></div>
   </body>
 </html>

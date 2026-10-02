@@ -7,6 +7,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { build, bpmOf, needed, plan, planKey, PulseGate, sourceOf, TIMER_ID, type CAct, type Plan } from "./compact";
 import { clone, DEFAULTS, normalize, PULSE_HYST, SOURCES, type CompactSettings, type SourceId } from "./settings-model";
 
@@ -36,7 +38,6 @@ const GLYPH: Record<SourceId, string> = {
   other: "M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z",
 };
 const GRIP = "M9 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm9-13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z";
-const CHEVRON = "M12 15.4 5.6 9 7 7.6l5 5 5-5L18.4 9z";
 
 // ---------- Zustand ----------
 
@@ -175,8 +176,9 @@ function statusText(id: SourceId, c: ReturnType<typeof current>): string {
   }
 }
 
+/** Markierungen als Status-Pillen wie in Haze; "up" in der Warnfarbe */
 function tag(cls: string, text: string, title = "") {
-  const t = el("span", `tag ${cls}`, text);
+  const t = el("span", `status-pill ${cls === "up" ? "up" : ""}`, text);
   if (title) t.title = title;
   return t;
 }
@@ -211,52 +213,61 @@ function refresh() {
 let deps: (() => void)[] = [];
 const syncDeps = () => deps.forEach((f) => f());
 
+/** Schalter wie in Haze (Pille, an = hell mit dunklem Knopf) — ohne Zeile, z. B. in der Ranglisten-Zeile */
 function switchEl(checked: boolean, label: string, onChange: (on: boolean) => void) {
-  const l = el("label", "switch");
+  const l = el("label", "vis");
   const inp = el("input");
   inp.type = "checkbox";
   inp.checked = checked;
   inp.setAttribute("role", "switch");
   inp.setAttribute("aria-label", label);
-  l.append(inp, el("i"));
+  l.append(inp, el("span", "toggle"));
   inp.addEventListener("change", () => onChange(inp.checked));
   return l;
 }
 
+/** Haze-Toggle-Zeile: Text links, kleine Erklärung darunter, Schalter rechts */
 function optToggle(label: string, sub: string, get: () => boolean, set: (v: boolean) => void) {
-  const o = el("div", "opt");
-  o.append(el("b", "", label), el("small", "", sub), switchEl(get(), label, (v) => { set(v); syncDeps(); commit(); }));
-  return o;
+  const row = el("label", "toggle-row");
+  const text = el("span", "", label);
+  text.append(el("small", "", sub));
+  const inp = el("input");
+  inp.type = "checkbox";
+  inp.checked = get();
+  inp.setAttribute("role", "switch");
+  inp.addEventListener("change", () => { set(inp.checked); syncDeps(); commit(); });
+  row.append(text, inp, el("span", "toggle"));
+  return row;
 }
 
-function setFill(r: HTMLInputElement) {
-  const p = ((Number(r.value) - Number(r.min)) / (Number(r.max) - Number(r.min))) * 100;
-  r.style.setProperty("--p", `${p}%`);
-}
-
+/** Haze-Feld mit Regler: „Name · Wert“, daneben „Standard“ */
 function optRange(
-  label: string, min: number, max: number, step: number, fmt: (v: number) => string,
+  label: string, min: number, max: number, step: number, def: number, fmt: (v: number) => string,
   get: () => number, set: (v: number) => void, enabled?: () => boolean, sub?: () => string,
 ) {
-  const o = el("div", "opt range");
-  const val = el("span", "val", fmt(get()));
+  const o = el("div", "field");
+  const head = el("span", "", `${label} · ${fmt(get())}`);
+  const rr = el("div", "range-row");
   const r = el("input");
   r.type = "range";
   r.min = String(min); r.max = String(max); r.step = String(step); r.value = String(get());
   r.setAttribute("aria-label", label);
-  setFill(r);
-  o.append(el("b", "", label), val, r);
+  const std = el("button", "link-button", "Standard");
+  std.disabled = get() === def;
+  rr.append(r, std);
+  o.append(head, rr);
   let small: HTMLElement | null = null;
   if (sub) { small = el("small", "", sub()); o.append(small); }
-  r.addEventListener("input", () => {
-    const v = Number(r.value);
+  const apply = (v: number, now: boolean) => {
     set(v);
-    val.textContent = fmt(v);
-    setFill(r);
+    head.textContent = `${label} · ${fmt(v)}`;
+    std.disabled = v === def;
     syncDeps();
-    commit(false);
-  });
+    commit(now);
+  };
+  r.addEventListener("input", () => apply(Number(r.value), false));
   r.addEventListener("change", () => commit());
+  std.addEventListener("click", () => { r.value = String(def); apply(def, true); });
   deps.push(() => {
     if (enabled) o.classList.toggle("dim", !enabled());
     if (small && sub) small.textContent = sub();
@@ -276,7 +287,7 @@ function extras(id: SourceId): HTMLElement[] {
     case "music": return [
       optToggle("Pegel neben das Cover", "Steht rechts etwas anderes, wandern die Balken nach links statt zu verschwinden.",
         () => s.music.eqBesideCover, (v) => { s.music.eqBesideCover = v; }),
-      optRange("Nach Pause noch zeigen", 0, 120, 5, secs, () => s.music.lingerSec, (v) => { s.music.lingerSec = v; }),
+      optRange("Nach Pause noch zeigen", 0, 120, 5, DEFAULTS.music.lingerSec, secs, () => s.music.lingerSec, (v) => { s.music.lingerSec = v; }),
     ];
     case "timer": return [
       optToggle("Notch verbreitern, solange ein Timer läuft", "Der Timer hängt sich rechts an und verdrängt nichts. Aus: Er reiht sich hier in die Rangliste ein.",
@@ -285,13 +296,13 @@ function extras(id: SourceId): HTMLElement[] {
     case "pulse": return [
       optToggle("Bei hohem Puls nach oben rücken", "Ab der Schwelle steht der Puls ganz oben – nur Blutzucker außerhalb des Bereichs bleibt davor.",
         () => s.pulse.boost, (v) => { s.pulse.boost = v; }),
-      optRange("Ab", 90, 200, 5, (v) => `${v} bpm`, () => s.pulse.threshold, (v) => { s.pulse.threshold = v; },
+      optRange("Ab", 90, 200, 5, DEFAULTS.pulse.threshold, (v) => `${v} bpm`, () => s.pulse.threshold, (v) => { s.pulse.threshold = v; },
         () => s.pulse.boost, () => `Unter ${s.pulse.threshold - PULSE_HYST} bpm geht er zurück auf Platz ${s.order.indexOf("pulse") + 1}.`),
     ];
     case "folio": return [
       optToggle("Seitenzahl beim Blättern einblenden", "Liegt etwas anderes oben, übernimmt die Seitenzahl kurz den letzten Platz.",
         () => s.folio.flash, (v) => { s.folio.flash = v; }),
-      optRange("Wie lange", 1, 5, 0.5, secs, () => s.folio.flashSec, (v) => { s.folio.flashSec = v; }, () => s.folio.flash),
+      optRange("Wie lange", 1, 5, 0.5, DEFAULTS.folio.flashSec, secs, () => s.folio.flashSec, (v) => { s.folio.flashSec = v; }, () => s.folio.flash),
     ];
     case "other": return [el("p", "note", "Apps, die eine Live Activity schicken (z. B. Umwandlungen). Untereinander entscheidet die Priorität, die die App selbst mitschickt.")];
   }
@@ -304,9 +315,9 @@ const nameOf = (id: SourceId) => SOURCES[id].name;
 
 function rowEl(id: SourceId, i: number) {
   const n = s.order.length;
-  const row = el("li", "row");
+  // jede Quelle ist eine aufklappbare Gruppe wie in den Haze-Einstellungen
+  const row = el("li", "row settings-group");
   row.dataset.id = id;
-  row.style.setProperty("--c", SOURCES[id].color);
   row.classList.toggle("open", open.has(id));
   row.classList.toggle("off", s.hidden.includes(id));
 
@@ -315,9 +326,8 @@ function rowEl(id: SourceId, i: number) {
   grip.append(svg(GRIP));
   grip.title = "Ziehen oder anklicken und ↑ ↓ drücken";
   grip.setAttribute("aria-label", `${nameOf(id)} verschieben, Platz ${i + 1} von ${n}`);
-  const num = el("span", "num", String(i + 1));
   const icoBox = el("span", "ico");
-  icoBox.append(svg(GLYPH[id]));
+  icoBox.append(svg(GLYPH[id]), el("span", "num", String(i + 1)));
   const txt = el("div", "txt");
   txt.append(el("b", "", nameOf(id)), el("small", "st", ""));
   const tags = el("div", "tags");
@@ -329,10 +339,10 @@ function rowEl(id: SourceId, i: number) {
   });
   vis.title = "In der kleinen Notch zeigen";
   const more = el("button", "more");
-  more.append(svg(CHEVRON));
+  more.append(el("span", "chev"));
   more.setAttribute("aria-label", `Einstellungen für ${nameOf(id)}`);
   more.setAttribute("aria-expanded", String(open.has(id)));
-  main.append(grip, num, icoBox, txt, tags, vis, more);
+  main.append(grip, icoBox, txt, tags, vis, more);
 
   const ex = el("div", "extras");
   const exIn = el("div", "extras-in");
@@ -354,7 +364,7 @@ function rowEl(id: SourceId, i: number) {
   more.addEventListener("click", toggle);
   // grosse Klickflaeche: Symbol und Text klappen ebenfalls auf
   main.addEventListener("click", (e) => {
-    if ((e.target as Element).closest(".grip, .switch, .more")) return;
+    if ((e.target as Element).closest(".grip, .vis, .more")) return;
     toggle();
   });
 
@@ -449,20 +459,40 @@ function startDrag(row: HTMLElement, grip: HTMLElement, e: PointerEvent) {
 
 // ---------- Segment-Schalter, Ausprobieren ----------
 
+/** Segmente wie in Haze: aktiver Knopf hell (Klasse active + aria-pressed) */
+function setSeg(sel: string, on: (b: HTMLButtonElement) => boolean) {
+  document.querySelectorAll<HTMLButtonElement>(sel).forEach((b) => {
+    const a = on(b);
+    b.classList.toggle("active", a);
+    b.setAttribute("aria-pressed", String(a));
+  });
+}
+
+let dock = "top";
+
 function syncSegs() {
-  document.querySelectorAll<HTMLButtonElement>("[data-slots]").forEach((b) => b.setAttribute("aria-checked", String(Number(b.dataset.slots) === s.slots)));
-  document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.mode === mode)));
+  setSeg("[data-slots]", (b) => Number(b.dataset.slots) === s.slots);
+  setSeg("[data-mode]", (b) => b.dataset.mode === mode);
+  setSeg("button[data-dock]", (b) => b.dataset.dock === dock);
   q(".slots-hint").textContent = s.slots === 2
     ? "Zwei Dinge nebeneinander – z. B. das Cover links und der Blutzucker rechts."
     : "Nur das Wichtigste. Ruhiger, dafür steht immer nur eine Sache da.";
   q(".demo").hidden = mode !== "demo";
 }
 
+// ---------- Reiter (wie Haze: Unterstrich unter dem aktiven) ----------
+
+function setTab(t: string) {
+  document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
+  document.querySelectorAll<HTMLElement>("[data-pane]").forEach((p) => { p.hidden = p.dataset.pane !== t; });
+  q(".panel-body").scrollTop = 0;
+  try { localStorage.setItem("settings-tab", t); } catch { /* egal */ }
+}
+
 function demoChips() {
   const box = q(".demo-chips");
   box.replaceChildren(...(Object.keys(SOURCES) as SourceId[]).map((id) => {
-    const b = el("button", "dchip");
-    b.style.setProperty("--c", SOURCES[id].color);
+    const b = el("button");
     b.append(svg(GLYPH[id]), document.createTextNode(SOURCES[id].name));
     b.setAttribute("aria-pressed", String(demoOn.has(id)));
     b.addEventListener("click", () => {
@@ -498,7 +528,7 @@ async function main() {
   });
   await listen<{ src: string }>("media-cover", (e) => { liveCover = e.payload.src; refresh(); });
   await listen<CAct[]>("activities", (e) => { liveActs = e.payload; refresh(); });
-  const snap = await invoke<{ media: Media; cover: string | null; activities: CAct[] }>("snapshot").catch(() => null);
+  const snap = await invoke<{ media: Media; cover: string | null; activities: CAct[]; dock: string; voice_key: string }>("snapshot").catch(() => null);
   if (snap) { liveMedia = snap.media; liveCover = snap.cover; liveActs = snap.activities; }
 
   // ohne laufende Quellen gleich zum Ausprobieren
@@ -510,13 +540,12 @@ async function main() {
   document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) =>
     b.addEventListener("click", () => { mode = b.dataset.mode === "demo" ? "demo" : "live"; pvSig = ""; syncSegs(); refresh(); }));
 
-  const bpm = q<HTMLInputElement>(".d-bpm"), bpmOut = q(".d-bpm-out");
-  const bg = q<HTMLInputElement>(".d-bg"), bgOut = q(".d-bg-out");
+  const bpm = q<HTMLInputElement>(".d-bpm"), bpmOut = q(".d-bpm-label");
+  const bg = q<HTMLInputElement>(".d-bg"), bgOut = q(".d-bg-label");
   const syncDemo = () => {
     demoBpm = Number(bpm.value); demoBg = Number(bg.value);
-    bpmOut.textContent = `${demoBpm} bpm`;
-    bgOut.textContent = `${demoBg} mg/dL`;
-    setFill(bpm); setFill(bg);
+    bpmOut.textContent = `Puls · ${demoBpm} bpm`;
+    bgOut.textContent = `Blutzucker · ${demoBg} mg/dL`;
   };
   bpm.addEventListener("input", () => { syncDemo(); refresh(); });
   bg.addEventListener("input", () => { syncDemo(); refresh(); });
@@ -537,6 +566,28 @@ async function main() {
     renderAll();
     announce("Auf Standard zurückgesetzt");
   });
+
+  // Reiter
+  document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab!)));
+  let startTab = "display";
+  try { startTab = localStorage.getItem("settings-tab") || "display"; } catch { /* egal */ }
+  setTab(q(`[data-pane="${startTab}"]`) ? startTab : "display");
+
+  // Andocken: gleiche Befehle wie Tray und Ziehen
+  dock = snap?.dock ?? "top";
+  await listen<string>("dock", (e) => { dock = e.payload; syncSegs(); });
+  document.querySelectorAll<HTMLButtonElement>("button[data-dock]").forEach((b) =>
+    b.addEventListener("click", () => { dock = b.dataset.dock!; syncSegs(); invoke("dock_set", { dock }).catch(() => {}); }));
+
+  // App
+  getVersion().then((v) => { q(".app-version").textContent = `Version ${v}`; }).catch(() => {});
+  q(".voice-key").textContent = snap?.voice_key || "kein freies Kürzel gefunden";
+  q(".voice-setup").addEventListener("click", () => { invoke("voice_setup").catch(() => {}); });
+
+  // Schließen wie in Haze: Knopf oben rechts oder Esc
+  const close = () => { getCurrentWindow().close().catch(() => {}); };
+  q(".close").addEventListener("click", close);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !(e.target as Element).closest?.("input[type=text]")) close(); });
 
   demoChips();
   renderAll();
