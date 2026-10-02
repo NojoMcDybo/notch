@@ -180,6 +180,15 @@ Browser-Seiten dürfen nur von `localhost`/`127.0.0.1`/`tauri://` aus schreiben 
 - **Haze** (Electron-App, `D:\Dev\haze`, Repo NojoMcDybo/Haze): Nightscout-Dashboard (Dexcom Share über Nightscout als Brücke), hält selbst bis zu 600 Messwerte (~2 Tage). `desktop/notch-bridge.cjs` schickt bei jedem neuen Messwert `haze:bg` mit Wert, Trend (Sensor, sonst Dexcom-Schwellen), Änderung und 24 h Verlauf, `ttl` 900 s + Auffrischen jede Minute, `alert` beim Wechsel in hoch/tief; beim Beenden wird der Eintrag gelöscht. Doppelklick auf den Graphen holt das Dashboard nach vorn (Haze pollt `/events`). Seit Haze-PR #4/#5 in `main`; einen Haze-Branch testen: `tools\haze-branch-start.cmd` per Explorer starten.
 - Der ältere C#-Prototyp (jetzt `D:\Dev\_archiv\haze-widget-lab`) (Widget Lab, nur Demowerte, id `haze-bz`) ist nicht mehr die angebundene App.
 
+## Musik-Reaktion
+
+Einstellungen › Anzeige › Musik › **Notch reagiert auf Musik**: *Aus* (Standard) / *Auto* / *Zacken* / *Welle* / *Puls*, dazu **Stärke** (50–200 %). Die schwarze Kante verformt sich zur Musik, Bass in der Mitte, Höhen nach außen.
+
+- **Abgriff** (`spectrum.rs`): WASAPI-Loopback genau des Ausgangs, auf dem der Player spielt (z. B. „Sonar - Media“), sonst des Standardausgangs. Läuft nur, wenn die Einstellung an ist, Musik spielt und kein Vollbild-Programm vorne ist; sonst ist der Abgriff geschlossen.
+- **Analyse** (`music_style.rs`, getestet mit künstlichen Signalen): FFT (2048) alle 512 Samples, 24 logarithmische Bänder 40 Hz–16 kHz mit automatischer Aussteuerung; Schläge aus dem pegelrelativen spektralen Fluss (Bass doppelt) mit adaptiver Schwelle und Mindeststärke; Tempo aus der Autokorrelation der erkannten Schläge über 8 s (Halbtempo-Korrektur).
+- **Auto**: *Zacken* bei deutlichem Takt und ≥ 135 BPM oder dichten, basslastigen Schlägen; *Welle* ohne Takt und mit wenig Schlägen; sonst *Puls*. Ein Wechsel braucht drei Bestätigungen im Sekundenabstand, nach einem Songwechsel zählt die erste Einschätzung. Die Schwellen sind Startwerte; das Einstellungsfenster zeigt live, was erkannt wird.
+- **Zeichnen** (`src/music-react.ts`): Canvas an der Kante, ~30 Pakete/s, `requestAnimationFrame` nur solange Daten kommen; bei „Bewegung reduzieren“ aus.
+
 ## Updates
 
 Notch prüft 20 s nach dem Start und danach alle 6 h, ob es auf GitHub eine neue Version gibt (Tray › **Nach Updates suchen** prüft sofort). Gibt es eine, erscheint in der Notch „Update verfügbar“ mit **Installieren** / **Später**; installiert wird nur nach Klick und nur, wenn das Update mit dem Schlüssel aus `tauri.conf.json` (`plugins.updater.pubkey`) signiert ist.
@@ -191,6 +200,7 @@ Neue Version veröffentlichen: Version in `package.json`, `src-tauri/Cargo.toml`
 - `src-tauri/src/lib.rs` — Fenster, Platzierung, Maus-Polling (Klick-durch außerhalb der Form), Tray
 - `src-tauri/src/media.rs` — Now Playing über die Windows-Media-Session, Quellenwahl, Spulen
 - `src-tauri/src/audio.rs` — Systemlautstärke (Core Audio)
+- `src-tauri/src/spectrum.rs`, `music_style.rs` — Musik-Reaktion: Loopback-Abgriff, Analyse, Stil
 - `src-tauri/src/activities.rs` — HTTP-Schnittstelle, Klicks, Events
 - `src-tauri/src/open.rs` — öffnen / nach vorn holen / localhost-Rückmeldung
 - `src-tauri/src/timer.rs` — Timer als Activity

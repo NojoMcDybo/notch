@@ -7,6 +7,7 @@ import { Wheel } from "./wheel";
 import { fillCard, isBg, type ChartData } from "./glucose";
 import { build, needed, plan, planKey, planSig, PulseGate, sourceOf, type Plan } from "./compact";
 import { DEFAULTS, normalize, type CompactSettings } from "./settings-model";
+import { MusicReactor, type Spectrum } from "./music-react";
 
 // ---------- Typen ----------
 
@@ -1333,9 +1334,23 @@ async function main() {
   });
   window.addEventListener("resize", () => render(false));
 
+  // Musik-Reaktion: Rust schickt nur, wenn sie an ist, Musik laeuft und kein Vollbild vorne ist
+  const reactor = new MusicReactor(
+    q<HTMLCanvasElement>("canvas.react"),
+    () => settings.music.react,
+    () => settings.music.strength,
+    () => state === "expanded",
+    () => dock,
+  );
   // Einstellungen (Rangliste der kleinen Notch) — aendern sich live aus dem Einstellungsfenster
-  await listen<unknown>("settings", (e) => { settings = normalize(e.payload); compactSig = ""; render(); });
+  await listen<unknown>("settings", (e) => {
+    settings = normalize(e.payload);
+    compactSig = "";
+    if (settings.music.react === "off") reactor.stop();
+    render();
+  });
   settings = normalize(await invoke<unknown>("settings_get").catch(() => null));
+  await listen<Spectrum>("spectrum", (e) => { if (!hiddenByFullscreen()) reactor.feed(e.payload); });
   q(".settings-btn").addEventListener("click", () => { invoke("open_settings").catch(() => {}); });
 
   const snap = await invoke<{

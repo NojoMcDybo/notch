@@ -28,14 +28,14 @@ pub struct Volume {
     follows_player: bool,
 }
 
-fn enumerator() -> windows::core::Result<IMMDeviceEnumerator> {
+pub(crate) fn enumerator() -> windows::core::Result<IMMDeviceEnumerator> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
     }
 }
 
-fn device_name(dev: &IMMDevice) -> String {
+pub(crate) fn device_name(dev: &IMMDevice) -> String {
     unsafe {
         dev.OpenPropertyStore(STGM_READ)
             .and_then(|ps| ps.GetValue(&PKEY_Device_FriendlyName))
@@ -45,14 +45,14 @@ fn device_name(dev: &IMMDevice) -> String {
 }
 
 /// Exe-Name des Players aus der Medienquelle: "SpotifyAB…!Spotify" -> "spotify.exe", "chrome.exe" bleibt.
-fn player_exe() -> Option<String> {
+pub(crate) fn player_exe() -> Option<String> {
     let src = crate::media::last()?.source;
     let s = src.rsplit('!').next().unwrap_or(&src).to_lowercase();
     Some(if s.ends_with(".exe") { s } else { format!("{s}.exe") })
 }
 
 /// Ausgabegeraet, auf dem der Player eine Audio-Sitzung hat (aktive Sitzungen zuerst).
-fn player_device(en: &IMMDeviceEnumerator, exe: &str) -> Option<IMMDevice> {
+pub(crate) fn player_device(en: &IMMDeviceEnumerator, exe: &str) -> Option<IMMDevice> {
     unsafe {
         let devices = en.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE).ok()?;
         let mut fallback = None;

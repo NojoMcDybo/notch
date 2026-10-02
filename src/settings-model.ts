@@ -26,7 +26,8 @@ export type CompactSettings = {
   /** wie viele Dinge die kleine Notch gleichzeitig zeigt */
   slots: 1 | 2;
   glucose: { delta: boolean; outOfRangeTop: boolean };
-  music: { eqBesideCover: boolean; lingerSec: number };
+  /** react: Kante der Notch bewegt sich zur Musik (auto = Stil aus der Musik); strength 0.5..2 */
+  music: { eqBesideCover: boolean; lingerSec: number; react: MusicReact; strength: number };
   timer: { expand: boolean };
   pulse: { boost: boolean; threshold: number };
   folio: { flash: boolean; flashSec: number };
@@ -34,6 +35,9 @@ export type CompactSettings = {
    *  show = bleibt sichtbar, aber durchklickbar (Klicks gehen ans Programm) */
   fullscreen: { mode: FullscreenMode };
 };
+
+export type MusicReact = "off" | "auto" | "spikes" | "wave" | "pulse";
+export const MUSIC_REACT: MusicReact[] = ["off", "auto", "spikes", "wave", "pulse"];
 
 export type FullscreenMode = "hide" | "peek" | "show";
 export const FULLSCREEN_MODES: FullscreenMode[] = ["hide", "peek", "show"];
@@ -44,7 +48,7 @@ export const DEFAULTS: CompactSettings = {
   hidden: [],
   slots: 2,
   glucose: { delta: true, outOfRangeTop: true },
-  music: { eqBesideCover: true, lingerSec: 30 },
+  music: { eqBesideCover: true, lingerSec: 30, react: "off", strength: 1 },
   timer: { expand: true },
   pulse: { boost: true, threshold: 140 },
   folio: { flash: true, flashSec: 2 },
@@ -76,7 +80,9 @@ export function normalize(raw: unknown): CompactSettings {
     hidden: [...new Set((Array.isArray(r.hidden) ? r.hidden : []).filter(known))],
     slots: r.slots === 1 ? 1 : 2,
     glucose: { delta: bool(g.delta, DEFAULTS.glucose.delta), outOfRangeTop: bool(g.outOfRangeTop, DEFAULTS.glucose.outOfRangeTop) },
-    music: { eqBesideCover: bool(m.eqBesideCover, DEFAULTS.music.eqBesideCover), lingerSec: num(m.lingerSec, 0, 300, DEFAULTS.music.lingerSec) },
+    music: { eqBesideCover: bool(m.eqBesideCover, DEFAULTS.music.eqBesideCover), lingerSec: num(m.lingerSec, 0, 300, DEFAULTS.music.lingerSec),
+      react: MUSIC_REACT.includes(m.react as MusicReact) ? (m.react as MusicReact) : DEFAULTS.music.react,
+      strength: num(m.strength, 0.5, 2, DEFAULTS.music.strength) },
     timer: { expand: bool(t.expand, DEFAULTS.timer.expand) },
     pulse: { boost: bool(p.boost, DEFAULTS.pulse.boost), threshold: Math.round(num(p.threshold, 60, 220, DEFAULTS.pulse.threshold)) },
     folio: { flash: bool(f.flash, DEFAULTS.folio.flash), flashSec: num(f.flashSec, 0.5, 8, DEFAULTS.folio.flashSec) },

@@ -10,7 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { build, bpmOf, needed, plan, planKey, PulseGate, sourceOf, TIMER_ID, type CAct, type Plan } from "./compact";
-import { clone, DEFAULTS, FULLSCREEN_MODES, normalize, SOURCES, type CompactSettings, type FullscreenMode, type SourceId } from "./settings-model";
+import { clone, DEFAULTS, FULLSCREEN_MODES, MUSIC_REACT, normalize, SOURCES, type CompactSettings, type FullscreenMode, type MusicReact, type SourceId } from "./settings-model";
 
 const q = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector(s) as T;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) {
@@ -269,6 +269,44 @@ function optRange(
 
 const secs = (v: number) => (v === 0 ? "sofort weg" : `${String(v).replace(".", ",")} s`);
 
+const REACT_TEXT: Record<MusicReact, string> = { off: "Aus", auto: "Auto", spikes: "Zacken", wave: "Welle", pulse: "Puls" };
+const STYLE_NAME: Record<string, string> = { spikes: "Zacken", wave: "Welle", pulse: "Puls" };
+
+/** Musik-Reaktion: Auswahl + was gerade erkannt wird (live aus "spectrum") */
+function reactField() {
+  const field = el("div", "field");
+  field.setAttribute("role", "group");
+  field.setAttribute("aria-label", "Notch reagiert auf Musik");
+  field.append("Notch reagiert auf Musik");
+  const seg = el("div", "segmented compact");
+  for (const m of MUSIC_REACT) {
+    const b = el("button", "", REACT_TEXT[m]);
+    b.dataset.react = m;
+    b.addEventListener("click", () => {
+      s.music.react = m;
+      syncDeps();
+      commit();
+      setSeg("button[data-react]", (x) => x.dataset.react === m);
+      showReactHint();
+    });
+    seg.append(b);
+  }
+  const live = el("small", "react-live", reactHint());
+  live.setAttribute("aria-live", "polite");
+  field.append(seg, live);
+  queueMicrotask(() => setSeg("button[data-react]", (b) => b.dataset.react === s.music.react));
+  return field;
+}
+
+let reactLast: { s: string; bpm: number; beat: number; at: number } | null = null;
+const showReactHint = () => document.querySelectorAll(".react-live").forEach((e) => { e.textContent = reactHint(); });
+function reactHint() {
+  if (s.music.react === "off") return "Die schwarze Kante bewegt sich zur Musik: Zacken für harte, schnelle Musik, Welle für ruhige, Puls für alles dazwischen. „Auto“ erkennt den Stil selbst.";
+  if (!reactLast || Date.now() - reactLast.at > 1500) return "Wartet auf Musik …";
+  const tempo = reactLast.bpm ? ` · ${reactLast.bpm} BPM · Takt ${reactLast.beat} %` : " · Tempo wird ermittelt …";
+  return `Erkannt: ${STYLE_NAME[reactLast.s] ?? reactLast.s}${tempo}`;
+}
+
 function extras(id: SourceId): HTMLElement[] {
   switch (id) {
     case "glucose": return [
@@ -278,6 +316,8 @@ function extras(id: SourceId): HTMLElement[] {
     case "music": return [
       optToggle("Pegel neben das Cover statt ausblenden", () => s.music.eqBesideCover, (v) => { s.music.eqBesideCover = v; }),
       optRange("Nach Pause noch zeigen", 0, 120, 5, DEFAULTS.music.lingerSec, secs, () => s.music.lingerSec, (v) => { s.music.lingerSec = v; }),
+      reactField(),
+      optRange("Stärke", 0.5, 2, 0.1, DEFAULTS.music.strength, (v) => `${Math.round(v * 100)} %`, () => s.music.strength, (v) => { s.music.strength = v; }, () => s.music.react !== "off"),
     ];
     case "timer": return [
       optToggle("Notch verbreitern statt Platz nehmen", () => s.timer.expand, (v) => { s.timer.expand = v; }),
@@ -532,6 +572,14 @@ async function main() {
   });
 
   // Live-Daten wie in der Notch
+  // Musik-Reaktion: was gerade erkannt wird (hoechstens 4x pro Sekunde auffrischen)
+  let reactShown = 0;
+  await listen<{ s: string; bpm: number; beat: number }>("spectrum", (e) => {
+    reactLast = { ...e.payload, at: Date.now() };
+    if (Date.now() - reactShown > 250) { reactShown = Date.now(); showReactHint(); }
+  });
+  setInterval(showReactHint, 2000);
+
   await listen<Media>("media", (e) => {
     if (liveMedia?.playing && e.payload && !e.payload.playing) pausedAt = Date.now();
     liveMedia = e.payload;

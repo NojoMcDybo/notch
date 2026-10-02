@@ -3,8 +3,10 @@ mod audio;
 mod clipboard;
 mod convert;
 mod media;
+mod music_style;
 mod open;
 mod shelf;
+mod spectrum;
 mod timer;
 mod update;
 mod voice;
@@ -47,7 +49,12 @@ fn set_hit_rect(rect: Rect) {
 
 /// Einstellung "Im Vollbild: Am Rand einblenden" (compact.fullscreen.mode == "peek", Schema im Frontend)
 fn peek_enabled() -> bool {
-    SETTINGS.lock().unwrap().pointer("/fullscreen/mode").and_then(|v| v.as_str()) == Some("peek")
+    settings_value("/fullscreen/mode").and_then(|v| v.as_str().map(|m| m == "peek")).unwrap_or(false)
+}
+
+/// Ein Wert aus den Einstellungen (Schema im Frontend), z. B. "/music/react"
+pub(crate) fn settings_value(pointer: &str) -> Option<serde_json::Value> {
+    SETTINGS.lock().unwrap().pointer(pointer).cloned()
 }
 
 /// Steht der Cursor an der Monitorkante, an der die Notch sitzt, und auf ihrer Hoehe bzw. Breite?
@@ -548,6 +555,7 @@ pub fn run() {
             spawn_pointer(w, hwnd);
             clipboard::spawn(app.handle().clone());
             update::spawn(app.handle().clone());
+            spectrum::spawn(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

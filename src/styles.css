@@ -481,3 +481,10 @@ svg { display: block; }
 .bg-tip { fill: #2c2c2e; stroke: rgba(255, 255, 255, 0.12); }
 .bg-tiptext { fill: #fff; font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .bg-empty { fill: var(--fg2); font-size: 11px; }
+
+/* ---------- Musik-Reaktion (music-react.ts) ---------- */
+/* schwarze Flaeche direkt an der Kante, zwischen den runden Ecken; 1 px Ueberlappung gegen Haarlinien */
+#notch .react { position: absolute; pointer-events: none; left: var(--r); right: var(--r); top: calc(100% - 1px); width: auto; height: 32px; }
+#notch[data-dock="left"] .react { left: calc(100% - 1px); right: auto; top: var(--r); bottom: var(--r); width: 32px; height: auto; }
+#notch[data-dock="right"] .react { right: calc(100% - 1px); left: auto; top: var(--r); bottom: var(--r); width: 32px; height: auto; }
+#notch.gone .react { visibility: hidden; }
