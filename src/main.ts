@@ -117,6 +117,12 @@ let hover = false;
 let hoverRaw = false;
 let peekUntil = 0;
 let fullscreen = false;
+/** im Vollbild per Maus an der Kante ausgefahren (Einstellung „Im Vollbild: Am Rand einblenden“) */
+let peek = false;
+/** Vollbild: versteckt, ausser „Sichtbar, nicht anklickbar“ oder gerade per Kante ausgefahren */
+const hiddenByFullscreen = () => fullscreen && !peek && settings.fullscreen.mode !== "show";
+/** Vollbild: Klicks gehen durch die Notch ans Programm (versteckt oder „nicht anklickbar“) */
+const passiveInFullscreen = () => fullscreen && !peek;
 let dragOver = false;
 let holding = 0; // laufende Zieh-Gesten (Spulen/Lautstaerke) halten die Notch offen
 let state: State = "idle";
@@ -1188,7 +1194,7 @@ function render(full = true) {
 
   state = wanted();
   notch.dataset.state = state;
-  notch.classList.toggle("gone", fullscreen);
+  notch.classList.toggle("gone", hiddenByFullscreen());
   notch.classList.toggle("dragging", dragOver);
   notch.classList.toggle("alarm", timerAlarm());
   if (timerAlarm() && view !== "home") { view = "home"; notch.dataset.view = "home"; }
@@ -1225,7 +1231,7 @@ function render(full = true) {
   // unter dem Zeiger weg.
   if (state === "expanded" && hoverRaw && lastRect) rect = union(rect, lastRect);
   lastRect = state === "expanded" && hoverRaw ? rect : null;
-  invoke("set_hit_rect", { rect: fullscreen ? { x: 0, y: 0, w: 0, h: 0 } : rect });
+  invoke("set_hit_rect", { rect: passiveInFullscreen() ? { x: 0, y: 0, w: 0, h: 0 } : rect });
   if (state === "expanded" && countdowns.size) tickCountdowns();
 }
 
@@ -1290,6 +1296,7 @@ async function main() {
     setTimeout(render, 3600);
   });
   await listen<boolean>("fullscreen", (e) => { fullscreen = e.payload; render(); });
+  await listen<boolean>("peek", (e) => { peek = e.payload; render(); });
   await listen<boolean>("hover", (e) => {
     hoverRaw = e.payload;
     clearTimeout(hoverTimer);
@@ -1332,13 +1339,14 @@ async function main() {
   q(".settings-btn").addEventListener("click", () => { invoke("open_settings").catch(() => {}); });
 
   const snap = await invoke<{
-    media: Media; cover: string | null; activities: Activity[]; shelf: Item[]; clips: Clip[]; fullscreen: boolean; hover: boolean;
+    media: Media; cover: string | null; activities: Activity[]; shelf: Item[]; clips: Clip[]; fullscreen: boolean; peek?: boolean; hover: boolean;
     dock: Dock; voice_key: string;
   }>("snapshot");
   dock = snap.dock;
   voiceKey = snap.voice_key;
   micBtn.title = voiceKey ? `Sprachassistent (${voiceKey})` : "Sprachassistent";
   fullscreen = snap.fullscreen;
+  peek = !!snap.peek;
   hover = hoverRaw = snap.hover;
   setMedia(snap.media);
   setCover(snap.cover);

@@ -33,7 +33,12 @@ Was die zugeklappte Notch zeigt, entscheidet eine Rangliste (`src/compact.ts`, S
 - Folio blättert, liegt aber nicht in der Notch: Seitenzahl übernimmt kurz (Standard 2 s) den letzten Platz.
 - Pro Quelle ausblendbar (nur kompakt; aufgeklappt bleibt alles da).
 
-Bei Vollbild-Programmen auf dem Hauptmonitor fährt die Notch nach oben weg.
+Bei Vollbild-Programmen auf dem Hauptmonitor verhält sich die Notch nach **Einstellungen › Andocken › Im Vollbild**:
+- **Ausblenden** (Standard): Sie fährt weg.
+- **Am Rand**: Sie fährt weg; Maus an die Bildschirmkante, wo sie sonst sitzt, holt sie heraus, 0,4 s nach dem Wegfahren der Maus verschwindet sie wieder.
+- **Nur anzeigen**: Sie bleibt klein sichtbar, ist aber durchklickbar (Klicks gehen ans Vollbild-Programm) und klappt nicht auf.
+
+Exklusives Vollbild (manche Spiele) lässt kein Fenster darüber zu; dort bleibt die Notch in jedem Fall unsichtbar.
 
 ## Andocken: oben, links, rechts
 

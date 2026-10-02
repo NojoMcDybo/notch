@@ -30,7 +30,13 @@ export type CompactSettings = {
   timer: { expand: boolean };
   pulse: { boost: boolean; threshold: number };
   folio: { flash: boolean; flashSec: number };
+  /** Vollbild-Programm vorn: hide = weg; peek = weg, Maus an die Kante holt sie kurz raus;
+   *  show = bleibt sichtbar, aber durchklickbar (Klicks gehen ans Programm) */
+  fullscreen: { mode: FullscreenMode };
 };
+
+export type FullscreenMode = "hide" | "peek" | "show";
+export const FULLSCREEN_MODES: FullscreenMode[] = ["hide", "peek", "show"];
 
 export const DEFAULTS: CompactSettings = {
   v: 1,
@@ -42,6 +48,7 @@ export const DEFAULTS: CompactSettings = {
   timer: { expand: true },
   pulse: { boost: true, threshold: 140 },
   folio: { flash: true, flashSec: 2 },
+  fullscreen: { mode: "hide" },
 };
 
 /** Puls faellt erst so viele bpm unter der Schwelle wieder zurueck (kein Hin- und Herspringen) */
@@ -62,7 +69,7 @@ export function normalize(raw: unknown): CompactSettings {
   const uniq = [...new Set(order)];
   // neue Quellen (spaetere Versionen) an ihrer Standardstelle einfuegen
   for (const id of DEFAULTS.order) if (!uniq.includes(id)) uniq.splice(Math.min(DEFAULTS.order.indexOf(id), uniq.length), 0, id);
-  const g = obj(r.glucose), m = obj(r.music), t = obj(r.timer), p = obj(r.pulse), f = obj(r.folio);
+  const g = obj(r.glucose), m = obj(r.music), t = obj(r.timer), p = obj(r.pulse), f = obj(r.folio), fs = obj(r.fullscreen);
   return {
     v: 1,
     order: uniq,
@@ -73,6 +80,7 @@ export function normalize(raw: unknown): CompactSettings {
     timer: { expand: bool(t.expand, DEFAULTS.timer.expand) },
     pulse: { boost: bool(p.boost, DEFAULTS.pulse.boost), threshold: Math.round(num(p.threshold, 60, 220, DEFAULTS.pulse.threshold)) },
     folio: { flash: bool(f.flash, DEFAULTS.folio.flash), flashSec: num(f.flashSec, 0.5, 8, DEFAULTS.folio.flashSec) },
+    fullscreen: { mode: FULLSCREEN_MODES.includes(fs.mode as FullscreenMode) ? (fs.mode as FullscreenMode) : DEFAULTS.fullscreen.mode },
   };
 }
 

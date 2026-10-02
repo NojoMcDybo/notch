@@ -34,10 +34,31 @@ struct Rect {
     h: f64,
 }
 static HIT: Mutex<Rect> = Mutex::new(Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 });
+/// letzte sichtbare Form — im Vollbild meldet das Frontend eine leere; daran misst sich die Kante
+static LAST_HIT: Mutex<Rect> = Mutex::new(Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 });
 
 #[tauri::command]
 fn set_hit_rect(rect: Rect) {
+    if rect.w > 0.0 && rect.h > 0.0 {
+        *LAST_HIT.lock().unwrap() = rect;
+    }
     *HIT.lock().unwrap() = rect;
+}
+
+/// Einstellung "Im Vollbild: Am Rand einblenden" (compact.fullscreen.mode == "peek", Schema im Frontend)
+fn peek_enabled() -> bool {
+    SETTINGS.lock().unwrap().pointer("/fullscreen/mode").and_then(|v| v.as_str()) == Some("peek")
+}
+
+/// Steht der Cursor an der Monitorkante, an der die Notch sitzt, und auf ihrer Hoehe bzw. Breite?
+/// `span`: Ausdehnung der Notch entlang der Kante in Bildschirmpixeln (x fuer oben, y fuer seitlich).
+fn at_peek_edge(dock: &str, (cx, cy): (f64, f64), (mx, my, mw, _mh): (i32, i32, i32, i32), (a, b): (f64, f64)) -> bool {
+    let (mx, my, mw) = (mx as f64, my as f64, mw as f64);
+    match dock {
+        "left" => cx <= mx + 1.0 && cy >= a && cy <= b,
+        "right" => cx >= mx + mw - 2.0 && cy >= a && cy <= b,
+        _ => cy <= my + 1.0 && cx >= a && cx <= b,
+    }
 }
 
 #[tauri::command]
@@ -50,6 +71,7 @@ fn snapshot() -> serde_json::Value {
         "clips": clipboard::list(),
         "port": activities::PORT,
         "fullscreen": FULLSCREEN.load(Ordering::Relaxed),
+        "peek": PEEK.load(Ordering::Relaxed),
         "hover": HOVER.load(Ordering::Relaxed),
         "dock": dock(),
         "voice_key": VOICE_KEY.lock().unwrap().clone(),
@@ -61,6 +83,8 @@ static VOICE_KEY: Mutex<String> = Mutex::new(String::new());
 
 // Fuer den Fall, dass das Frontend (neu) laedt, nachdem ein Event schon raus ist.
 static FULLSCREEN: AtomicBool = AtomicBool::new(false);
+/// im Vollbild per Maus an der Kante ausgefahren
+static PEEK: AtomicBool = AtomicBool::new(false);
 static HOVER: AtomicBool = AtomicBool::new(false);
 /// Ein Eingabefeld in der Notch hat den Fokus -> Fenster darf vorne bleiben (Tastatur)
 static KEYBOARD: AtomicBool = AtomicBool::new(false);
@@ -299,6 +323,8 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
             .unwrap_or(Geo { wx: 0, wy: 0, ww: 640, wh: 400, scale: 1.0, mon: (0, 0, 1920, 1080) });
         let mut inside_prev = false;
         let mut fs_prev = false;
+        let mut peek = false;
+        let mut away_since: Option<std::time::Instant> = None;
         let mut tick: u32 = 0;
         let mut last_fg: isize = 0;
         loop {
@@ -319,6 +345,11 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
                     fs_prev = fs;
                     FULLSCREEN.store(fs, Ordering::Relaxed);
                     let _ = w.emit("fullscreen", fs);
+                    if !fs && peek {
+                        peek = false;
+                        PEEK.store(false, Ordering::Relaxed);
+                        let _ = w.emit("peek", false);
+                    }
                 }
             }
             if REPLACE.swap(false, Ordering::Relaxed) {
@@ -335,8 +366,30 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
             tick = tick.wrapping_add(1);
 
             let (wx, wy, s) = (geo.wx, geo.wy, geo.scale);
-            let inside = !fs_prev
-                && match win::cursor() {
+            let cursor = win::cursor();
+            // Vollbild: Maus an die Kante, wo die Notch sitzt -> ausfahren; weg davon -> wieder rein
+            let at_edge = fs_prev
+                && cursor.is_some_and(|(cx, cy)| {
+                    let d = dock();
+                    let r = *LAST_HIT.lock().unwrap();
+                    let margin = 24.0 * s;
+                    let span = match (d.as_str(), r.w > 0.0) {
+                        ("left" | "right", true) => (wy as f64 + r.y * s - margin, wy as f64 + (r.y + r.h) * s + margin),
+                        (_, true) => (wx as f64 + r.x * s - margin, wx as f64 + (r.x + r.w) * s + margin),
+                        // noch nie sichtbar gewesen: Mitte des Fensters
+                        ("left" | "right", false) => (wy as f64 + geo.wh as f64 / 2.0 - 150.0 * s, wy as f64 + geo.wh as f64 / 2.0 + 150.0 * s),
+                        (_, false) => (wx as f64 + geo.ww as f64 / 2.0 - 150.0 * s, wx as f64 + geo.ww as f64 / 2.0 + 150.0 * s),
+                    };
+                    at_peek_edge(&d, (cx as f64, cy as f64), geo.mon, span)
+                });
+            if at_edge && !peek && peek_enabled() {
+                peek = true;
+                away_since = None;
+                PEEK.store(true, Ordering::Relaxed);
+                let _ = w.emit("peek", true);
+            }
+            let inside = (!fs_prev || peek)
+                && match cursor {
                     Some((cx, cy)) => {
                         let r = *HIT.lock().unwrap();
                         let pad = 6.0;
@@ -349,6 +402,15 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
                     }
                     None => false,
                 };
+            if peek && fs_prev {
+                if inside || at_edge {
+                    away_since = None;
+                } else if away_since.get_or_insert_with(std::time::Instant::now).elapsed() > Duration::from_millis(400) {
+                    peek = false;
+                    PEEK.store(false, Ordering::Relaxed);
+                    let _ = w.emit("peek", false);
+                }
+            }
             if inside != inside_prev {
                 inside_prev = inside;
                 win::enforce(hwnd, !inside);
@@ -490,4 +552,31 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("Notch konnte nicht starten");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::at_peek_edge;
+
+    const MON: (i32, i32, i32, i32) = (0, 0, 1920, 1080);
+
+    #[test]
+    fn oben_nur_ganz_oben_und_ueber_der_notch() {
+        let span = (760.0, 1160.0);
+        assert!(at_peek_edge("top", (960.0, 0.0), MON, span));
+        assert!(at_peek_edge("top", (760.0, 1.0), MON, span));
+        assert!(!at_peek_edge("top", (960.0, 3.0), MON, span), "knapp unter der Kante");
+        assert!(!at_peek_edge("top", (300.0, 0.0), MON, span), "Kante, aber nicht bei der Notch");
+    }
+
+    #[test]
+    fn seitlich_und_zweiter_monitor() {
+        let span = (340.0, 740.0);
+        assert!(at_peek_edge("left", (0.0, 540.0), MON, span));
+        assert!(!at_peek_edge("left", (1919.0, 540.0), MON, span));
+        assert!(at_peek_edge("right", (1919.0, 540.0), MON, span));
+        assert!(!at_peek_edge("right", (1919.0, 100.0), MON, span));
+        // rechter Monitor (x ab 1920), Notch oben
+        assert!(at_peek_edge("top", (2880.0, 0.0), (1920, 0, 2560, 1440), (2680.0, 3080.0)));
+    }
 }

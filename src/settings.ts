@@ -10,7 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { build, bpmOf, needed, plan, planKey, PulseGate, sourceOf, TIMER_ID, type CAct, type Plan } from "./compact";
-import { clone, DEFAULTS, normalize, SOURCES, type CompactSettings, type SourceId } from "./settings-model";
+import { clone, DEFAULTS, FULLSCREEN_MODES, normalize, SOURCES, type CompactSettings, type FullscreenMode, type SourceId } from "./settings-model";
 
 const q = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector(s) as T;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) {
@@ -491,9 +491,33 @@ function demoChips() {
   }));
 }
 
+const FULLSCREEN_TEXT: Record<FullscreenMode, [string, string]> = {
+  hide: ["Ausblenden", "Läuft ein Programm im Vollbild, fährt die Notch weg."],
+  peek: ["Am Rand", "Die Notch fährt weg. Fährst du mit der Maus an die Bildschirmkante, wo sie sonst sitzt, kommt sie heraus – und verschwindet wieder, sobald die Maus weggeht."],
+  show: ["Nur anzeigen", "Die Notch bleibt klein sichtbar (z. B. Blutzucker beim Spielen), ist aber nicht anklickbar: Klicks gehen durch sie hindurch ans Programm, und sie klappt nicht auf."],
+};
+
+function renderDock() {
+  const field = el("div", "field");
+  field.setAttribute("role", "group");
+  field.setAttribute("aria-label", "Im Vollbild");
+  field.append("Im Vollbild");
+  const seg = el("div", "segmented compact");
+  for (const m of FULLSCREEN_MODES) {
+    const b = el("button", "", FULLSCREEN_TEXT[m][0]);
+    b.dataset.fsmode = m;
+    b.addEventListener("click", () => { s.fullscreen.mode = m; commit(); renderDock(); });
+    seg.append(b);
+  }
+  field.append(seg, el("small", "", FULLSCREEN_TEXT[s.fullscreen.mode][1]));
+  q(".dock-options").replaceChildren(field);
+  setSeg("button[data-fsmode]", (b) => b.dataset.fsmode === s.fullscreen.mode);
+}
+
 function renderAll() {
   syncSegs();
   renderList();
+  renderDock();
 }
 
 async function main() {
