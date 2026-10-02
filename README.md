@@ -186,3 +186,7 @@ Browser-Seiten dürfen nur von `localhost`/`127.0.0.1`/`tauri://` aus schreiben 
 - `src-tauri/src/shelf.rs`, `convert.rs` — Ablage und Konvertieren
 - `src-tauri/src/win.rs` — Win32: Cursor, Vollbild, Fensterstile, Fenster nach vorn holen
 - `src/main.ts`, `src/styles.css` — Form, Federanimation, Ansichten
+
+## Lizenz
+
+MIT, siehe [LICENSE](LICENSE).
