@@ -120,8 +120,14 @@ let peekUntil = 0;
 let fullscreen = false;
 /** im Vollbild per Maus an der Kante ausgefahren (Einstellung „Im Vollbild: Am Rand einblenden“) */
 let peek = false;
-/** Vollbild: versteckt, ausser „Sichtbar, nicht anklickbar“ oder gerade per Kante ausgefahren */
-const hiddenByFullscreen = () => fullscreen && !peek && settings.fullscreen.mode !== "show";
+/** Controller (gamepad.rs): Steuerkreuz links + RB/RT holt die Notch im Vollbild klein/aufgeklappt heraus */
+let padMode: "off" | "compact" | "expanded" = "off";
+/** Sprachassistent per Controller gestartet: im Vollbild sichtbar, solange er laeuft (ausser „Ausblenden“) */
+let padVoice = false;
+/** Vollbild: versteckt, ausser „Sichtbar, nicht anklickbar“, per Kante/Controller herausgeholt oder Sprachassistent per Controller */
+const hiddenByFullscreen = () =>
+  fullscreen && !peek && padMode === "off" && settings.fullscreen.mode !== "show" &&
+  !(padVoice && voice.active && settings.fullscreen.mode !== "hide");
 /** Vollbild: Klicks gehen durch die Notch ans Programm (versteckt oder „nicht anklickbar“) */
 const passiveInFullscreen = () => fullscreen && !peek;
 let dragOver = false;
@@ -169,7 +175,7 @@ const findShelf = (name: string) => {
 };
 
 const voice = new Voice({
-  onState: (s, detail) => showVoice(s, detail),
+  onState: (s, detail) => { if (s === "off" || s === "error") padVoice = false; showVoice(s, detail); },
   onTranscript: (t) => { q(".v-text", voiceEl).textContent = t; render(false); },
   onLevel: (l) => orb.style.setProperty("--lvl", l.toFixed(3)),
   // Werkzeuge, mit denen der Assistent die Notch bedient — alles ueber die vorhandenen Befehle
@@ -473,7 +479,7 @@ function currentPlan(): Plan {
 const timerAlarm = () => acts.some((a) => a.id === "notch:timer" && a.title.includes("abgelaufen"));
 
 function wanted(): State {
-  if (hover || dragOver || holding > 0 || typing || voiceShown || timerAlarm() || Date.now() < peekUntil) return "expanded";
+  if (hover || dragOver || holding > 0 || typing || voiceShown || timerAlarm() || Date.now() < peekUntil || padMode === "expanded") return "expanded";
   if (Date.now() < clipPeekUntil) return "clip";
   const p = currentPlan();
   if (p.slots.length || p.timer) return "compact";
@@ -1387,6 +1393,16 @@ async function main() {
   // Sprachassistent: Mikrofon-Knopf, Strg+Alt+Leertaste, Beenden, Schluessel eintragen
   micBtn.addEventListener("click", () => void toggleVoice());
   await listen("voice-toggle", () => void toggleVoice());
+  // Controller: Steuerkreuz links + R3 halten = zuhoeren, loslassen = antworten
+  await listen<boolean>("voice-ptt", async (e) => {
+    if (e.payload) {
+      if (!voice.active && !(await invoke<boolean>("voice_ready"))) { showVoice("nokey"); return; }
+      padVoice = true;
+    }
+    void voice.hold(e.payload);
+    render();
+  });
+  await listen<"off" | "compact" | "expanded">("pad", (e) => { padMode = e.payload; render(); });
   q(".v-stop").addEventListener("click", () => { voice.stop(); showVoice("off"); });
   q(".v-setup").addEventListener("click", () => { invoke("voice_setup"); showVoice("off"); });
 

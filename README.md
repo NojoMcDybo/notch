@@ -180,6 +180,18 @@ Browser-Seiten dürfen nur von `localhost`/`127.0.0.1`/`tauri://` aus schreiben 
 - **Haze** (Electron-App, `D:\Dev\haze`, Repo NojoMcDybo/Haze): Nightscout-Dashboard (Dexcom Share über Nightscout als Brücke), hält selbst bis zu 600 Messwerte (~2 Tage). `desktop/notch-bridge.cjs` schickt bei jedem neuen Messwert `haze:bg` mit Wert, Trend (Sensor, sonst Dexcom-Schwellen), Änderung und 24 h Verlauf, `ttl` 900 s + Auffrischen jede Minute, `alert` beim Wechsel in hoch/tief; beim Beenden wird der Eintrag gelöscht. Doppelklick auf den Graphen holt das Dashboard nach vorn (Haze pollt `/events`). Seit Haze-PR #4/#5 in `main`; einen Haze-Branch testen: `tools\haze-branch-start.cmd` per Explorer starten.
 - Der ältere C#-Prototyp (jetzt `D:\Dev\_archiv\haze-widget-lab`) (Widget Lab, nur Demowerte, id `haze-bz`) ist nicht mehr die angebundene App.
 
+## Controller
+
+Xbox-Controller und alles, was sich per XInput meldet (GameSir, Steam Input …), auch während ein Spiel vorne ist (`src-tauri/src/gamepad.rs`, ohne Controller wird nur alle 250 ms nachgesehen):
+
+| Kombination | Wirkung |
+|---|---|
+| Steuerkreuz links + RB (R1) | Notch klein heraus – nur im Vollbild mit *Im Vollbild: Am Rand*; nochmal = weg, sonst nach 10 s |
+| Steuerkreuz links + RT (R2) | Notch aufgeklappt heraus – ebenso |
+| Steuerkreuz links + R3 halten | Sprachassistent hört zu, solange gedrückt; loslassen = er antwortet (Sitzung startet bei Bedarf, ohne automatische Spracherkennung; erneutes Drücken unterbricht ihn) |
+
+Herausgeholt bleibt die Notch durchklickbar, Klicks gehen weiter ans Spiel. **Grenze:** XInput kann nur mitlesen – das Spiel sieht dieselben Tasten. Wer das nicht will, legt die Kombination z. B. in Steam Input auf eine Taste, die das Spiel nicht nutzt.
+
 ## Musik-Reaktion
 
 Einstellungen › Anzeige › Musik › **Notch reagiert auf Musik**: *Aus* (Standard) / *Auto* / *Eigene*, dazu **Stärke** (50–200 %). Die schwarze Notch verformt sich an allen drei freien Seiten (oben angedockt: links, unten, rechts; seitlich entsprechend gedreht), unten in der Mitte der Bass, zu den Enden Mitten und Höhen bis ~2,7 kHz; an der Bildschirmkante läuft es auf 8 px aus. Maximaler Ausschlag bei 100 %: 26 px kompakt, 54 px aufgeklappt.

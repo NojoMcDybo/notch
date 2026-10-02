@@ -97,6 +97,10 @@ export class Voice {
   private raf = 0;
   private idle = 0;
   private text = "";
+  /** Sprechen per Knopfdruck (Controller): keine automatische Spracherkennung, Mikro nur beim Halten */
+  private ptt = false;
+  /** gehalten = Mikro soll an sein (auch waehrend die Verbindung noch aufgebaut wird) */
+  private held = false;
   state: VoiceState = "off";
 
   constructor(private h: VoiceHooks) {
@@ -123,6 +127,49 @@ export class Voice {
   private bumpIdle() {
     clearTimeout(this.idle);
     this.idle = window.setTimeout(() => this.stop(), IDLE_MS);
+  }
+
+  /** Halten zum Sprechen: gedrueckt = zuhoeren (startet die Sitzung bei Bedarf), losgelassen = antworten */
+  async hold(down: boolean) {
+    this.held = down;
+    if (down) {
+      if (!this.active) {
+        this.ptt = true;
+        await this.start();
+        return;
+      }
+      if (!this.ptt) {
+        // Sitzung lief mit automatischer Erkennung (Tastenkuerzel): ab jetzt per Knopfdruck
+        this.ptt = true;
+        this.configure();
+      }
+      // spricht der Assistent gerade: unterbrechen
+      if (this.state === "speaking" || this.state === "thinking") {
+        this.send({ type: "response.cancel" });
+        this.send({ type: "output_audio_buffer.clear" });
+      }
+      this.send({ type: "input_audio_buffer.clear" });
+      this.setMic(true);
+      this.text = "";
+      this.h.onTranscript("");
+      this.set("listening");
+      this.bumpIdle();
+    } else {
+      if (!this.ptt || this.state === "connecting" || !this.active) return; // configure() kuemmert sich
+      this.release();
+    }
+  }
+
+  private release() {
+    this.setMic(false);
+    this.send({ type: "input_audio_buffer.commit" });
+    this.send({ type: "response.create" });
+    this.set("thinking");
+    this.bumpIdle();
+  }
+
+  private setMic(on: boolean) {
+    this.mic?.getAudioTracks().forEach((t) => { t.enabled = on; });
   }
 
   async start() {
@@ -172,6 +219,7 @@ export class Voice {
     void this.ctx?.close().catch(() => {});
     this.audio.srcObject = null;
     this.dc = this.pc = this.mic = this.ctx = undefined;
+    this.ptt = this.held = false;
     this.h.onLevel(0);
     if (this.state !== "error") this.set("off");
   }
@@ -184,11 +232,14 @@ export class Voice {
         instructions: INSTRUCTIONS,
         tools: TOOLS,
         tool_choice: "auto",
-        audio: { input: { turn_detection: { type: "semantic_vad" } } },
+        // Knopfdruck: wir sagen selbst, wann der Satz fertig ist (commit beim Loslassen)
+        audio: { input: { turn_detection: this.ptt ? null : { type: "semantic_vad" } } },
       },
     });
     this.set("listening");
     this.bumpIdle();
+    // schon losgelassen, waehrend die Verbindung aufgebaut wurde: das Gesagte trotzdem beantworten
+    if (this.ptt && !this.held) this.release();
   }
 
   private onEvent(ev: { type: string; [k: string]: any }) {

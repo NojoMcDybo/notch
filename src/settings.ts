@@ -550,7 +550,7 @@ function demoChips() {
 
 const FULLSCREEN_TEXT: Record<FullscreenMode, [string, string]> = {
   hide: ["Ausblenden", "Läuft ein Programm im Vollbild, fährt die Notch weg."],
-  peek: ["Am Rand", "Die Notch fährt weg. Fährst du mit der Maus an die Bildschirmkante, wo sie sonst sitzt, kommt sie heraus – und verschwindet wieder, sobald die Maus weggeht."],
+  peek: ["Am Rand", "Die Notch fährt weg. Fährst du mit der Maus an die Bildschirmkante, wo sie sonst sitzt, kommt sie heraus – und verschwindet wieder, sobald die Maus weggeht. Mit Xbox-Controller: Steuerkreuz links + RB holt sie klein heraus, Steuerkreuz links + RT aufgeklappt; nochmal drücken oder nach 10 s wieder weg."],
   show: ["Nur anzeigen", "Die Notch bleibt klein sichtbar (z. B. Blutzucker beim Spielen), ist aber nicht anklickbar: Klicks gehen durch sie hindurch ans Programm, und sie klappt nicht auf."],
 };
 

@@ -2,6 +2,7 @@ mod activities;
 mod audio;
 mod clipboard;
 mod convert;
+mod gamepad;
 mod media;
 mod music_style;
 mod open;
@@ -48,7 +49,7 @@ fn set_hit_rect(rect: Rect) {
 }
 
 /// Einstellung "Im Vollbild: Am Rand einblenden" (compact.fullscreen.mode == "peek", Schema im Frontend)
-fn peek_enabled() -> bool {
+pub(crate) fn peek_enabled() -> bool {
     settings_value("/fullscreen/mode").and_then(|v| v.as_str().map(|m| m == "peek")).unwrap_or(false)
 }
 
@@ -556,6 +557,7 @@ pub fn run() {
             clipboard::spawn(app.handle().clone());
             update::spawn(app.handle().clone());
             spectrum::spawn(app.handle().clone());
+            gamepad::spawn(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
