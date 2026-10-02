@@ -23,8 +23,9 @@ export const TIMER_ID = "notch:timer";
 
 export function sourceOf(a: CAct): SourceId {
   if (a.id === TIMER_ID) return "timer";
-  if (isBg(a) || a.app === "Haze") return "glucose";
+  // Puls zuerst: Haze schickt neben dem Blutzucker auch den Garmin-Puls (haze:hr, mit `pulse`)
   if ((a.pulse ?? 0) > 0 || a.app === "Helio") return "pulse";
+  if (isBg(a) || a.app === "Haze") return "glucose";
   if (a.app === "Folio") return "folio";
   return "other";
 }

@@ -24,7 +24,7 @@ Beenden über das Tray-Symbol → „Notch beenden".
 
 Was die zugeklappte Notch zeigt, entscheidet eine Rangliste (`src/compact.ts`, Schema in `src/settings-model.ts`, gespeichert unter `compact` in `config.json`). Einstellungen öffnen: Zahnrad in der aufgeklappten Notch oder Tray → „Einstellungen …“ — eigenes Fenster, nicht in der Notch.
 
-- Quellen: Blutzucker (Haze / Activity mit `chart`), Musik, Timer (`notch:timer`), Puls (Activity mit `pulse` / Helio), Folio (`app: "Folio"`), Andere Apps.
+- Quellen: Blutzucker (Haze / Activity mit `chart`), Musik, Timer (`notch:timer`), Puls (Activity mit `pulse`: Garmin über Haze `haze:hr`, sonst Helio — die höhere `priority` gewinnt, aufgeklappt steht nur eine Puls-Zeile), Folio (`app: "Folio"`), Andere Apps.
 - Standard: Blutzucker, Musik, Timer, Puls, Folio, Andere — zwei Plätze gleichzeitig.
 - Musik + etwas anderes: Pegel-Balken wandern neben das Cover statt zu verschwinden.
 - Timer läuft: die Notch wird breiter, der Timer hängt sich rechts an und verdrängt nichts (abschaltbar → reiht sich ein).

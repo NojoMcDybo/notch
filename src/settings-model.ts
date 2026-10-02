@@ -12,7 +12,7 @@ export const SOURCES: Record<SourceId, { name: string; from: string; color: stri
   glucose: { name: "Blutzucker", from: "Haze", color: "#ff7971" },
   music: { name: "Musik", from: "Windows-Medien", color: "#30d158" },
   timer: { name: "Timer", from: "Notch", color: "#ffb340" },
-  pulse: { name: "Puls", from: "Helio", color: "#ff5a6e" },
+  pulse: { name: "Puls", from: "Garmin über Haze, sonst Helio", color: "#ff5a6e" },
   folio: { name: "Folio", from: "Seitenzahl", color: "#f5f5f7" },
   other: { name: "Andere Apps", from: "Live Activities", color: "#64d2ff" },
 };
