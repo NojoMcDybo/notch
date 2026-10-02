@@ -1,6 +1,6 @@
 [package]
 name = "notch"
-version = "0.1.1"
+version = "0.1.2"
 description = "Notch - Dynamic-Island-artige Infoanzeige fuer Windows"
 authors = ["Nojo"]
 edition = "2021"
@@ -25,6 +25,7 @@ ureq = { version = "3", features = ["json"] }
 webview2-com = "0.39"
 tauri-plugin-global-shortcut = "2"
 arboard = "3"
+tauri-plugin-updater = "2"
 
 [dependencies.windows]
 version = "0.62"

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Notch",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "de.nojo.notch",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -36,19 +36,37 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": { "allow": ["**"] }
+        "scope": {
+          "allow": [
+            "**"
+          ]
+        }
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFCRjZEODM0MzVBQjU4MjYKUldRbVdLczFOTmoycTlIeEIzNEt5NHZ3aXU1RGZFcUI3NCtSWFRoSE01NE9ZM2x6bU0ybjFXeXoK",
+      "endpoints": [
+        "https://github.com/NojoMcDybo/notch/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

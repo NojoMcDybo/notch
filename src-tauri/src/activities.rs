@@ -420,6 +420,10 @@ pub fn activity_action(app: AppHandle, id: String, action: String) -> Result<(),
         crate::timer::action(&app, &action);
         return Ok(());
     }
+    if id == crate::update::ID {
+        crate::update::action(&app, &action);
+        return Ok(());
+    }
     let Some(act) = get(&id) else { return Ok(()) };
     let Some(a) = act.actions.iter().find(|a| a.id == action) else { return Ok(()) };
     if let Some(url) = &a.post {

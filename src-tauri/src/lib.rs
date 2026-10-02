@@ -6,6 +6,7 @@ mod media;
 mod open;
 mod shelf;
 mod timer;
+mod update;
 mod voice;
 mod win;
 
@@ -355,6 +356,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_drag::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             // Strg+Alt+Leertaste: Sprachassistent an/aus — egal, welches Programm vorne ist
             tauri_plugin_global_shortcut::Builder::new()
@@ -439,8 +441,9 @@ pub fn run() {
             let left = MenuItem::with_id(app, "dock:left", "Links andocken", true, None::<&str>)?;
             let right = MenuItem::with_id(app, "dock:right", "Rechts andocken", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
+            let updates = MenuItem::with_id(app, "updates", "Nach Updates suchen", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Notch beenden", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&settings, &sep0, &top, &left, &right, &sep, &quit])?;
+            let menu = Menu::with_items(app, &[&settings, &sep0, &top, &left, &right, &sep, &updates, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("Notch")
@@ -455,6 +458,9 @@ pub fn run() {
                         tauri::async_runtime::spawn(async move {
                             let _ = show_settings(&app);
                         });
+                    } else if id == "updates" {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move { update::check(&app, true).await });
                     } else if let Some(d) = id.strip_prefix("dock:") {
                         set_dock(app, d);
                     }
@@ -467,6 +473,7 @@ pub fn run() {
             audio::spawn_meter(app.handle().clone());
             spawn_pointer(w, hwnd);
             clipboard::spawn(app.handle().clone());
+            update::spawn(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
