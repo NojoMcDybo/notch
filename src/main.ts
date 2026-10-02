@@ -748,7 +748,9 @@ function newRow(id: string) {
 }
 
 function renderActs() {
-  const list = acts.slice(0, 4);
+  // nur eine Puls-Zeile: die wichtigste (Garmin über Haze hat Vorrang vor Helio, siehe priority)
+  const firstPulse = acts.find((a) => sourceOf(a) === "pulse");
+  const list = acts.filter((a) => sourceOf(a) !== "pulse" || a === firstPulse).slice(0, 4);
   const sig = JSON.stringify(list) + dock;
   if (sig === actsSig) return;
   actsSig = sig;

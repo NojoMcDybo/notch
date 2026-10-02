@@ -161,7 +161,7 @@ function statusText(id: SourceId, c: ReturnType<typeof current>): string {
       if (!liveMedia) return "Gerade keine Musik";
       return `${liveMedia.playing ? "Spielt" : "Pausiert"} · ${liveMedia.title || "unbekannter Titel"}`;
     case "timer": return a ? `${a.title.includes("abgelaufen") ? "Abgelaufen" : "Läuft"} · ${a.value ?? ""}` : "Kein Timer";
-    case "pulse": return a ? `${bpmOf(a)} bpm · ${a.app}` : "Helio schickt gerade nichts";
+    case "pulse": return a ? `${bpmOf(a)} bpm · ${a.app === "Haze" ? "Garmin über Haze" : a.app}` : "Kein Pulsmesser verbunden";
     case "folio": return a ? `${a.title} · Seite ${a.value ?? "?"} ${a.unit ?? ""}`.trim() : "Kein Dokument offen";
     case "other": {
       const o = c.acts.filter((x) => sourceOf(x) === "other");
