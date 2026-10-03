@@ -707,12 +707,22 @@ const sportSlot = q(".sport-slot");
 const bannerSlot = q(".sport-banner");
 let sportCardSig = "";
 let bannerSig = "";
+/** Arena (eigene Sport-App) installiert? Alle 5 Min neu nachsehen */
+let arena = false;
+let arenaAt = 0;
+function checkArena() {
+  if (Date.now() - arenaAt < 5 * 60_000) return;
+  arenaAt = Date.now();
+  invoke<boolean>("arena_installed").then((v) => { if (v !== arena) { arena = v; render(); } }).catch(() => {});
+}
+const openArena = (key = "") => invoke("open", { target: key ? `arena://spiel/${encodeURIComponent(key)}` : "arena://start" }).catch(() => {});
 
 function renderSport() {
   const f = cardFocus();
   const usePitch = !!f && f.pitch && f.source === "espn" && settings.sport.pitch && f.state !== "pre";
   const others = f ? sport.matches.filter((m) => m.key !== f.key && m.state === "in") : [];
-  const sig = f ? cardSig(f, others, dock !== "top", usePitch) : "";
+  if (f) checkArena();
+  const sig = f ? cardSig(f, others, dock !== "top", usePitch, arena) : "";
   if (sig !== sportCardSig) {
     sportCardSig = sig;
     if (f && usePitch) pitch.setMatch(f);
@@ -720,6 +730,7 @@ function renderSport() {
       pitch: usePitch ? pitch : null,
       side: dock !== "top",
       onOpen: (m) => { if (m.link) invoke("open", { target: m.link }).catch(() => {}); },
+      onArena: arena ? (m) => void openArena(m.key) : undefined,
       onFocus: (key) => { sportFocus = key; hot = null; render(); },
     })] : []));
   }

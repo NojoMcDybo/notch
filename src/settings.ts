@@ -584,6 +584,8 @@ let sportLive: SportLive | null = null;
 /** Teamsuche: Wettbewerb, aus dem die Liste kommt, und geladene Mannschaften */
 let teamLeague = "";
 let teamPicking = false;
+/** Arena (eigene Sport-App) installiert? */
+let arenaThere = false;
 const teamCache = new Map<string, TeamInfo[]>();
 
 /** kurze Erklaerung nur zur gewaehlten Stufe */
@@ -674,6 +676,12 @@ function renderSport() {
   const live = el("div", "sport-live n-glass n-liquid");
   live.setAttribute("aria-live", "polite");
   parts.push(live);
+  if (arenaThere) {
+    const a = el("button", "arena-link n-card");
+    a.append(el("b", "", "Arena öffnen"), el("span", "", "Spielplan, Tabellen, Spielfeld groß – gleiche Teams und Wettbewerbe"));
+    a.addEventListener("click", () => invoke("open", { target: "arena://start" }).catch(() => {}));
+    parts.push(a);
+  }
 
   const rest = el("div", "sport-rest");
   rest.classList.toggle("dim", !s.sport.on);
@@ -1058,6 +1066,7 @@ async function main() {
 
   // Live-Sport: Wettbewerbe aus sport.rs, Stand live mitlesen
   invoke<LeagueInfo[]>("sport_leagues").then((l) => { leagues = l; renderSport(); }).catch(() => {});
+  invoke<boolean>("arena_installed").then((v) => { arenaThere = v; if (v) renderSport(); }).catch(() => {});
   sportLive = (snap as { sport?: SportLive } | null)?.sport ?? null;
   await listen<SportLive>("sport", (e) => { sportLive = e.payload; renderSportLive(); });
 

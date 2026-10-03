@@ -43,6 +43,8 @@ function sv<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, 
 /** eigene Symbole statt Emoji (Emoji sehen je nach Windows-Version anders aus) */
 const BALL_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#fff"/><path fill="#111" d="m12 7.2 3.4 2.5-1.3 4h-4.2l-1.3-4zM12 2.2v3l-3.3 2.4-2.9-.9a10 10 0 0 1 6.2-4.5zm0 0a10 10 0 0 1 6.2 4.5l-2.9.9L12 5.2zM2.3 10.4l2.8.9 1.3 3.9-1.8 2.4a9.9 9.9 0 0 1-2.3-7.2zm19.4 0a9.9 9.9 0 0 1-2.3 7.2l-1.8-2.4 1.3-3.9zM8.6 21.4l.1-3h6.6l.1 3a10 10 0 0 1-6.8 0z"/></svg>`;
 const OPEN_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h9v9"/><path d="M18 6 6 18"/></svg>`;
+/** Arena: Spielfeld in fein */
+const ARENA_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M12 5.5v13"/><circle cx="12" cy="12" r="2.6"/></svg>`;
 const SPORT_GLYPH: Record<string, string> = { hockey: "●", football: "◆", basketball: "●", baseball: "●" };
 
 /** Anstoss: "20:30" heute, sonst "Sa 15:30" */
@@ -172,6 +174,8 @@ export function bannerEl(n: SportNews, m: SportMatch | undefined) {
 export type CardOpts = {
   pitch: Pitch | null;
   onOpen: (m: SportMatch) => void;
+  /** Arena (eigene Sport-App) ist installiert: Spiel dort gross oeffnen */
+  onArena?: (m: SportMatch) => void;
   onFocus: (key: string) => void;
   side: boolean;
 };
@@ -201,9 +205,9 @@ function tickerEl(m: SportMatch, n: number) {
 }
 
 /** Signatur der Karte: nur neu bauen, wenn sich Sichtbares aendert (der Ballverlauf lebt weiter) */
-export function cardSig(focus: SportMatch | undefined, others: SportMatch[], side: boolean, pitchOn: boolean) {
+export function cardSig(focus: SportMatch | undefined, others: SportMatch[], side: boolean, pitchOn: boolean, arena = false) {
   const f = focus ? [focus.key, focus.home.score, focus.away.score, focus.clock, focus.state, focus.events.map((e) => e.id).join(",")] : [];
-  return JSON.stringify([f, others.map((m) => [m.key, m.home.score, m.away.score, m.clock]), side, pitchOn]);
+  return JSON.stringify([f, others.map((m) => [m.key, m.home.score, m.away.score, m.clock]), side, pitchOn, arena]);
 }
 
 export function cardEl(focus: SportMatch, others: SportMatch[], o: CardOpts) {
@@ -221,6 +225,14 @@ export function cardEl(focus: SportMatch, others: SportMatch[], o: CardOpts) {
   open.setAttribute("aria-label", "Spiel im Browser öffnen");
   open.hidden = !focus.link;
   open.addEventListener("click", (e) => { e.stopPropagation(); o.onOpen(focus); });
+  if (o.onArena) {
+    const arena = mk("button", "sp-open n-liquid");
+    arena.innerHTML = ARENA_SVG;
+    arena.title = "In Arena öffnen – Spielfeld, Spielplan, Tabelle";
+    arena.setAttribute("aria-label", "In Arena öffnen");
+    arena.addEventListener("click", (e) => { e.stopPropagation(); o.onArena!(focus); });
+    head.append(arena);
+  }
   head.append(open);
 
   // Wappen  1 : 2  Wappen — Namen stehen im Tooltip

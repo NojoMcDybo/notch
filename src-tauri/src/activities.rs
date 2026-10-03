@@ -313,7 +313,7 @@ pub fn spawn(app: AppHandle) {
             let cors = |r: Response<std::io::Cursor<Vec<u8>>>| match &origin {
                 Some(o) => r
                     .with_header(header("Access-Control-Allow-Origin", o))
-                    .with_header(header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS"))
+                    .with_header(header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"))
                     .with_header(header("Access-Control-Allow-Headers", "Content-Type")),
                 None => r,
             };
@@ -367,6 +367,25 @@ pub fn spawn(app: AppHandle) {
                             crate::shelf::shelf_add(app.clone(), b.paths);
                             Response::from_string("{\"ok\":true}").with_header(json)
                         }
+                        Err(e) => Response::from_string(format!("ungueltiges JSON: {e}")).with_status_code(400),
+                    }
+                }
+                // Sport-Einstellungen fuer Arena (eigene Sport-App): lesen und schreiben, bereinigt
+                (Method::Get, "/sport/settings") => {
+                    let v = crate::sport::sanitize_settings(&crate::settings_value("/sport").unwrap_or(serde_json::Value::Null));
+                    Response::from_string(v.to_string()).with_header(json)
+                }
+                (Method::Put, "/sport/settings") => {
+                    let mut body = String::new();
+                    let _ = req.as_reader().take(64 * 1024).read_to_string(&mut body);
+                    match serde_json::from_str::<serde_json::Value>(&body) {
+                        Ok(v) if v.is_object() => {
+                            let clean = crate::sport::sanitize_settings(&v);
+                            let out = clean.to_string();
+                            crate::settings_update(&app, |s| s["sport"] = clean);
+                            Response::from_string(out).with_header(json)
+                        }
+                        Ok(_) => Response::from_string("Objekt erwartet").with_status_code(400),
                         Err(e) => Response::from_string(format!("ungueltiges JSON: {e}")).with_status_code(400),
                     }
                 }

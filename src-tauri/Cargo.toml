@@ -1,6 +1,6 @@
 [package]
 name = "notch"
-version = "0.2.3"
+version = "0.2.4"
 description = "Notch - Dynamic-Island-artige Infoanzeige fuer Windows"
 authors = ["Nojo"]
 edition = "2021"
@@ -54,6 +54,7 @@ features = [
   "Win32_Security",
   "Win32_Security_Cryptography",
   "Win32_UI_Input_XboxController",
+  "Win32_System_Registry",
 ]
 
 [profile.release]

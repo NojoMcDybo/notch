@@ -509,6 +509,7 @@ pub fn run() {
             sport::sport_watch,
             sport::sport_leagues,
             sport::sport_teams,
+            sport::arena_installed,
             share::share_status,
             share::share_qr,
             share::share_offer,

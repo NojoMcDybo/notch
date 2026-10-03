@@ -978,6 +978,71 @@ pub async fn sport_teams(league: String) -> Result<Vec<TeamInfo>, String> {
     .map_err(|e| e.to_string())?
 }
 
+// ---------- Arena (eigene Sport-App) ----------
+
+/// Sport-Einstellungen wie normalize() in settings-model.ts: nur bekannte Felder, begrenzte Laengen.
+/// Arena liest und schreibt sie ueber http://127.0.0.1:47800/sport/settings (activities.rs).
+pub fn sanitize_settings(v: &Value) -> Value {
+    let b = |k: &str| v[k].as_bool().unwrap_or(true);
+    let id_ok = |x: &str| (2..=12).contains(&x.len()) && x.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    let mut leagues: Vec<String> = Vec::new();
+    match v["leagues"].as_array() {
+        Some(a) => {
+            for x in a.iter().filter_map(|x| x.as_str()) {
+                if id_ok(x) && !leagues.iter().any(|l| l == x) {
+                    leagues.push(x.to_string());
+                }
+            }
+        }
+        None => leagues = vec!["bl1".into(), "dfbteam".into()],
+    }
+    let cut = |s: &str, n: usize| s.chars().take(n).collect::<String>();
+    let mut teams: Vec<Value> = Vec::new();
+    for t in v["teams"].as_array().into_iter().flatten() {
+        let (Some(key), Some(name)) = (t["key"].as_str(), t["name"].as_str()) else { continue };
+        if key.is_empty() || teams.iter().any(|x| x["key"] == key) {
+            continue;
+        }
+        let mut o = serde_json::json!({ "key": cut(key, 40), "name": cut(name, 60) });
+        if let Some(l) = t["logo"].as_str() {
+            o["logo"] = cut(l, 300).into();
+        }
+        teams.push(o);
+        if teams.len() >= 20 {
+            break;
+        }
+    }
+    let expand = match v["expand"].as_str() {
+        Some(e @ ("off" | "goals" | "important" | "all")) => e,
+        _ => "goals",
+    };
+    serde_json::json!({
+        "on": b("on"),
+        "leagues": leagues,
+        "teams": teams,
+        "scope": if v["scope"] == "fav" { "fav" } else { "all" },
+        "expand": expand,
+        "center": b("center"),
+        "pitch": b("pitch"),
+        "fullscreen": b("fullscreen"),
+    })
+}
+
+/// Ist Arena installiert? (meldet das Schema arena:// bei Windows an) — dann bietet die Notch „In Arena“ an
+#[tauri::command]
+pub fn arena_installed() -> bool {
+    use windows::core::w;
+    use windows::Win32::System::Registry::{RegCloseKey, RegOpenKeyExW, HKEY, HKEY_CLASSES_ROOT, KEY_READ};
+    let mut k = HKEY::default();
+    unsafe {
+        let ok = RegOpenKeyExW(HKEY_CLASSES_ROOT, w!("arena\\shell\\open\\command"), Some(0), KEY_READ, &mut k).is_ok();
+        if ok {
+            let _ = RegCloseKey(k);
+        }
+        ok
+    }
+}
+
 // ---------- Schleife ----------
 
 pub fn spawn(app: AppHandle) {
@@ -1194,6 +1259,19 @@ fn minute_order(m: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn einstellungen_fuer_arena_bereinigt() {
+        let v = sanitize_settings(&serde_json::json!({
+            "on": false, "leagues": ["bl1", "bl1", "BÖSE"], "scope": "fav", "expand": "boom",
+            "teams": [{ "key": "soccer:268", "name": "Gladbach" }, { "key": "soccer:268", "name": "doppelt" }], "fremd": 1
+        }));
+        assert_eq!(v["on"], false);
+        assert_eq!(v["leagues"], serde_json::json!(["bl1"]));
+        assert_eq!(v["teams"].as_array().unwrap().len(), 1);
+        assert_eq!(v["expand"], "goals");
+        assert!(v.get("fremd").is_none());
+    }
 
     #[test]
     fn utc_zeiten() {
