@@ -10,7 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { build, bpmOf, needed, plan, planKey, PulseGate, sourceOf, TIMER_ID, type CAct, type Plan } from "./compact";
-import { glassLight, lightScroller, segments, windowControls } from "./nojo/nojo-ui";
+import { glassLight, lightScroller, liquid, segments, windowControls } from "./nojo/nojo-ui";
 import { clone, DEFAULTS, FULLSCREEN_MODES, LAYERS, MUSIC_REACT, normalize, SOURCES, SPORT_EXPAND, type CompactSettings, type FullscreenMode, type Layer, type MusicReact, type SourceId, type SportExpand } from "./settings-model";
 
 const q = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector(s) as T;
@@ -576,59 +576,190 @@ function renderDock() {
 
 type LeagueInfo = { id: string; name: string; group: string; sport: string; source: string };
 type TeamInfo = { key: string; name: string; logo: string };
-type SportLive = { matches: { state: string; fav: boolean; league_name: string; home: { name: string; score: string }; away: { name: string; score: string }; clock: string }[]; error?: string; updated?: number; off?: boolean };
+type LiveTeam = { name: string; abbr?: string; logo?: string; color?: string; score: string };
+type LiveMatch = { key?: string; state: string; fav: boolean; league_name: string; home: LiveTeam; away: LiveTeam; clock: string; start?: number };
+type SportLive = { matches: LiveMatch[]; error?: string; updated?: number; off?: boolean };
 let leagues: LeagueInfo[] = [];
 let sportLive: SportLive | null = null;
 /** Teamsuche: Wettbewerb, aus dem die Liste kommt, und geladene Mannschaften */
 let teamLeague = "";
+let teamPicking = false;
 const teamCache = new Map<string, TeamInfo[]>();
 
+/** kurze Erklaerung nur zur gewaehlten Stufe */
 const EXPAND_TEXT: Record<SportExpand, [string, string]> = {
-  goals: ["Toren", "Bei Toren (und Roten Karten) klappt die Notch kurz auf und zeigt die Meldung oben."],
-  important: ["Wichtigem", "Auch bei Anpfiff, Halbzeit, Abpfiff, verschossenem Elfmeter und Videobeweis."],
-  all: ["Allem", "Auch bei Gelben Karten, Wechseln und Pfostentreffern."],
-  off: ["Nie", "Die Notch klappt nicht von selbst auf; der Spielstand steht trotzdem in der Mitte."],
+  goals: ["Toren", "Tore und Rote Karten"],
+  important: ["Wichtigem", "dazu Anpfiff, Halbzeit, Abpfiff, Elfmeter, Videobeweis"],
+  all: ["Allem", "dazu Gelbe Karten, Wechsel, Pfosten"],
+  off: ["Nie", "nur der Spielstand in der Mitte"],
 };
 
-function sportStatus() {
-  if (!s.sport.on) return "Aus.";
-  if (!sportLive) return "Wird geladen …";
-  if (sportLive.error) return sportLive.error;
-  const live = sportLive.matches.filter((m) => m.state === "in");
-  const at = sportLive.updated ? new Date(sportLive.updated).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "";
-  if (!live.length) {
-    const next = sportLive.matches.filter((m) => m.state === "pre").length;
-    return `Gerade kein Spiel live${next ? ` · ${next} in den nächsten Stunden` : ""}${at ? ` · Stand ${at}` : ""}`;
+/** Wappen statt Vereinsname; der Name steht im Tooltip (und fuer Screenreader) */
+function crest(t: { name: string; logo?: string; abbr?: string; color?: string }, cls = "crest") {
+  const c = el("span", cls);
+  c.title = t.name;
+  c.setAttribute("role", "img");
+  c.setAttribute("aria-label", t.name);
+  const mono = () => {
+    c.classList.add("mono");
+    c.textContent = (t.abbr || t.name.replace(/^(1\.|FC|SV|VfB|VfL|TSG|SC|FSV|SpVgg)\s+/i, "")).slice(0, 3).toUpperCase();
+    if (t.color) c.style.setProperty("--c", t.color);
+  };
+  if (t.logo) {
+    const i = new Image();
+    i.decoding = "async";
+    i.alt = "";
+    i.src = t.logo;
+    i.onerror = () => { i.remove(); mono(); };
+    c.append(i);
+  } else mono();
+  return c;
+}
+
+const clockOf = (m: LiveMatch) => {
+  if (m.state === "pre" && m.start) {
+    const d = new Date(m.start);
+    const t = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    return new Date().toDateString() === d.toDateString() ? t : `${d.toLocaleDateString("de-DE", { weekday: "short" }).replace(".", "")} ${t}`;
   }
-  const one = live.slice(0, 3).map((m) => `${m.home.name} ${m.home.score}:${m.away.score} ${m.away.name} (${m.clock})`).join(" · ");
-  return `Live: ${one}${live.length > 3 ? ` · +${live.length - 3}` : ""}`;
+  return m.clock || (m.state === "post" ? "Ende" : "");
+};
+
+/** Spielstand-Kaertchen: Wappen  2:1  Wappen  67' */
+function scoreBug(m: LiveMatch) {
+  const b = el("span", `bug ${m.state}`);
+  b.title = `${m.home.name} – ${m.away.name} · ${m.league_name}`;
+  b.append(crest(m.home), el("b", "", m.state === "pre" ? "–" : `${m.home.score || 0}:${m.away.score || 0}`), crest(m.away), el("small", "", clockOf(m)));
+  return b;
+}
+
+/** Leiste oben: was gerade live laeuft (oder wann das naechste Spiel ist) */
+function renderSportLive() {
+  const box = q(".sport-live");
+  if (!box) return;
+  box.hidden = !s.sport.on;
+  if (!s.sport.on) return;
+  const parts: HTMLElement[] = [];
+  if (!sportLive) parts.push(el("span", "faint", "Wird geladen …"));
+  else if (sportLive.error) parts.push(el("span", "faint", sportLive.error));
+  else {
+    const live = sportLive.matches.filter((m) => m.state === "in");
+    const next = sportLive.matches.filter((m) => m.state === "pre").sort((x, y) => (x.start ?? 0) - (y.start ?? 0));
+    if (live.length) {
+      parts.push(el("span", "live-dot", "Live"));
+      for (const m of [...live].sort((x, y) => Number(y.fav) - Number(x.fav)).slice(0, 3)) parts.push(scoreBug(m));
+      if (live.length > 3) parts.push(el("span", "faint", `+${live.length - 3}`));
+    } else if (next.length) {
+      parts.push(el("span", "faint", "Als Nächstes"), scoreBug(next[0]));
+    } else parts.push(el("span", "faint", "Gerade kein Spiel"));
+  }
+  box.replaceChildren(...parts);
+}
+
+function card(title: string) {
+  const c = el("section", "s-card");
+  const h = el("div", "s-head");
+  h.append(el("span", "eyebrow", title));
+  c.append(h);
+  return c;
 }
 
 function renderSport() {
   const box = q(".sport-options");
   if (!box) return;
   const parts: HTMLElement[] = [];
-  const on = optToggle("Live-Sport in der Notch", () => s.sport.on, (v) => { s.sport.on = v; queueMicrotask(renderSport); });
-  on.querySelector("span")!.append(el("small", "", "Spielstand in der Mitte der kleinen Notch, Meldungen bei Toren, aufgeklappt Ticker und Spielfeld mit Ballverlauf."));
+  const on = optToggle("Live-Sport", () => s.sport.on, (v) => { s.sport.on = v; queueMicrotask(renderSport); });
+  on.querySelector("span")!.append(el("small", "", "Spielstand, Tore und Spielfeld in der Notch"));
   parts.push(on);
-  const status = el("p", "fine tight sport-status", sportStatus());
-  status.setAttribute("aria-live", "polite");
-  parts.push(status);
+  const live = el("div", "sport-live n-glass n-liquid");
+  live.setAttribute("aria-live", "polite");
+  parts.push(live);
 
   const rest = el("div", "sport-rest");
   rest.classList.toggle("dim", !s.sport.on);
   rest.inert = !s.sport.on;
 
-  // Wettbewerbe, nach Gruppen
-  const comp = el("div", "field");
-  comp.append("Wettbewerbe");
-  const groups = [...new Set(leagues.map((l) => l.group))];
-  for (const g of groups) {
-    comp.append(el("small", "chip-group", g));
+  // Deine Teams: nur Wappen; „Hinzufügen“ oeffnet die Auswahl
+  const teams = card("Deine Teams");
+  const picking = teamPicking || !s.sport.teams.length;
+  const add = el("button", "s-act", picking ? "Fertig" : "Hinzufügen");
+  add.hidden = !s.sport.teams.length;
+  add.addEventListener("click", () => { teamPicking = !teamPicking; renderSport(); });
+  teams.querySelector(".s-head")!.append(add);
+  if (s.sport.teams.length) {
+    const mine = el("div", "crest-row");
+    for (const t of s.sport.teams) {
+      const b = el("button", "crest-tile n-liquid");
+      b.title = `${t.name} – entfernen`;
+      b.setAttribute("aria-label", `${t.name} entfernen`);
+      b.append(crest(t), el("i", "x", "×"));
+      b.addEventListener("click", () => { s.sport.teams = s.sport.teams.filter((x) => x.key !== t.key); commit(); announce(`${t.name} entfernt`); renderSport(); });
+      mine.append(b);
+    }
+    teams.append(mine);
+  }
+
+  if (picking) {
+    if (!s.sport.teams.length) teams.append(el("p", "s-hint", "Wappen antippen – Spiele deiner Teams stehen dann vorn und in der Mitte."));
+    const pick = el("div", "team-pick");
+    const sel = el("select", "text-input team-league") as HTMLSelectElement;
+    for (const l of leagues) {
+      const o = el("option", "", l.name) as HTMLOptionElement;
+      o.value = l.id;
+      sel.append(o);
+    }
+    if (!teamLeague) teamLeague = s.sport.leagues[0] ?? leagues[0]?.id ?? "bl1";
+    sel.value = teamLeague;
+    const find = el("input", "text-input team-find") as HTMLInputElement;
+    find.type = "search";
+    find.placeholder = "Suchen";
+    find.spellcheck = false;
+    const results = el("div", "crest-grid team-results");
+    const showTeams = () => {
+      const list = teamCache.get(teamLeague);
+      results.replaceChildren();
+      if (!list) { results.append(el("small", "faint", "Wird geladen …")); return; }
+      const qx = find.value.trim().toLowerCase();
+      const hits = list.filter((t) => !s.sport.teams.some((x) => x.key === t.key) && (!qx || t.name.toLowerCase().includes(qx)));
+      if (!hits.length) results.append(el("small", "faint", list.length ? "Kein Treffer" : "Keine Mannschaften"));
+      for (const t of hits) {
+        const b = el("button", "crest-pick");
+        b.title = t.name;
+        b.setAttribute("aria-label", `${t.name} hinzufügen`);
+        b.append(crest(t));
+        b.addEventListener("click", () => {
+          s.sport.teams = [...s.sport.teams, { key: t.key, name: t.name, ...(t.logo ? { logo: t.logo } : {}) }];
+          teamPicking = true;
+          commit();
+          announce(`${t.name} hinzugefügt`);
+          renderSport();
+          q<HTMLInputElement>(".team-find")?.focus();
+        });
+        results.append(b);
+      }
+    };
+    const load = () => {
+      showTeams();
+      if (teamCache.has(teamLeague)) return;
+      const want = teamLeague;
+      invoke<TeamInfo[]>("sport_teams", { league: want })
+        .then((t) => { teamCache.set(want, t); if (teamLeague === want) showTeams(); })
+        .catch((e) => { if (teamLeague === want) results.replaceChildren(el("small", "faint", `Nicht erreichbar: ${e}`)); });
+    };
+    sel.addEventListener("change", () => { teamLeague = sel.value; load(); });
+    find.addEventListener("input", showTeams);
+    pick.append(sel, find);
+    teams.append(pick, results);
+    if (leagues.length) queueMicrotask(load);
+  }
+  rest.append(teams);
+
+  // Wettbewerbe
+  const comp = card("Wettbewerbe");
+  for (const g of [...new Set(leagues.map((l) => l.group))]) {
     const chips = el("div", "chips");
     for (const l of leagues.filter((x) => x.group === g)) {
       const b = el("button", "", l.name);
-      b.title = `Quelle: ${l.source}`;
       b.setAttribute("aria-pressed", String(s.sport.leagues.includes(l.id)));
       b.addEventListener("click", () => {
         s.sport.leagues = s.sport.leagues.includes(l.id) ? s.sport.leagues.filter((x) => x !== l.id) : [...s.sport.leagues, l.id];
@@ -637,122 +768,52 @@ function renderSport() {
       });
       chips.append(b);
     }
-    comp.append(chips);
+    comp.append(el("small", "chip-group", g), chips);
   }
-  if (!leagues.length) comp.append(el("small", "", "Liste wird geladen …"));
+  if (!leagues.length) comp.append(el("small", "faint", "Wird geladen …"));
   rest.append(comp);
 
-  // Lieblingsteams
-  const fav = el("div", "field");
-  fav.append("Lieblingsteams");
-  const favChips = el("div", "chips fav-chips");
-  for (const t of s.sport.teams) {
-    const b = el("button", "fav");
-    b.setAttribute("aria-pressed", "true");
-    b.title = `${t.name} entfernen`;
-    if (t.logo) { const i = new Image(); i.src = t.logo; i.alt = ""; i.className = "fav-logo"; b.append(i); }
-    b.append(document.createTextNode(t.name), el("span", "x", "×"));
-    b.addEventListener("click", () => { s.sport.teams = s.sport.teams.filter((x) => x.key !== t.key); commit(); renderSport(); });
-    favChips.append(b);
-  }
-  if (!s.sport.teams.length) favChips.append(el("small", "", "Noch keine. Spiele deiner Teams stehen dann immer vorn und in der Mitte."));
-  fav.append(favChips);
-  // Suche: Wettbewerb waehlen, tippen, antippen
-  const pick = el("div", "team-pick");
-  const sel = el("select", "text-input team-league") as HTMLSelectElement;
-  for (const l of leagues) {
-    const o = el("option", "", l.name) as HTMLOptionElement;
-    o.value = l.id;
-    sel.append(o);
-  }
-  if (!teamLeague) teamLeague = s.sport.leagues[0] ?? leagues[0]?.id ?? "bl1";
-  sel.value = teamLeague;
-  const find = el("input", "text-input team-find") as HTMLInputElement;
-  find.type = "text";
-  find.placeholder = "Team suchen …";
-  find.spellcheck = false;
-  const results = el("div", "chips team-results");
-  const showTeams = () => {
-    const list = teamCache.get(teamLeague);
-    results.replaceChildren();
-    if (!list) { results.append(el("small", "", "Mannschaften werden geladen …")); return; }
-    const qx = find.value.trim().toLowerCase();
-    const hits = list.filter((t) => !s.sport.teams.some((x) => x.key === t.key) && (!qx || t.name.toLowerCase().includes(qx))).slice(0, 24);
-    if (!hits.length) results.append(el("small", "", list.length ? "Kein Treffer." : "Keine Mannschaften gefunden."));
-    for (const t of hits) {
-      const b = el("button", "", t.name);
-      if (t.logo) { const i = new Image(); i.src = t.logo; i.alt = ""; i.className = "fav-logo"; b.prepend(i); }
-      b.addEventListener("click", () => {
-        s.sport.teams = [...s.sport.teams, { key: t.key, name: t.name, ...(t.logo ? { logo: t.logo } : {}) }];
-        commit();
-        announce(`${t.name} ist jetzt ein Lieblingsteam`);
-        renderSport();
-        q<HTMLInputElement>(".team-find")?.focus();
-      });
-      results.append(b);
-    }
-  };
-  const load = () => {
-    if (teamCache.has(teamLeague)) { showTeams(); return; }
-    showTeams();
-    const want = teamLeague;
-    invoke<TeamInfo[]>("sport_teams", { league: want })
-      .then((t) => { teamCache.set(want, t); if (teamLeague === want) showTeams(); })
-      .catch((e) => { if (teamLeague === want) results.replaceChildren(el("small", "", `Konnte die Mannschaften nicht laden: ${e}`)); });
-  };
-  sel.addEventListener("change", () => { teamLeague = sel.value; load(); });
-  find.addEventListener("input", showTeams);
-  pick.append(sel, find);
-  fav.append(pick, results);
-  rest.append(fav);
-  if (leagues.length) queueMicrotask(load);
-
-  // Zeigen: alle Spiele / nur Lieblingsteams
-  const scope = el("div", "field");
-  scope.append("In der Notch");
+  // In der Notch
+  const notch = card("In der Notch");
   const seg = el("div", "segmented compact");
-  for (const [v, label] of [["all", "Alle Spiele der Wettbewerbe"], ["fav", "Nur Lieblingsteams"]] as const) {
+  for (const [v, label] of [["all", "Alle Spiele"], ["fav", "Nur meine Teams"]] as const) {
     const b = el("button", "", label);
     b.dataset.scope = v;
     b.addEventListener("click", () => { s.sport.scope = v; commit(); setSeg("button[data-scope]", (x) => x.dataset.scope === s.sport.scope); });
     seg.append(b);
   }
-  scope.append(seg);
-  rest.append(scope);
-
-  // Von selbst aufklappen
   const ex = el("div", "field");
-  ex.append("Von selbst aufklappen bei");
+  const exHead = el("span", "", "Aufklappen bei");
+  const exHint = el("small", "", EXPAND_TEXT[s.sport.expand][1]);
   const exSeg = el("div", "segmented compact");
-  const exText = el("small", "", EXPAND_TEXT[s.sport.expand][1]);
   for (const v of SPORT_EXPAND) {
     const b = el("button", "", EXPAND_TEXT[v][0]);
     b.dataset.expand = v;
     b.addEventListener("click", () => {
       s.sport.expand = v;
-      exText.textContent = EXPAND_TEXT[v][1];
+      exHint.textContent = EXPAND_TEXT[v][1];
       commit();
       setSeg("button[data-expand]", (x) => x.dataset.expand === s.sport.expand);
     });
     exSeg.append(b);
   }
-  ex.append(exSeg, exText);
-  rest.append(ex);
+  ex.append(exHead, exSeg, exHint);
+  const center = optToggle("Spielstand in der Mitte", () => s.sport.center, (v) => { s.sport.center = v; });
+  const pitch = optToggle("Spielfeld mit Ballverlauf", () => s.sport.pitch, (v) => { s.sport.pitch = v; });
+  pitch.title = "Lädt nur, solange das Spielfeld zu sehen ist (etwa 10–15 MB pro Stunde).";
+  const full = optToggle("Tore auch im Vollbild", () => s.sport.fullscreen, (v) => { s.sport.fullscreen = v; });
+  full.title = "Nur wenn die Notch im Vollbild am Rand bleibt (Reiter Andocken).";
+  notch.append(seg, ex, center, pitch, full);
+  rest.append(notch);
 
-  rest.append(
-    optToggle("Spielstand in der Mitte der kleinen Notch", () => s.sport.center, (v) => { s.sport.center = v; }),
-    optToggle("Spielfeld mit Ballverlauf", () => s.sport.pitch, (v) => { s.sport.pitch = v; }),
-    optToggle("Im Vollbild Tore kurz zeigen", () => s.sport.fullscreen, (v) => { s.sport.fullscreen = v; }),
-  );
-  const notes = [
-    "Spielfeld: lädt nur, solange die Notch aufgeklappt ist und das Spiel zeigt (etwa alle 6 s die neuesten Ballaktionen, rund 10–15 MB pro Stunde Zuschauen).",
-    "Im Vollbild: nur bei „Am Rand“ oder „Nur anzeigen“ (Reiter Andocken), nicht bei „Ausblenden“.",
-  ];
-  rest.querySelectorAll(".toggle-row").forEach((r, i) => { if (i > 0) r.querySelector("span")!.append(el("small", "", notes[i - 1])); });
-  rest.append(el("p", "fine", "Daten: ESPN (frei abrufbar, ohne Konto, aber inoffiziell – kann sich jederzeit ändern) und OpenLigaDB (offiziell frei, von der Community gepflegt; Hauptquelle für 3. Liga und Frauen-Bundesliga, Ersatz für Bundesliga, 2. Liga und DFB-Pokal). Echte Positionsdaten aller Spieler gibt es live nirgends frei – das Spielfeld zeigt den Ballverlauf aus den Ballaktionen mit Rückennummern."));
+  const src = el("details", "fine-more");
+  src.append(el("summary", "", "Daten: ESPN · OpenLigaDB"),
+    el("p", "", "Beide frei abrufbar, ohne Konto. ESPN ist inoffiziell und kann sich ändern; OpenLigaDB wird von der Community gepflegt (3. Liga, Frauen-Bundesliga, Ersatz für Bundesliga und Pokal). Echte Positionen aller Spieler gibt es live nirgends frei – das Spielfeld zeigt den Ballverlauf mit Rückennummern."));
+  rest.append(src);
 
   parts.push(rest);
   box.replaceChildren(...parts);
+  renderSportLive();
   setSeg("button[data-scope]", (x) => x.dataset.scope === s.sport.scope);
   setSeg("button[data-expand]", (x) => x.dataset.expand === s.sport.expand);
 }
@@ -763,23 +824,40 @@ type ShareDev = { fp: string; alias: string; model: string; kind: string; recent
 type ShareState = { on: boolean; running: boolean; error: string; ip: string; port: number; alias: string; folder: string; devices: ShareDev[] };
 let share: ShareState | null = null;
 
-function shareStatus() {
-  if (!s.share.on) return "Aus. Eingeschaltet lauscht die Notch in deinem WLAN auf Port 53317.";
-  if (!share) return "Wird gestartet …";
-  if (share.error && !share.running) return share.error;
-  if (!share.running) return "Startet …";
-  const where = share.ip ? `${share.ip}:${share.port}` : "kein WLAN gefunden";
-  return `Bereit als „${share.alias}“ · ${where}${share.error ? ` · ${share.error}` : ""}`;
+function svgLine(d: string) {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+}
+const ICON_PHONE = svgLine('<rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18h2"/>');
+const ICON_QR = svgLine('<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2v2M20 14v6h-4M14 18v2"/>');
+const ICON_FOLDER = svgLine('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>');
+
+/** Zustand in wenigen Worten; leuchtet, wenn bereit */
+function shareStatus(): [string, string] {
+  if (!s.share.on) return ["off", "Aus"];
+  if (!share) return ["wait", "Startet …"];
+  if (share.error && !share.running) return ["err", share.error];
+  if (!share.running) return ["wait", "Startet …"];
+  if (!share.ip) return ["err", "Kein WLAN gefunden"];
+  return ["ok", `Bereit als „${share.alias}“`];
+}
+
+function renderShareStatus() {
+  const st = q(".share-status");
+  if (!st) return;
+  const [k, t] = shareStatus();
+  st.className = `share-status n-glass n-liquid ${k}`;
+  st.replaceChildren(el("i", "dot"), t);
+  st.title = share?.ip ? `${share.ip}:${share.port}${share.error ? ` · ${share.error}` : ""}` : "";
 }
 
 function renderShare() {
   const box = q(".share-options");
   if (!box) return;
   const parts: HTMLElement[] = [];
-  const on = optToggle("iPhone-Austausch im WLAN", () => s.share.on, (v) => { s.share.on = v; queueMicrotask(renderShare); });
-  on.querySelector("span")!.append(el("small", "", "Fotos, Dateien und Text zwischen iPhone und PC – wie AirDrop, über dein WLAN, ohne Cloud. Neue Sendungen fragt die Notch erst nach."));
+  const on = optToggle("iPhone-Austausch", () => s.share.on, (v) => { s.share.on = v; queueMicrotask(renderShare); });
+  on.querySelector("span")!.append(el("small", "", "Wie AirDrop – über dein WLAN, ohne Cloud"));
   parts.push(on);
-  const st = el("p", "fine tight share-status", shareStatus());
+  const st = el("div", "share-status");
   st.setAttribute("aria-live", "polite");
   parts.push(st);
 
@@ -787,30 +865,50 @@ function renderShare() {
   rest.classList.toggle("dim", !s.share.on);
   rest.inert = !s.share.on;
 
-  // QR-Code fuer die Browser-Seite (ohne App)
-  const qrField = el("div", "field");
-  qrField.append("Ohne App: mit der iPhone-Kamera scannen");
+  // Verbinden: zwei Wege nebeneinander
+  const ways = el("div", "ways");
+  const ls = el("section", "s-card way");
+  const lsHead = el("div", "way-head");
+  lsHead.innerHTML = ICON_PHONE;
+  lsHead.append(el("b", "", "LocalSend"));
+  const devs = el("div", "devs");
+  const near = (share?.devices ?? []).filter((d) => d.recent);
+  if (!near.length) devs.append(el("small", "faint", "Kein Gerät in der Nähe"));
+  for (const d of near) {
+    const p = el("span", "dev", d.alias);
+    p.title = d.model || d.alias;
+    devs.append(p);
+  }
+  ls.append(lsHead, devs);
+
+  const qr = el("section", "s-card way");
+  const qrHead = el("div", "way-head");
+  qrHead.innerHTML = ICON_QR;
+  qrHead.append(el("b", "", "Ohne App"));
   const qrBox = el("div", "qr-box");
-  const qrBtn = el("button", "button secondary", "QR-Code anzeigen");
+  const qrBtn = el("button", "button secondary", "QR-Code zeigen");
   qrBtn.addEventListener("click", async () => {
     try {
       const r = await invoke<{ url: string; svg: string; minutes: number }>("share_qr");
       const img = new Image();
       img.src = `data:image/svg+xml;utf8,${encodeURIComponent(r.svg)}`;
-      img.alt = "QR-Code";
+      img.alt = "QR-Code für die iPhone-Kamera";
       img.className = "qr";
-      const t = el("small", "", `Öffnet in Safari eine Seite zum Hoch- und Herunterladen. Gilt ${r.minutes} Minuten. ${r.url}`);
-      qrBox.replaceChildren(img, t);
+      img.title = r.url;
+      qrBox.replaceChildren(img, el("small", "faint", `Mit der Kamera scannen · ${r.minutes} Min gültig`));
+      qrBtn.hidden = true;
     } catch (e) {
       qrBox.replaceChildren(el("small", "error", String(e)));
     }
   });
-  qrField.append(qrBtn, qrBox);
-  rest.append(qrField);
+  qr.append(qrHead, qrBtn, qrBox);
+  ways.append(ls, qr);
+  rest.append(ways);
 
-  // Name und Ordner
+  // Empfangen
+  const recv = card("Empfangen");
   const nameField = el("label", "field");
-  nameField.append("Name in LocalSend");
+  nameField.append("Name");
   const name = el("input", "text-input") as HTMLInputElement;
   name.type = "text";
   name.maxLength = 40;
@@ -818,40 +916,28 @@ function renderShare() {
   name.placeholder = share?.alias && !s.share.name ? share.alias : "Notch · PC-Name";
   name.addEventListener("change", () => { s.share.name = name.value.trim(); commit(); });
   nameField.append(name);
-  rest.append(nameField);
 
   const folderField = el("div", "field");
-  folderField.append("Empfangene Dateien landen in");
-  const row = el("div", "team-pick");
+  folderField.append("Ordner");
+  const row = el("div", "input-row");
   const folder = el("input", "text-input") as HTMLInputElement;
   folder.type = "text";
   folder.value = s.share.folder;
   folder.placeholder = share?.folder ?? "Downloads\\Notch";
+  folder.title = "Leer lassen für Downloads › Notch. Empfangenes liegt zusätzlich in der Ablage der Notch.";
   folder.addEventListener("change", () => { s.share.folder = folder.value.trim(); commit(); });
-  const openF = el("button", "button secondary", "Ordner öffnen");
+  const openF = el("button", "icon-btn n-glass n-liquid");
+  openF.innerHTML = ICON_FOLDER;
+  openF.title = "Ordner öffnen";
+  openF.setAttribute("aria-label", "Ordner öffnen");
   openF.addEventListener("click", () => invoke("open", { target: s.share.folder || share?.folder || "" }).catch(() => {}));
-  row.style.gridTemplateColumns = "1fr auto";
   row.append(folder, openF);
-  folderField.append(row, el("small", "", "…und zusätzlich in der Ablage der Notch. Leer lassen für Downloads › Notch."));
-  rest.append(folderField);
-
-  // Geraete in der Naehe und vertrauenswuerdige
-  const devField = el("div", "field");
-  devField.append("Geräte mit LocalSend in der Nähe");
-  const devs = el("div", "chips");
-  const near = share?.devices ?? [];
-  if (!near.length) devs.append(el("small", "", "Keine – LocalSend auf dem iPhone öffnen (gleiches WLAN)."));
-  for (const d of near) {
-    const t = el("span", "status-pill", `${d.alias}${d.model ? ` · ${d.model}` : ""}${d.recent ? "" : " · länger nicht gesehen"}`);
-    devs.append(t);
-  }
-  devField.append(devs);
-  rest.append(devField);
+  folderField.append(row);
 
   const trustField = el("div", "field");
-  trustField.append("Immer annehmen von");
+  trustField.append("Ohne Nachfrage annehmen von");
   const tchips = el("div", "chips");
-  if (!s.share.trusted.length) tchips.append(el("small", "", "Niemand – jede Sendung wird nachgefragt. In der Notch: „Immer annehmen“."));
+  if (!s.share.trusted.length) tchips.append(el("small", "faint", "Niemand – jede Sendung wird nachgefragt"));
   for (const t of s.share.trusted) {
     const b = el("button", "fav");
     b.setAttribute("aria-pressed", "true");
@@ -861,28 +947,29 @@ function renderShare() {
     tchips.append(b);
   }
   trustField.append(tchips);
-  rest.append(trustField);
+  recv.append(nameField, folderField, trustField);
+  rest.append(recv);
 
-  // Anleitung
+  // Anleitung (darf erklaeren)
   const how = el("details", "settings-group");
-  how.open = !s.share.trusted.length;
-  how.append(el("summary", "", "So geht’s mit LocalSend"));
+  how.open = !s.share.trusted.length && !near.length;
+  how.append(el("summary", "", "So geht’s"));
   const body = el("div", "group-body howto");
   const steps = [
-    "LocalSend aus dem App Store laden – kostenlos, Open Source, ohne Konto.",
-    "iPhone und PC im selben WLAN. Beim ersten Einschalten fragt Windows, ob Notch im Netzwerk erreichbar sein darf: „Private Netzwerke“ erlauben.",
-    "iPhone → PC: Foto oder Datei › Teilen › LocalSend › „" + (share?.alias ?? "Notch") + "“. Die Notch klappt auf: Annehmen, Ablehnen oder Immer annehmen. Text und Links: in LocalSend › Senden › Text – die Notch zeigt ihn zum Kopieren oder Öffnen.",
-    "PC → iPhone: LocalSend auf dem iPhone offen lassen, dann in der Notch Ablage › Rechtsklick auf eine Datei › An iPhone senden › dein iPhone. Auf dem iPhone annehmen.",
+    "LocalSend aus dem App Store laden – kostenlos, ohne Konto. iPhone und PC im selben WLAN; fragt Windows nach dem Netzwerk, „Private Netzwerke“ erlauben.",
+    `iPhone → PC: Teilen › LocalSend › „${share?.alias ?? "Notch"}“. Die Notch fragt: Annehmen, Ablehnen oder Immer annehmen. Text und Links zeigt sie zum Kopieren.`,
+    "PC → iPhone: LocalSend auf dem iPhone offen lassen, in der Ablage der Notch Rechtsklick auf eine Datei › An iPhone senden.",
+    "Ohne App: QR-Code scannen – Safari öffnet eine Seite zum Hoch- und Herunterladen.",
   ];
   const ol = el("ol", "steps");
   for (const t of steps) ol.append(el("li", "", t));
-  body.append(ol);
+  body.append(ol, el("p", "fine tight", "Echtes AirDrop braucht Apples eigenes Funkprotokoll, das Windows nicht kann. Die Übertragung ist unverschlüsselt und fürs Heim-WLAN gedacht."));
   how.append(body);
   rest.append(how);
-  rest.append(el("p", "fine", "Warum kein echtes AirDrop? Apple funkt dafür über ein eigenes WLAN-Protokoll (AWDL) mit Apple-Zertifikaten – das kann Windows nicht. Die Übertragung läuft unverschlüsselt (HTTP) wie LocalSend mit ausgeschalteter Verschlüsselung und ist für das Heim-WLAN gedacht, nicht für öffentliche Netze."));
 
   parts.push(rest);
   box.replaceChildren(...parts);
+  renderShareStatus();
 }
 
 function renderAll() {
@@ -972,19 +1059,14 @@ async function main() {
   // Live-Sport: Wettbewerbe aus sport.rs, Stand live mitlesen
   invoke<LeagueInfo[]>("sport_leagues").then((l) => { leagues = l; renderSport(); }).catch(() => {});
   sportLive = (snap as { sport?: SportLive } | null)?.sport ?? null;
-  await listen<SportLive>("sport", (e) => {
-    sportLive = e.payload;
-    const st = q(".sport-status");
-    if (st) st.textContent = sportStatus();
-  });
+  await listen<SportLive>("sport", (e) => { sportLive = e.payload; renderSportLive(); });
 
   // iPhone-Austausch: Zustand aus share.rs (laeuft, Adresse, Geraete in der Naehe)
   invoke<ShareState>("share_status").then((x) => { share = x; renderShare(); }).catch(() => {});
   await listen<ShareState>("share-state", (e) => {
     const was = JSON.stringify(share?.devices) + share?.running + share?.alias + share?.folder;
     share = e.payload;
-    const st = q(".share-status");
-    if (st) st.textContent = shareStatus();
+    renderShareStatus();
     // Liste der Geraete neu, aber nicht beim Tippen in ein Feld
     const now = JSON.stringify(share.devices) + share.running + share.alias + share.folder;
     if (now !== was && !(document.activeElement as HTMLElement | null)?.closest?.(".share-options input")) renderShare();
@@ -1038,6 +1120,7 @@ async function main() {
   const close = () => { getCurrentWindow().close().catch(() => {}); };
   windowControls({ minimize: () => void getCurrentWindow().minimize().catch(() => {}), close, closeTitle: "Schließen (Esc)" });
   glassLight();
+  liquid();
   segments(document, ".n-seg, .segmented");
   // Lichtleiste statt Bildlaufleiste
   lightScroller(q(".panel-body"), { insetTop: 8 });

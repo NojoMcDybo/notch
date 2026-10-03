@@ -8,6 +8,7 @@ import { fillCard, isBg, type ChartData } from "./glucose";
 import { build, needed, plan, planKey, planSig, PulseGate, sourceOf, type Plan } from "./compact";
 import { DEFAULTS, normalize, type CompactSettings } from "./settings-model";
 import { MusicReactor, type Spectrum } from "./music-react";
+import { liquid } from "./nojo/nojo-ui";
 import { bannerEl, cardEl, cardSig, kickoff, midEl, midSig as sportSig, Pitch, type SportMatch, type SportNews, type SportPlay, type SportState } from "./sport";
 
 // ---------- Typen ----------
@@ -1603,6 +1604,8 @@ function setCover(src: string | null) {
 }
 
 async function main() {
+  // Liquid Glass (gemeinsame Designsprache): Sportmeldung, Spielfeld-Beschriftung, QR-Code
+  liquid();
   // Erst zuhoeren, dann den Stand holen — sonst gehen Ereignisse beim Start verloren.
   await listen<Media>("media", (e) => { setMedia(e.payload); render(); });
   await listen<{ key: string; src: string }>("media-cover", (e) => { setCover(e.payload.src); render(); });

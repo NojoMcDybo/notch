@@ -107,9 +107,11 @@
 
 /* Spielstand in der Mitte (sport.ts): Kuerzel mit Teamfarbe, Tore, Minute; nach einem Tor leuchtet er kurz */
 .sm { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sm-t { font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; padding-bottom: 1px; }
-.sm-t.h { box-shadow: inset 0 -2px 0 var(--hc); }
-.sm-t.a { box-shadow: inset 0 -2px 0 var(--ac); }
+/* Wappen statt Kuerzel; ohne Wappen das Kuerzel mit Strich in der Teamfarbe */
+.sm-t { --c: #fff; width: 17px; height: 17px; display: grid; place-items: center; flex: none; transition: transform 0.45s var(--spring, ease-out), filter 0.45s; }
+.sm-t img { width: 100%; height: 100%; object-fit: contain; }
+.sm-t.mono { width: auto; height: auto; font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; padding-bottom: 1px; box-shadow: inset 0 -2px 0 var(--c); }
+.sm.hot .sm-t.lit { transform: scale(1.2); filter: drop-shadow(0 0 6px var(--hot)); }
 .sm-s { font-size: 14px; font-weight: 700; min-width: 2.3em; text-align: center; }
 .sm.pre .sm-s { color: var(--fg2); min-width: 1em; }
 .sm-c { font-size: 10.5px; color: var(--fg2); font-weight: 500; display: flex; align-items: center; gap: 4px; }
@@ -120,6 +122,7 @@
 @keyframes sm-hot { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.14); } }
 [data-dock="left"] .sm, [data-dock="right"] .sm { flex-direction: column; height: auto; gap: 3px; }
 [data-dock="left"] .sm-s, [data-dock="right"] .sm-s { font-size: 13px; min-width: 0; }
-[data-dock="left"] .sm-t, [data-dock="right"] .sm-t { font-size: 10px; }
+[data-dock="left"] .sm-t, [data-dock="right"] .sm-t { width: 15px; height: 15px; }
+[data-dock="left"] .sm-t.mono, [data-dock="right"] .sm-t.mono { width: auto; height: auto; font-size: 10px; }
 [data-dock="left"] .sm-c, [data-dock="right"] .sm-c { font-size: 9px; flex-direction: column; gap: 2px; }
 @media (prefers-reduced-motion: reduce) { .sm.hot, .sm.in .sm-c::before { animation: none; } }

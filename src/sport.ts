@@ -1,9 +1,12 @@
 /**
  * Live-Sport in der Notch (Daten: src-tauri/src/sport.rs).
  *
- * - Mitte der kleinen Notch: Spielstand mit Kuerzeln und Minute; nach einem Tor leuchtet er kurz in der Teamfarbe.
- * - Neue Meldung: die Notch klappt kurz auf, die Meldung steht ganz oben unter der Leiste.
- * - Aufgeklappt: Karte mit Spielstand, Spielfeld mit Ballverlauf, Ticker und weitere laufende Spiele.
+ * - Ueberall Wappen statt Vereinsnamen (Name im Tooltip); ohne Wappen das Kuerzel in der Teamfarbe.
+ * - Mitte der kleinen Notch: Wappen 2:1 Wappen und Minute; nach einem Tor leuchtet der Stand in der Teamfarbe.
+ * - Neue Meldung: die Notch klappt kurz auf, die Meldung schwebt als Liquid Glass ueber einem Licht in der
+ *   Teamfarbe (die Glaskante bricht es).
+ * - Aufgeklappt: Karte mit Spielstand, Spielfeld mit Ballverlauf (Beschriftung als Glas darueber), Ticker und
+ *   weitere laufende Spiele.
  *
  * Ballverlauf: echte Positionsdaten aller Spieler gibt es live nicht frei. Die Notch spielt stattdessen jede
  * Ballaktion (Pass von wo nach wo, Flanke, Schuss, Zweikampf …) im Takt der echten Uhrzeit nach: der Ball
@@ -39,6 +42,7 @@ function sv<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, 
 
 /** eigene Symbole statt Emoji (Emoji sehen je nach Windows-Version anders aus) */
 const BALL_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#fff"/><path fill="#111" d="m12 7.2 3.4 2.5-1.3 4h-4.2l-1.3-4zM12 2.2v3l-3.3 2.4-2.9-.9a10 10 0 0 1 6.2-4.5zm0 0a10 10 0 0 1 6.2 4.5l-2.9.9L12 5.2zM2.3 10.4l2.8.9 1.3 3.9-1.8 2.4a9.9 9.9 0 0 1-2.3-7.2zm19.4 0a9.9 9.9 0 0 1-2.3 7.2l-1.8-2.4 1.3-3.9zM8.6 21.4l.1-3h6.6l.1 3a10 10 0 0 1-6.8 0z"/></svg>`;
+const OPEN_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h9v9"/><path d="M18 6 6 18"/></svg>`;
 const SPORT_GLYPH: Record<string, string> = { hockey: "●", football: "◆", basketball: "●", baseball: "●" };
 
 /** Anstoss: "20:30" heute, sonst "Sa 15:30" */
@@ -47,6 +51,57 @@ export function kickoff(m: SportMatch) {
   const t = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
   const today = new Date().toDateString() === d.toDateString();
   return today ? t : `${d.toLocaleDateString("de-DE", { weekday: "short" }).replace(".", "")} ${t}`;
+}
+
+/** ESPN liefert 500-px-Wappen; fuer die Notch reicht eine kleine Fassung (faellt sonst aufs Original zurueck) */
+function smallLogo(url: string) {
+  const m = /^https:\/\/a\.espncdn\.com(\/i\/teamlogos\/[^?]+\.png)$/.exec(url);
+  return m ? `https://a.espncdn.com/combiner/i?img=${m[1]}&h=96&w=96` : url;
+}
+
+/** Wappen statt Name; ohne Bild das Kuerzel mit einem Strich in der Teamfarbe */
+export function crestEl(t: SportTeam, cls = "crest") {
+  const c = mk("span", cls);
+  c.style.setProperty("--c", t.color);
+  c.title = t.name;
+  const mono = () => {
+    c.classList.add("mono");
+    c.textContent = (t.abbr || t.short || t.name).slice(0, 3).toUpperCase();
+  };
+  if (!t.logo) { mono(); return c; }
+  const img = new Image();
+  img.alt = "";
+  img.draggable = false;
+  const small = smallLogo(t.logo);
+  img.src = small;
+  img.onerror = () => {
+    if (img.src !== t.logo && small !== t.logo) { img.src = t.logo; return; }
+    img.remove();
+    mono();
+  };
+  c.append(img);
+  return c;
+}
+
+/** Vereinsnamen aus Meldungen nehmen (das Wappen steht daneben): „Tor für Mainz!“ -> „Tor!“ */
+export function deTeam(text: string, m?: SportMatch) {
+  if (!m || !text) return text;
+  let r = text;
+  for (const n of [m.home.name, m.away.name, m.home.short, m.away.short]) if (n && n.length > 1) r = r.split(n).join("");
+  r = r.replace(/\s*für\s*!/, "!").replace(/\(\s*\)/g, "").replace(/\s{2,}/g, " ").replace(/\s+([!.,:])/g, "$1").trim();
+  return /^[\s–-]*$/.test(r) ? "" : r;
+}
+
+const sideTeam = (m: SportMatch, side: string) => (side === "home" ? m.home : side === "away" ? m.away : null);
+
+/** Wappen 2:1 Wappen — der Stand, wie er ueberall in der Notch steht */
+function bugEl(m: SportMatch, score: string, cls = "bug", lit = "") {
+  const b = mk("span", cls);
+  const h = crestEl(m.home), a = crestEl(m.away);
+  if (lit === "home") h.classList.add("lit");
+  if (lit === "away") a.classList.add("lit");
+  b.append(h, mk("b", "", score), a);
+  return b;
 }
 
 const scoreOf = (m: SportMatch) => (m.state === "pre" ? "–" : `${m.home.score || 0}:${m.away.score || 0}`);
@@ -72,11 +127,10 @@ export function midEl(m: SportMatch, hot: SportNews | null) {
   box.style.setProperty("--ac", m.away.color);
   if (hot) box.style.setProperty("--hot", newsColor(hot, m));
   box.title = `${m.home.name} – ${m.away.name} · ${m.league_name}`;
-  const h = mk("b", "sm-t h", m.home.abbr || m.home.short.slice(0, 3).toUpperCase());
-  const a = mk("b", "sm-t a", m.away.abbr || m.away.short.slice(0, 3).toUpperCase());
-  const sc = mk("span", "sm-s", scoreOf(m));
-  const cl = mk("small", "sm-c", clockOf(m));
-  box.append(h, sc, a, cl);
+  const h = crestEl(m.home, "sm-t h"), a = crestEl(m.away, "sm-t a");
+  if (hot?.ev.side === "home") h.classList.add("lit");
+  if (hot?.ev.side === "away") a.classList.add("lit");
+  box.append(h, mk("span", "sm-s", scoreOf(m)), a, mk("small", "sm-c", clockOf(m)));
   return box;
 }
 
@@ -95,38 +149,25 @@ function kindIcon(kind: string, sport: string) {
 }
 
 export function bannerEl(n: SportNews, m: SportMatch | undefined) {
-  const b = mk("div", `sp-news k-${n.ev.kind}` + (n.ev.big >= 3 ? " big" : ""));
-  b.style.setProperty("--c", newsColor(n, m));
+  const wrap = mk("div", "sp-news-wrap");
+  wrap.style.setProperty("--c", newsColor(n, m));
+  // Licht hinter dem Glas: die Kante bricht es, die Mitte zeigt es weich
+  wrap.append(mk("i", "spn-glow"));
+  const b = mk("div", `sp-news n-liquid panel k-${n.ev.kind}` + (n.ev.big >= 3 ? " big" : ""));
+  b.dataset.refract = "9";
   b.append(kindIcon(n.ev.kind, m?.sport ?? "soccer"));
   const body = mk("div", "spn-body");
-  body.append(mk("b", "", n.ev.title));
-  const sub = [n.ev.text, n.ev.minute].filter(Boolean).join(" · ");
+  body.append(mk("b", "", deTeam(n.ev.title, m) || n.ev.title));
+  const sub = [deTeam(n.ev.text, m), n.ev.minute].filter(Boolean).join(" · ");
   if (sub) body.append(mk("span", "", sub));
   b.append(body);
-  if (m) {
-    const sc = mk("div", "spn-score");
-    sc.append(mk("span", "", m.home.abbr), mk("b", "", n.score || scoreOf(m)), mk("span", "", m.away.abbr));
-    b.append(sc);
-  }
-  return b;
+  if (m) b.append(bugEl(m, n.score || scoreOf(m), "spn-score", n.ev.side));
+  if (n.ev.big >= 3) b.append(mk("i", "spn-shine"));
+  wrap.append(b);
+  return wrap;
 }
 
 // ---------- Karte (aufgeklappt) ----------
-
-function logo(t: SportTeam) {
-  const box = mk("span", "sp-logo");
-  box.style.setProperty("--c", t.color);
-  if (t.logo) {
-    const img = new Image();
-    img.decoding = "async";
-    img.loading = "lazy";
-    img.src = t.logo;
-    img.alt = "";
-    img.onerror = () => { img.remove(); box.textContent = t.abbr.slice(0, 3); };
-    box.append(img);
-  } else box.textContent = t.abbr.slice(0, 3);
-  return box;
-}
 
 export type CardOpts = {
   pitch: Pitch | null;
@@ -135,12 +176,12 @@ export type CardOpts = {
   side: boolean;
 };
 
-/** Ticker: neueste Meldung oben, hoechstens n Zeilen */
+/** Ticker: neueste Meldung oben, hoechstens n Zeilen; Wappen statt Vereinsname */
 function tickerEl(m: SportMatch, n: number) {
   const ol = mk("ol", "sp-ticker");
   const evs = [...m.events].reverse().slice(0, n);
   if (!evs.length) {
-    ol.append(mk("li", "sp-empty", m.state === "pre" ? `Anstoß ${kickoff(m)}` : m.source === "openligadb" ? "Tore erscheinen hier (OpenLigaDB)" : "Noch keine Meldungen"));
+    ol.append(mk("li", "sp-empty", m.state === "pre" ? `Anstoß ${kickoff(m)}` : m.source === "openligadb" ? "Tore erscheinen hier" : "Noch keine Meldungen"));
     return ol;
   }
   for (const e of evs) {
@@ -148,8 +189,11 @@ function tickerEl(m: SportMatch, n: number) {
     li.style.setProperty("--c", e.side === "away" ? m.away.color : e.side === "home" ? m.home.color : "var(--fg2)");
     li.append(mk("span", "tk-m", e.minute), kindIcon(e.kind, m.sport));
     const t = mk("span", "tk-t");
-    t.append(mk("b", "", e.title));
-    if (e.text) t.append(" ", mk("span", "", e.text));
+    const team = sideTeam(m, e.side);
+    if (team) t.append(crestEl(team, "crest tk-c"));
+    t.append(mk("b", "", deTeam(e.title, m) || e.title));
+    const text = deTeam(e.text, m);
+    if (text) t.append(" ", mk("span", "", text));
     li.append(t);
     ol.append(li);
   }
@@ -170,23 +214,22 @@ export function cardEl(focus: SportMatch, others: SportMatch[], o: CardOpts) {
 
   const head = mk("div", "sp-head");
   head.append(mk("span", "sp-league", focus.league_name));
-  const clock = mk("span", `sp-clock ${focus.state}`, clockOf(focus));
-  head.append(clock);
-  const open = mk("button", "sp-open", "Spielseite");
+  head.append(mk("span", `sp-clock ${focus.state}`, clockOf(focus)));
+  const open = mk("button", "sp-open n-liquid");
+  open.innerHTML = OPEN_SVG;
   open.title = "Spiel im Browser öffnen";
+  open.setAttribute("aria-label", "Spiel im Browser öffnen");
   open.hidden = !focus.link;
   open.addEventListener("click", (e) => { e.stopPropagation(); o.onOpen(focus); });
   head.append(open);
 
+  // Wappen  1 : 2  Wappen — Namen stehen im Tooltip
   const score = mk("div", "sp-score");
-  const th = mk("div", "sp-team h");
-  th.append(logo(focus.home), mk("span", "sp-name", focus.home.name));
-  const ta = mk("div", "sp-team a");
-  ta.append(mk("span", "sp-name", focus.away.name), logo(focus.away));
+  score.title = `${focus.home.name} – ${focus.away.name}`;
   const num = mk("div", "sp-num");
   if (focus.state === "pre") num.append(mk("span", "sp-ko", kickoff(focus)));
   else num.append(mk("b", "", focus.home.score || "0"), mk("i", "", ":"), mk("b", "", focus.away.score || "0"));
-  score.append(th, num, ta);
+  score.append(crestEl(focus.home, "crest sp-crest h"), num, crestEl(focus.away, "crest sp-crest a"));
   card.append(head, score);
 
   const body = mk("div", "sp-body" + (o.pitch ? " with-pitch" : ""));
@@ -198,9 +241,9 @@ export function cardEl(focus: SportMatch, others: SportMatch[], o: CardOpts) {
   if (others.length) {
     const more = mk("div", "sp-more");
     for (const m of others.slice(0, 6)) {
-      const c = mk("button", `sp-chip ${m.state}`);
+      const c = mk("button", `sp-chip n-liquid ${m.state}`);
       c.title = `${m.home.name} – ${m.away.name} · ${m.league_name}`;
-      c.append(mk("b", "", m.home.abbr), mk("span", "", scoreOf(m)), mk("b", "", m.away.abbr), mk("small", "", clockOf(m)));
+      c.append(bugEl(m, scoreOf(m), "sp-bug"), mk("small", "", clockOf(m)));
       c.addEventListener("click", (e) => { e.stopPropagation(); o.onFocus(m.key); });
       more.append(c);
     }
@@ -247,8 +290,9 @@ export class Pitch {
   private ball: SVGGElement;
   private label: HTMLElement;
   private net: { l: SVGRectElement; r: SVGRectElement };
-  private tagH: SVGTextElement;
-  private tagA: SVGTextElement;
+  private tagH: SVGGElement;
+  private tagA: SVGGElement;
+  private teams: { home: SportTeam; away: SportTeam } | null = null;
   private key = "";
   private colors = { home: "#4da3ff", away: "#ff6b6b" };
   private queue: Step[] = [];
@@ -275,9 +319,9 @@ export class Pitch {
       sv("rect", { x: W - 5.5, y: 24.85, width: 5.5, height: 18.3 }),
       sv("circle", { cx: W / 2, cy: H / 2, r: 0.5, class: "pl-dot" }),
     );
-    // Kuerzel der Teams blass im Hintergrund ihrer Haelfte (Heim links, spielt nach rechts)
-    this.tagH = sv("text", { x: W / 4, y: H / 2 + 4, "text-anchor": "middle", class: "pitch-tag h" });
-    this.tagA = sv("text", { x: (W * 3) / 4, y: H / 2 + 4, "text-anchor": "middle", class: "pitch-tag a" });
+    // Wappen der Teams blass im Hintergrund ihrer Haelfte (Heim links, spielt nach rechts)
+    this.tagH = sv("g", { class: "pitch-tag h" });
+    this.tagA = sv("g", { class: "pitch-tag a" });
     lines.append(this.tagH, this.tagA);
     const l = sv("rect", { x: -2, y: 30.34, width: 2, height: 7.32, class: "net" });
     const r = sv("rect", { x: W, y: 30.34, width: 2, height: 7.32, class: "net" });
@@ -288,7 +332,8 @@ export class Pitch {
     this.ball = sv("g", { class: "ball" });
     this.ball.append(sv("circle", { r: 1.25 }));
     this.svg.append(lines, l, r, this.trailG, this.shotG, this.actorG, this.ball);
-    this.label = mk("div", "pitch-label", "Ballverlauf wird geladen …");
+    // Beschriftung schwebt als Liquid Glass ueber dem Feld: Ball und Spieler laufen darunter durch
+    this.label = mk("div", "pitch-label n-liquid", "Ballverlauf wird geladen …");
     this.el.append(this.svg, this.label);
     this.place();
   }
@@ -298,14 +343,30 @@ export class Pitch {
     this.colors = { home: m.home.color, away: m.away.color };
     this.el.style.setProperty("--hc", m.home.color);
     this.el.style.setProperty("--ac", m.away.color);
-    this.el.dataset.h = m.home.abbr;
-    this.el.dataset.a = m.away.abbr;
-    this.tagH.textContent = m.home.abbr;
-    this.tagA.textContent = m.away.abbr;
+    this.teams = { home: m.home, away: m.away };
+    this.tag(this.tagH, m.home, W / 4);
+    this.tag(this.tagA, m.away, (W * 3) / 4);
     if (m.key !== this.key) {
       this.key = m.key;
       this.clear();
       this.label.textContent = m.state === "pre" ? "Ballverlauf ab Anpfiff" : "Ballverlauf wird geladen …";
+    }
+  }
+
+  /** blasses Wappen (oder Kuerzel) mitten in der Haelfte */
+  private tag(g: SVGGElement, t: SportTeam, cx: number) {
+    const sig = t.logo || t.abbr;
+    if (g.dataset.sig === sig) return;
+    g.dataset.sig = sig;
+    if (t.logo) {
+      const img = sv("image", { x: cx - 13, y: H / 2 - 13, width: 26, height: 26, preserveAspectRatio: "xMidYMid meet" });
+      img.setAttribute("href", smallLogo(t.logo));
+      img.addEventListener("error", () => img.setAttribute("href", t.logo), { once: true });
+      g.replaceChildren(img);
+    } else {
+      const tx = sv("text", { x: cx, y: H / 2 + 4, "text-anchor": "middle" });
+      tx.textContent = t.abbr;
+      g.replaceChildren(tx);
     }
   }
 
@@ -409,12 +470,12 @@ export class Pitch {
   }
 
   private say(p: SportPlay) {
-    const team = p.side === "home" ? this.el.dataset.h : p.side === "away" ? this.el.dataset.a : "";
+    const team = p.side === "home" ? this.teams?.home : p.side === "away" ? this.teams?.away : undefined;
     const who = [p.jersey ? `#${p.jersey}` : "", p.who].filter(Boolean).join(" ");
     this.label.replaceChildren(
       mk("span", "pl-min", p.minute),
-      mk("i", `pl-dot ${p.side}`),
-      mk("span", "pl-who", [team, who].filter(Boolean).join(" · ")),
+      team ? crestEl(team, "crest pl-crest") : mk("i", `pl-dot ${p.side}`),
+      mk("span", "pl-who", who),
       mk("span", "pl-what", playName(p.kind)),
     );
   }

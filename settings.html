@@ -19,15 +19,16 @@
           <h2 data-tauri-drag-region>Einstellungen</h2>
         </div>
       </div>
-      <nav class="settings-tabs n-seg" role="tablist">
-        <button role="tab" data-tab="display">Anzeige</button>
-        <button role="tab" data-tab="dock">Andocken</button>
-        <button role="tab" data-tab="sport">Sport</button>
-        <button role="tab" data-tab="share">iPhone</button>
-        <button role="tab" data-tab="app">App</button>
-      </nav>
 
       <div class="panel-body">
+        <!-- Reiter schweben als Liquid Glass ueber dem Inhalt (der darunter durchscrollt) -->
+        <nav class="settings-tabs n-seg n-liquid panel" role="tablist">
+          <button role="tab" data-tab="display">Anzeige</button>
+          <button role="tab" data-tab="dock">Andocken</button>
+          <button role="tab" data-tab="sport">Sport</button>
+          <button role="tab" data-tab="share">iPhone</button>
+          <button role="tab" data-tab="app">App</button>
+        </nav>
         <!-- Anzeige: kleine Notch + Rangliste -->
         <div class="pane" data-pane="display">
           <div class="notch-preview stage" data-dock="top">

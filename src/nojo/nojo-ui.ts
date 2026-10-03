@@ -7,6 +7,8 @@
  * - windowControls():   Fensterknoepfe als Glaspille oben rechts (wie Folio)
  * - lightScroller():    Lichtleiste statt Bildlaufleiste — duenner Leuchtstab, zeigt den Ort, laesst sich ziehen
  *                       (die breite Sprungleiste gibt es nur in Folio)
+ * - liquid():           echtes Liquid Glass fuer .n-liquid — Folios Optik (Brechung am Rand, klare Mitte,
+ *                       Lichtkante von oben links) als SVG-Filter im backdrop-filter
  */
 
 /** Feine Liniensymbole wie in Folio (24er Raster, Strich 1,6) */
@@ -69,6 +71,14 @@ export function segments(root: ParentNode = document, sel = ".n-seg") {
     const on = seg.querySelector<HTMLElement>(":scope > button.active, :scope > button[aria-pressed='true'], :scope > button[aria-selected='true']");
     if (!on) { thumb.style.width = "0"; return; }
     if (jump) thumb.style.transition = "none";
+    // fluessig: die Perle wird beim Gleiten flacher und laenger und federt am Ziel zurueck
+    else if (thumb.style.left && thumb.style.left !== `${on.offsetLeft}px` && !reduced()) {
+      thumb.classList.remove("moving");
+      void thumb.offsetWidth;
+      thumb.classList.add("moving");
+      clearTimeout(Number(thumb.dataset.t));
+      thumb.dataset.t = String(window.setTimeout(() => thumb!.classList.remove("moving"), 260));
+    }
     thumb.style.left = `${on.offsetLeft}px`;
     thumb.style.width = `${on.offsetWidth}px`;
     if (jump) { void thumb.offsetWidth; thumb.style.transition = ""; }
@@ -92,7 +102,7 @@ export type WindowActions = { minimize?: () => void; toggleMaximize?: () => void
 /** Glaspille oben rechts mit Minimieren, Maximieren, Schliessen (fehlende Aktionen = kein Knopf). */
 export function windowControls(a: WindowActions, host: HTMLElement = document.body) {
   const wc = document.createElement("div");
-  wc.className = "n-wc n-glass";
+  wc.className = "n-wc n-glass n-liquid";
   const add = (icon: string, title: string, fn: () => void, cls = "") => {
     const b = document.createElement("button");
     b.className = `n-ico sm ${cls}`.trim();
@@ -223,4 +233,148 @@ export function lightScroller(sc: HTMLElement, opts: LightScrollerOpts = {}) {
       bar.remove();
     },
   };
+}
+// ---------- Liquid Glass ----------
+// Folio bricht die PDF-Seiten mit WebGL (glass.ts). In den anderen Apps liegt unter dem Glas normales HTML; dasselbe
+// optische Modell laeuft hier als SVG-Filter im backdrop-filter (Chromium: WebView2 und Electron koennen das):
+// - Brechung nur am Rand: dort wird der Hintergrund von weiter innen geholt (wie eine dicke, runde Glaskante),
+//   die Mitte bleibt klar. Staerke wie in Folio: Rand^2 * Brechung, Randbreite hoechstens 12 px.
+// - Lichtkante knapp innerhalb der Kontur, am hellsten dort, wo die Kante zum Licht oben links zeigt.
+// Pro Groesse ein Filter (Displacement-Map + Lichtkante als Bild), geteilt und gezaehlt.
+//
+// Benutzung: class="n-liquid" (klar, fuer Knoepfe und Pillen) oder class="n-liquid panel" (staerker
+// weichgezeichnet, fuer Flaechen mit Text). Ohne Unterstuetzung bleibt es beim normalen Glas.
+
+const LIGHT_DIR = (() => { const l = Math.hypot(0.45, 0.9); return [-0.45 / l, -0.9 / l] as const; })();
+const smooth = (a: number, b: number, x: number) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+
+type LiquidFilter = { id: string; rim: string; refs: number };
+const liquidFilters = new Map<string, LiquidFilter>();
+let liquidDefs: SVGSVGElement | null = null;
+let liquidSeq = 0;
+
+/** Kann dieser Browser SVG-Filter als backdrop-filter? (Chromium ja, Safari und Firefox nicht) */
+export const liquidSupported = () =>
+  typeof CSS !== "undefined" && CSS.supports("backdrop-filter", "url(#n)") && /Chrome\/\d+/.test(navigator.userAgent);
+
+function liquidMaps(w: number, h: number, r: number, refract: number, dpr: number) {
+  const W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr));
+  const disp = new ImageData(W, H), spec = new ImageData(W, H);
+  const hw = w / 2, hh = h / 2, rr = Math.min(r, hw, hh);
+  const edgeW = Math.max(1, Math.min(12, Math.min(hw, hh) * 0.65));
+  const S = refract * 2 + 2;
+  const aa = 0.6 / dpr + 0.25;
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W; i++) {
+      const x = (i + 0.5) / dpr - hw, y = (j + 0.5) / dpr - hh;
+      const qx = Math.abs(x) - hw + rr, qy = Math.abs(y) - hh + rr;
+      const d = Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - rr;
+      let nx: number, ny: number;
+      if (qx > 0 && qy > 0) { const l = Math.hypot(qx, qy); nx = qx / l; ny = qy / l; }
+      else if (qx > qy) { nx = 1; ny = 0; } else { nx = 0; ny = 1; }
+      if (x < 0) nx = -nx;
+      if (y < 0) ny = -ny;
+      const depth = Math.max(-d, 0);
+      const edge = 1 - smooth(0, edgeW, depth);
+      const off = edge * edge * refract;
+      const k = (j * W + i) * 4;
+      // nach innen greifen: an der Kante liegt, was eigentlich weiter innen ist (Lupe am Rand)
+      disp.data[k] = clamp(Math.round(128 - (nx * off / S) * 255), 0, 255);
+      disp.data[k + 1] = clamp(Math.round(128 - (ny * off / S) * 255), 0, 255);
+      disp.data[k + 2] = 128;
+      disp.data[k + 3] = 255;
+      const facing = Math.max(nx * LIGHT_DIR[0] + ny * LIGHT_DIR[1], 0) ** 3;
+      const rim = Math.exp(-(((depth - 0.7) / 0.65) ** 2));
+      const cover = 1 - smooth(-aa, aa, d);
+      const a = (rim * (0.12 + 0.36 * facing) + 0.03 * edge * facing) * cover;
+      spec.data[k] = spec.data[k + 1] = spec.data[k + 2] = 255;
+      spec.data[k + 3] = clamp(Math.round(a * 255), 0, 255);
+    }
+  }
+  const url = (img: ImageData) => {
+    const c = document.createElement("canvas");
+    c.width = W;
+    c.height = H;
+    c.getContext("2d")!.putImageData(img, 0, 0);
+    return c.toDataURL("image/png");
+  };
+  return { disp: url(disp), rim: url(spec), scale: S };
+}
+
+function liquidFilter(w: number, h: number, r: number, refract: number) {
+  const dpr = Math.min(3, Math.max(1, devicePixelRatio || 1));
+  const key = `${w}x${h}r${r}f${refract}d${dpr}`;
+  let f = liquidFilters.get(key);
+  if (f) { f.refs++; return { key, f }; }
+  if (!liquidDefs) {
+    liquidDefs = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    liquidDefs.setAttribute("aria-hidden", "true");
+    liquidDefs.style.cssText = "position:absolute;width:0;height:0;overflow:hidden;pointer-events:none";
+    document.body.append(liquidDefs);
+  }
+  const m = liquidMaps(w, h, r, refract, dpr);
+  const id = `n-lq-${++liquidSeq}`;
+  liquidDefs.insertAdjacentHTML("beforeend",
+    `<filter id="${id}" x="0" y="0" width="${w}" height="${h}" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" color-interpolation-filters="sRGB">` +
+    `<feImage href="${m.disp}" x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="none" result="m"/>` +
+    `<feDisplacementMap in="SourceGraphic" in2="m" scale="${m.scale}" xChannelSelector="R" yChannelSelector="G"/></filter>`);
+  f = { id, rim: m.rim, refs: 1 };
+  liquidFilters.set(key, f);
+  return { key, f };
+}
+
+function liquidRelease(key: string | undefined) {
+  if (!key) return;
+  const f = liquidFilters.get(key);
+  if (!f || --f.refs > 0) return;
+  liquidFilters.delete(key);
+  liquidDefs?.querySelector(`#${f.id}`)?.remove();
+}
+
+let liquidOn = false;
+/**
+ * Einmal aufrufen: jedes .n-liquid (auch spaeter eingefuegte) bekommt Brechung und Lichtkante passend zu seiner
+ * Groesse und Rundung. Aendert sich die Groesse laufend (Aufklappen), bleibt kurz der alte Filter stehen.
+ */
+export function liquid() {
+  if (liquidOn || !liquidSupported()) return;
+  liquidOn = true;
+  const keys = new Map<HTMLElement, string>();
+  const timers = new WeakMap<HTMLElement, number>();
+  const drop = (el: HTMLElement) => { liquidRelease(keys.get(el)); keys.delete(el); ro.unobserve(el); };
+  const apply = (el: HTMLElement) => {
+    if (!el.isConnected || !el.classList.contains("n-liquid")) { drop(el); return; }
+    const w = Math.round(el.offsetWidth), h = Math.round(el.offsetHeight);
+    if (w < 4 || h < 4) return;
+    const rt = getComputedStyle(el).borderTopLeftRadius.split(" ")[0];
+    const r = Math.round(rt.endsWith("%") ? (parseFloat(rt) / 100) * Math.min(w, h) : parseFloat(rt) || 0);
+    const panel = el.classList.contains("panel");
+    const refract = Number(el.dataset.refract) || (panel ? 7 : 4.5);
+    const before = keys.get(el);
+    const { key, f } = liquidFilter(w, h, Math.min(r, Math.floor(Math.min(w, h) / 2)), refract);
+    if (before === key) { f.refs--; return; }
+    keys.set(el, key);
+    el.style.setProperty("--n-lq", `url(#${f.id})`);
+    el.style.setProperty("--n-lq-rim", `url("${f.rim}")`);
+    el.dataset.lq = "";
+    liquidRelease(before);
+  };
+  const later = (el: HTMLElement, wait = 90) => {
+    clearTimeout(timers.get(el));
+    timers.set(el, window.setTimeout(() => apply(el), keys.has(el) ? wait : 0));
+  };
+  const ro = new ResizeObserver((list) => list.forEach((e) => later(e.target as HTMLElement)));
+  const scan = () => {
+    document.querySelectorAll<HTMLElement>(".n-liquid").forEach((el) => {
+      if (keys.has(el) || timers.has(el)) return;
+      ro.observe(el);
+      later(el, 0);
+    });
+    // entfernte Flaechen geben ihren Filter frei
+    for (const el of [...keys.keys()]) if (!el.isConnected || !el.classList.contains("n-liquid")) drop(el);
+  };
+  let pending = 0;
+  new MutationObserver(() => { cancelAnimationFrame(pending); pending = requestAnimationFrame(scan); })
+    .observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+  scan();
 }
