@@ -3,6 +3,14 @@
  * Rust holt einen kurzlebigen Schluessel (der echte bleibt in Rust), dann spricht diese
  * Datei direkt mit OpenAI: Mikrofon rein, Stimme raus, Ereignisse ueber den Datenkanal.
  * Der Assistent kann ueber Werkzeuge die Notch bedienen (Musik, Lautstaerke, Timer, Ablage).
+ *
+ * Vorspeichern: Das Mikrofon laeuft ab dem ersten Moment mit (PreCapture), auch waehrend die Verbindung noch
+ * aufgebaut wird. Steht sie, geht das schon Gesagte als Audio-Eintrag hinterher (conversation.item.create
+ * mit input_audio, PCM16 24 kHz); danach laeuft das Mikro live ueber WebRTC weiter. Man muss also nicht
+ * warten, bis „Verbinde …“ weg ist.
+ *
+ * Ende: Ist die Antwort zu Ende gesprochen, schliesst der Assistent: per Controller sofort (Notch weg,
+ * Verbindung legt nach READY_MS auf), per Tastenkuerzel nach kurzer Zeit fuer eine Rueckfrage (FOLLOW_MS).
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -23,6 +31,14 @@ export type VoiceHooks = {
 const CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 /** ohne Gespraech nach so vielen ms automatisch auflegen (Kosten laufen pro Minute) */
 const IDLE_MS = 40_000;
+/** Controller: nach der Antwort bleibt die Verbindung (unsichtbar) so lange fuer den naechsten Druck */
+const READY_MS = 20_000;
+/** Tastenkuerzel: nach der Antwort so lange auf eine Rueckfrage hoeren, dann schliessen */
+const FOLLOW_MS = 8_000;
+/** Vorspeichern: hoechstens so viel Sprache vor dem Verbindungsaufbau aufheben */
+const PRE_MAX_S = 30;
+/** unter so viel Vorgespeichertem (Knacken, Luft) wird nichts nachgereicht */
+const PRE_MIN_MS = 250;
 /** Antwort fertig, aber kein "Ausgabe gestoppt" vom Server: nach so langer Stille gilt sie als zu Ende */
 const QUIET_MS = 1200;
 /** Halten-zum-Sprechen: haengt "denkt nach" so lange, ohne dass etwas kommt, wird aufgegeben */
@@ -102,10 +118,82 @@ const TOOLS = [
   },
 ];
 
+/**
+ * Nimmt das Mikrofon auf, bis die Verbindung steht: Mono, auf 24 kHz umgerechnet, PCM16 (Format der Realtime-API).
+ * Laeuft auf einer Kopie der Spur, damit das Abschalten der Sendespur die Aufnahme nicht stumm macht.
+ */
+class PreCapture {
+  private ctx: AudioContext;
+  private node: ScriptProcessorNode;
+  private chunks: Int16Array[] = [];
+  private len = 0;
+  private phase = 0;
+
+  constructor(stream: MediaStream) {
+    this.ctx = new AudioContext();
+    void this.ctx.resume().catch(() => {});
+    const src = this.ctx.createMediaStreamSource(stream);
+    this.node = this.ctx.createScriptProcessor(4096, 1, 1);
+    const ratio = this.ctx.sampleRate / 24_000;
+    this.node.onaudioprocess = (e) => {
+      const inp = e.inputBuffer.getChannelData(0);
+      const out = new Int16Array(Math.ceil(inp.length / ratio) + 1);
+      let n = 0;
+      let t = this.phase;
+      for (; t < inp.length - 1; t += ratio) {
+        const i = Math.floor(t), f = t - i;
+        const v = Math.max(-1, Math.min(1, inp[i] * (1 - f) + inp[i + 1] * f));
+        out[n++] = v < 0 ? v * 0x8000 : v * 0x7fff;
+      }
+      this.phase = Math.max(0, t - inp.length);
+      if (this.len + n > PRE_MAX_S * 24_000) return;
+      this.chunks.push(out.subarray(0, n));
+      this.len += n;
+    };
+    src.connect(this.node);
+    this.node.connect(this.ctx.destination); // ohne Ziel laeuft der Prozessor nicht (gibt nur Stille aus)
+  }
+
+  /** bisher Aufgenommenes (Bytes PCM16 little-endian) */
+  get ms() {
+    return (this.len / 24_000) * 1000;
+  }
+
+  take(): Uint8Array {
+    const all = new Int16Array(this.len);
+    let o = 0;
+    for (const c of this.chunks) { all.set(c, o); o += c.length; }
+    this.chunks = [];
+    this.len = 0;
+    return new Uint8Array(all.buffer);
+  }
+
+  stop() {
+    this.node.onaudioprocess = null;
+    this.node.disconnect();
+    void this.ctx.close().catch(() => {});
+  }
+}
+
+function b64(bytes: Uint8Array) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
 export class Voice {
   private pc?: RTCPeerConnection;
   private dc?: RTCDataChannel;
   private mic?: MediaStream;
+  /** Kopie der Mikrofonspur, die an OpenAI geht (an/aus beim Halten); das Original speist Pegel und Vorspeichern */
+  private sendTrack?: MediaStreamTrack;
+  private pre?: PreCapture;
+  /** zuletzt laut gesprochen (lokaler Pegel) — ob man beim Verbinden noch mitten im Satz ist */
+  private loudAt = 0;
+  /** seit wann das Mikro live an OpenAI geht (kurzer Rest = nichts zum Abschliessen) */
+  private liveAt = 0;
+  /** in dieser Runde wurde schon Vorgespeichertes nachgereicht */
+  private sentPre = false;
   private ctx?: AudioContext;
   private audio = new Audio();
   private raf = 0;
@@ -155,13 +243,22 @@ export class Voice {
     this.h.onState(s, detail);
   }
 
-  /** Halten-zum-Sprechen: Antwort ist zu Ende gesprochen -> Mikro aus, Notch darf wieder weg */
+  /**
+   * Antwort ist zu Ende gesprochen.
+   * Controller: Mikro aus, Notch weg, Verbindung wartet unsichtbar READY_MS auf den naechsten Druck.
+   * Tastenkuerzel: noch FOLLOW_MS fuer eine Rueckfrage zuhoeren, dann schliessen.
+   */
   private finish() {
-    if (!this.ptt || !this.active || this.held) return;
+    if (!this.active || this.held || this.state === "connecting") return;
     this.answered = false;
     this.playing = false;
-    this.set("ready");
-    this.bumpIdle();
+    if (this.ptt) {
+      this.set("ready");
+      this.idleIn(READY_MS);
+      return;
+    }
+    this.set("listening");
+    this.idleIn(FOLLOW_MS);
   }
 
   private send(ev: unknown) {
@@ -169,8 +266,12 @@ export class Voice {
   }
 
   private bumpIdle() {
+    this.idleIn(IDLE_MS);
+  }
+
+  private idleIn(ms: number) {
     clearTimeout(this.idle);
-    this.idle = window.setTimeout(() => this.stop(), IDLE_MS);
+    this.idle = window.setTimeout(() => this.stop(), ms);
   }
 
   /** Halten zum Sprechen: gedrueckt = zuhoeren (startet die Sitzung bei Bedarf), losgelassen = antworten */
@@ -182,6 +283,8 @@ export class Voice {
         await this.start();
         return;
       }
+      // Verbindung steht noch nicht: das Vorspeichern laeuft weiter, configure() uebernimmt
+      if (this.state === "connecting") return;
       if (!this.ptt) {
         // Sitzung lief mit automatischer Erkennung (Tastenkuerzel): ab jetzt per Knopfdruck
         this.ptt = true;
@@ -192,7 +295,7 @@ export class Voice {
         this.send({ type: "response.cancel" });
         this.send({ type: "output_audio_buffer.clear" });
       }
-      this.answered = this.playing = false;
+      this.answered = this.playing = this.sentPre = false;
       this.send({ type: "input_audio_buffer.clear" });
       this.setMic(true);
       this.text = "";
@@ -206,34 +309,70 @@ export class Voice {
   }
 
   private release() {
+    const live = Date.now() - this.liveAt;
     this.setMic(false);
-    this.send({ type: "input_audio_buffer.commit" });
+    // nur abschliessen, wenn live wirklich etwas ankam (sonst „Puffer leer“) — das Vorgespeicherte ist schon drin
+    if (!this.sentPre || live > 300) this.send({ type: "input_audio_buffer.commit" });
     this.send({ type: "response.create" });
     this.set("thinking");
     this.bumpIdle();
   }
 
   private setMic(on: boolean) {
-    this.mic?.getAudioTracks().forEach((t) => { t.enabled = on; });
+    if (this.sendTrack) this.sendTrack.enabled = on;
+    if (on) this.liveAt = Date.now();
+  }
+
+  /**
+   * Schon Gesagtes nachreichen: als Audio-Eintrag(e) des Nutzers. Ein Datenkanal-Paket darf nicht beliebig gross
+   * sein, also in Stuecke von hoechstens ~2,5 s. Gibt zurueck, ob etwas Hoerbares dabei war.
+   */
+  private flushPre(): boolean {
+    const pre = this.pre;
+    this.pre = undefined;
+    if (!pre) return false;
+    const ms = pre.ms;
+    const pcm = pre.take();
+    pre.stop();
+    if (ms < PRE_MIN_MS || !this.loudAt) return false;
+    const limit = Math.min(120_000, Math.floor((((this.pc?.sctp?.maxMessageSize || 65_536) - 4096) * 3) / 4));
+    const step = Math.max(24_000, limit - (limit % 2));
+    for (let i = 0; i < pcm.length; i += step) {
+      this.send({
+        type: "conversation.item.create",
+        item: { type: "message", role: "user", content: [{ type: "input_audio", audio: b64(pcm.subarray(i, i + step)) }] },
+      });
+    }
+    this.sentPre = true;
+    return true;
   }
 
   async start() {
     if (this.active) return;
     this.text = "";
     this.h.onTranscript("");
+    this.loudAt = 0;
+    this.sentPre = false;
     this.set("connecting");
     try {
+      // Mikro zuerst und gleich mitschneiden: man darf sofort losreden, nachgereicht wird beim Verbinden
+      this.mic = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      this.meter(this.mic);
+      try { this.pre = new PreCapture(this.mic); } catch { /* ohne Vorspeichern: wie bisher erst nach dem Verbinden */ }
+      if (!this.active) { this.stop(); return; } // waehrenddessen abgebrochen: Mikro wieder freigeben
       const token = await invoke<string>("voice_token");
+      if (!this.active) { this.stop(); return; }
       const pc = (this.pc = new RTCPeerConnection());
       pc.ontrack = (e) => {
         this.audio.srcObject = e.streams[0];
         this.outMeter(e.streams[0]);
       };
-      this.mic = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-      pc.addTrack(this.mic.getAudioTracks()[0], this.mic);
-      this.meter(this.mic);
+      // an OpenAI geht eine Kopie der Spur; aus, bis das Vorgespeicherte nachgereicht ist
+      this.sendTrack = this.mic.getAudioTracks()[0].clone();
+      this.sendTrack.enabled = !this.pre;
+      pc.addTrack(this.sendTrack, this.mic);
 
       const dc = (this.dc = pc.createDataChannel("oai-events"));
       dc.onopen = () => this.configure();
@@ -266,11 +405,14 @@ export class Voice {
     this.dc?.close();
     this.pc?.close();
     this.mic?.getTracks().forEach((t) => t.stop());
+    this.sendTrack?.stop();
+    this.pre?.stop();
+    this.pre = this.sendTrack = undefined;
     void this.ctx?.close().catch(() => {});
     void this.outCtx?.close().catch(() => {});
     this.audio.srcObject = null;
     this.dc = this.pc = this.mic = this.ctx = this.outCtx = undefined;
-    this.ptt = this.held = this.playing = this.answered = false;
+    this.ptt = this.held = this.playing = this.answered = this.sentPre = false;
     this.h.onLevel(0);
     this.h.onOutLevel?.(0);
     if (this.state !== "error") this.set("off");
@@ -288,16 +430,39 @@ export class Voice {
         audio: { input: { turn_detection: this.ptt ? null : { type: "semantic_vad" } } },
       },
     });
-    this.set("listening");
+    // was waehrend des Verbindens schon gesagt wurde, hinterherschicken
+    const had = this.flushPre();
     this.bumpIdle();
-    // schon losgelassen, waehrend die Verbindung aufgebaut wurde: das Gesagte trotzdem beantworten
-    if (this.ptt && !this.held) this.release();
+    if (this.ptt) {
+      if (this.held) {
+        // haelt noch: live weiter, Loslassen schliesst ab
+        this.setMic(true);
+        this.set("listening");
+      } else if (had) {
+        // schon losgelassen: das Vorgespeicherte beantworten
+        this.send({ type: "response.create" });
+        this.set("thinking");
+      } else {
+        this.set("listening");
+        this.release();
+      }
+      return;
+    }
+    // Tastenkuerzel: live weiter (die Spracherkennung des Servers merkt das Satzende). War man beim Verbinden
+    // schon still, gleich antworten lassen — sonst wartet der Server auf Sprache, die nicht mehr kommt.
+    this.setMic(true);
+    this.set("listening");
+    if (had && Date.now() - this.loudAt > 700) {
+      this.send({ type: "response.create" });
+      this.set("thinking");
+    }
   }
 
   private onEvent(ev: { type: string; [k: string]: any }) {
     switch (ev.type) {
       case "input_audio_buffer.speech_started":
         this.text = "";
+        this.answered = false;
         this.set("listening");
         this.bumpIdle();
         break;
@@ -322,6 +487,8 @@ export class Voice {
         void this.done(ev.response);
         break;
       case "error":
+        // leerer Puffer, aber das Vorgespeicherte ist schon drin: die Antwort kommt trotzdem
+        if (this.sentPre && String(ev.error?.code ?? "").includes("buffer")) break;
         // Halten-zum-Sprechen ohne Gesagtes (leerer Puffer) o. Ae.: still zurueck auf bereit
         if (this.ptt && !this.held && this.state === "thinking") {
           this.answered = true;
@@ -339,13 +506,10 @@ export class Voice {
     this.bumpIdle();
     const calls = (resp?.output ?? []).filter((o) => o.type === "function_call");
     if (!calls.length) {
-      if (!this.ptt) {
-        this.set("listening");
-        return;
-      }
-      // abgebrochen, weil schon wieder gedrueckt wurde: nichts tun, es hoert bereits zu
+      this.sentPre = false;
+      // abgebrochen, weil schon wieder gedrueckt bzw. dazwischengeredet wurde: es hoert bereits zu
       if (this.held || resp?.status === "cancelled") return;
-      // Halten-zum-Sprechen: warten, bis die Stimme zu Ende ist (output_audio_buffer.stopped oder Stille)
+      // warten, bis die Stimme zu Ende ist (output_audio_buffer.stopped oder Stille), dann schliessen
       this.answered = true;
       this.quietSince = 0;
       if (!this.playing && this.state !== "speaking") this.finish();
@@ -389,7 +553,7 @@ export class Voice {
         const lvl = Math.min(1, Math.sqrt(sum / buf.length) * 5);
         smooth = Math.max(lvl, smooth * 0.82);
         this.h.onOutLevel?.(smooth);
-        if (this.answered && this.ptt && !this.held) {
+        if (this.answered && !this.held) {
           const now = performance.now();
           if (lvl > 0.03) this.quietSince = 0;
           else if (!this.quietSince) this.quietSince = now;
@@ -415,7 +579,9 @@ export class Voice {
         an.getByteTimeDomainData(buf);
         let sum = 0;
         for (const v of buf) sum += ((v - 128) / 128) ** 2;
-        this.h.onLevel(Math.min(1, Math.sqrt(sum / buf.length) * 4));
+        const lvl = Math.min(1, Math.sqrt(sum / buf.length) * 4);
+        if (lvl > 0.12) this.loudAt = Date.now();
+        this.h.onLevel(lvl);
         this.raf = requestAnimationFrame(loop);
       };
       loop();

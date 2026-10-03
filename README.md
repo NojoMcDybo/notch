@@ -52,7 +52,10 @@ Seitlich ist die Notch eine senkrechte Pille; aufgeklappt zeigt sie **alles auf 
 
 ## Sprachassistent (OpenAI Realtime)
 
-Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (erstes freies aus Strg+Alt+Leertaste → Strg+Umschalt+Alt+Leertaste → Strg+Alt+N; das aktive steht im Tooltip des Knopfs). Nochmal drücken = auflegen; nach 40 s Stille legt er selbst auf.
+Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (erstes freies aus Strg+Alt+Leertaste → Strg+Umschalt+Alt+Leertaste → Strg+Alt+N; das aktive steht im Tooltip des Knopfs). Nochmal drücken = auflegen.
+
+- **Sofort losreden:** Das Mikrofon läuft ab dem Drücken mit, auch während die Verbindung noch aufgebaut wird („Hört zu · verbindet …“). Steht sie, geht das schon Gesagte als Audio hinterher (`conversation.item.create` mit `input_audio`, PCM16 24 kHz, in Stücken von höchstens 2,5 s), danach läuft das Mikro live weiter. War man beim Verbinden schon fertig, antwortet er direkt darauf.
+- **Schließt von selbst:** Ist die Antwort zu Ende gesprochen, hört er noch 8 s auf eine Rückfrage, dann legt er auf und die Notch klappt zu. Per Controller verschwindet die Notch sofort nach der Antwort; die Verbindung wartet unsichtbar 20 s auf den nächsten Druck. Ohne Gespräch legt er spätestens nach 40 s auf.
 
 - Modell `gpt-realtime-2.1`, Stimme `marin`, Sprache rein/raus über WebRTC direkt zu OpenAI
 - Der API-Schlüssel bleibt in Rust (`src-tauri/src/voice.rs`); das Frontend bekommt nur einen kurzlebigen Sitzungsschlüssel

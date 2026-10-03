@@ -159,7 +159,7 @@ const voiceEl = q(".voice");
 const orb = q(".orb");
 const micBtn = q(".mic-btn");
 const V_LABEL: Record<string, string> = {
-  connecting: "Verbinde …",
+  connecting: "Hört zu · verbindet …",
   listening: "Hört zu",
   thinking: "Denkt nach …",
   speaking: "Spricht",
