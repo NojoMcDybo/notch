@@ -893,16 +893,6 @@ function renderAll() {
   renderShare();
 }
 
-/** Name eines Abschnitts fuer die Lichtleiste: Gruppentitel, sonst der Text vor dem ersten Element */
-function sectionLabel(el: HTMLElement): string {
-  if (el.matches(".notch-preview")) return "Vorschau";
-  if (el.matches("details")) return (el.querySelector("summary span")?.textContent ?? el.querySelector("summary")?.textContent ?? "").trim();
-  if (el.matches(".profile-card")) return el.querySelector("h3")?.textContent?.trim() ?? "";
-  const own = [...el.childNodes].find((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
-  const text = own?.textContent ?? el.querySelector(":scope > span")?.childNodes[0]?.textContent ?? "";
-  return text.trim().replace(/\s+/g, " ").slice(0, 40);
-}
-
 async function main() {
   s = normalize(await invoke<unknown>("settings_get").catch(() => null));
 
@@ -1049,13 +1039,8 @@ async function main() {
   windowControls({ minimize: () => void getCurrentWindow().minimize().catch(() => {}), close, closeTitle: "Schließen (Esc)" });
   glassLight();
   segments(document, ".n-seg, .segmented");
-  // Lichtleiste: die Abschnitte des sichtbaren Reiters als Marken (Feldname bzw. Gruppentitel)
-  lightScroller(q(".panel-body"), {
-    insetTop: 8,
-    sections: () => [...document.querySelectorAll<HTMLElement>(".pane:not([hidden]) > .field, .pane:not([hidden]) > details, .pane:not([hidden]) > .notch-preview, .pane:not([hidden]) > .profile-card, .pane:not([hidden]) > div > .field, .pane:not([hidden]) > div > .toggle-row:first-child, .pane:not([hidden]) .sport-rest > .field, .pane:not([hidden]) .sport-rest > details")]
-      .map((el) => ({ el, label: sectionLabel(el) }))
-      .filter((s) => s.label),
-  });
+  // Lichtleiste statt Bildlaufleiste
+  lightScroller(q(".panel-body"), { insetTop: 8 });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !(e.target as Element).closest?.("input[type=text]")) close(); });
 
   demoChips();

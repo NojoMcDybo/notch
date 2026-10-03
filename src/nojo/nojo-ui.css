@@ -212,9 +212,9 @@ input:focus-visible + .n-switch { outline: 2px solid var(--n-accent); outline-of
 .n-input:focus { background: rgba(255, 255, 255, 0.09); box-shadow: inset 0 0 0 1px rgba(117, 184, 255, 0.55); }
 .n-input::placeholder { color: var(--n-faint); }
 
-/* ---------- Lichtleiste (Bildlauf wie in Folio) ----------
- * Duenn: ein leuchtender Stab, der zeigt, wo man ist. Verweilt die Maus, wird er zur Glasleiste mit
- * Abschnittsmarken: Ziel antippen = dorthin springen, Mausrad = Abschnitt fuer Abschnitt. */
+/* ---------- Lichtleiste ----------
+ * Statt Bildlaufleiste ein duenner, leuchtender Stab: zeigt, wo man ist, laesst sich ziehen und leuchtet
+ * beim Scrollen kurz auf. (Die breite Sprungleiste beim Verweilen gibt es bewusst nur in Folio.) */
 .n-scroll { scrollbar-width: none; }
 .n-scroll::-webkit-scrollbar { width: 0; height: 0; }
 .n-scroller {
@@ -222,32 +222,17 @@ input:focus-visible + .n-switch { outline: 2px solid var(--n-accent); outline-of
   z-index: 35;
   width: 6px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: var(--n-glow);
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.16);
   cursor: grab;
   opacity: 0;
-  transition: top 0.45s var(--n-ease), height 0.36s var(--n-spring), width 0.36s var(--n-spring), right 0.36s var(--n-spring), left 0.36s var(--n-spring), opacity 0.3s var(--n-ease), background 0.3s, box-shadow 0.25s;
+  transition: top 0.45s var(--n-ease), height 0.36s var(--n-spring), opacity 0.3s var(--n-ease), background 0.3s, box-shadow 0.3s;
 }
 .n-scroller.show { opacity: 1; }
-.n-scroller.dragging { cursor: grabbing; transition: width 0.15s var(--n-ease); }
-:root[data-theme="light"] .n-scroller { background: rgba(28, 28, 30, 0.55); }
-/* breit: wird zur Glasleiste mit Fenster (sichtbarer Teil) und Marken */
-.n-scroller.wide {
-  background: var(--n-glass);
-  -webkit-backdrop-filter: var(--n-glass-blur);
-  backdrop-filter: var(--n-glass-blur);
-  box-shadow: inset 0 1px 0 var(--n-glass-spec), inset 0 0 0 1px var(--n-glass-rim), 0 0 10px rgba(255, 255, 255, 0.12), var(--n-shadow);
-  cursor: pointer;
-}
-.n-scroller-view { position: absolute; left: 3px; right: 3px; border-radius: 999px; background: rgba(255, 255, 255, 0.85); box-shadow: var(--n-glow); opacity: 0; transition: top 0.3s var(--n-ease), height 0.3s var(--n-ease), opacity 0.25s; pointer-events: none; }
-:root[data-theme="light"] .n-scroller-view { background: rgba(28, 28, 30, 0.7); }
-.n-scroller.wide .n-scroller-view { opacity: 1; }
-.n-scroller-mark { position: absolute; left: 6px; right: 6px; height: 1px; background: var(--n-glass-ink); opacity: 0; transition: opacity 0.25s, left 0.2s, right 0.2s; pointer-events: none; }
-.n-scroller.wide .n-scroller-mark { opacity: 0.4; }
-.n-scroller-mark.near { opacity: 1 !important; left: 3px; right: 3px; }
-.n-scroller-tip { position: fixed; z-index: 36; padding: 6px 11px; border-radius: 13px; font-size: 12px; white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(calc(-100% - 10px), -50%); transition: opacity 0.18s; }
-.n-scroller-tip.show { opacity: 1; }
-
+.n-scroller.moving, .n-scroller:hover, .n-scroller.dragging { background: rgba(255, 255, 255, 0.82); box-shadow: var(--n-glow); }
+.n-scroller.dragging { cursor: grabbing; transition: opacity 0.3s; }
+:root[data-theme="light"] .n-scroller { background: rgba(28, 28, 30, 0.35); box-shadow: none; }
+:root[data-theme="light"] .n-scroller:is(.moving, :hover, .dragging) { background: rgba(28, 28, 30, 0.6); }
 /* ---------- Ruhe, Kontrast ---------- */
 
 @media (prefers-reduced-motion: reduce) {
@@ -255,7 +240,7 @@ input:focus-visible + .n-switch { outline: 2px solid var(--n-accent); outline-of
   .n-ico, .n-seg-thumb, .n-switch::after, .n-scroller, .n-card.lift { transition-duration: 0.01ms !important; }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .n-glass, .n-scroller.wide { background: var(--n-glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .n-glass { background: var(--n-glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 @media (forced-colors: active) {
   .n-glass, .n-card, .n-seg, .n-scroller { border: 1px solid CanvasText; background: Canvas; }
