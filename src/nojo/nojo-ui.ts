@@ -7,27 +7,21 @@
  * - windowControls():   Fensterknoepfe als Glaspille oben rechts (wie Folio)
  * - lightScroller():    Lichtleiste statt Bildlaufleiste — duenner Leuchtstab, zeigt den Ort, laesst sich ziehen
  *                       (die breite Sprungleiste gibt es nur in Folio)
+ * - ICONS / icon():     Symbole aus der Bibliothek (nojo-icons.ts, generiert aus assets/icons.mjs)
  * - liquid():           echtes Liquid Glass fuer .n-liquid — Folios Optik (Brechung am Rand, klare Mitte,
  *                       Lichtkante von oben links) als SVG-Filter im backdrop-filter
  */
 
-/** Feine Liniensymbole wie in Folio (24er Raster, Strich 1,6) */
-export const svgIcon = (d: string) =>
-  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+import { icon, type IconName } from "./nojo-icons";
+export { icon, iconNode, iconUrl, NOJO_ICONS, SOURCE_COLORS, type IconName } from "./nojo-icons";
 
-export const ICONS = {
-  min: svgIcon('<path d="M6 12h12"/>'),
-  max: svgIcon('<rect x="6.5" y="6.5" width="11" height="11" rx="2"/>'),
-  close: svgIcon('<path d="M7 7l10 10"/><path d="M17 7L7 17"/>'),
-  back: svgIcon('<path d="M14.5 5 8 12l6.5 7"/>'),
-  prev: svgIcon('<path d="M14.5 6 8.5 12l6 6"/>'),
-  next: svgIcon('<path d="M9.5 6l6 6-6 6"/>'),
-  settings: svgIcon('<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6 6l1.6 1.6M16.4 16.4 18 18M6 18l1.6-1.6M16.4 7.6 18 6"/>'),
-  widget: svgIcon('<rect x="4" y="6" width="16" height="12" rx="4"/><path d="M8 12h5"/>'),
-  sun: svgIcon('<circle cx="12" cy="12" r="3.6"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M6 18l1.4-1.4M16.6 7.4 18 6"/>'),
-  moon: svgIcon('<path d="M19 14.5A7.5 7.5 0 0 1 9.5 5 7.5 7.5 0 1 0 19 14.5z"/>'),
-  auto: svgIcon('<rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/>'),
-};
+/** Feine Liniensymbole wie in Folio (24er Raster, Strich 1,6) — nur noch fuer Uebergaenge; neue Symbole in die Bibliothek */
+export const svgIcon = (d: string) =>
+  `<svg viewBox="0 0 24 24" class="n-i n-i-line" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+
+/** Haeufige Symbole als fertiger SVG-Text (aus der Bibliothek) */
+const pick = (...names: IconName[]) => Object.fromEntries(names.map((n) => [n, icon(n)])) as Record<(typeof names)[number], string>;
+export const ICONS = pick("min", "max", "close", "back", "prev", "next", "settings", "widget", "sun", "moon", "auto", "fullscreen", "plus", "check", "search", "open");
 
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));

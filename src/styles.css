@@ -185,8 +185,7 @@ svg { display: block; }
 .vol { display: flex; align-items: center; gap: 4px; width: 118px; }
 .vol-btn { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: var(--fg2); flex: none; }
 .vol-btn:hover { background: var(--hover); color: var(--fg); }
-.vol-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.vol-btn .spk { fill: currentColor; stroke: none; }
+.vol-btn svg { width: 16px; height: 16px; }
 .vol-btn .mx { display: none; }
 .vol[data-lvl="0"] .w1, .vol[data-lvl="0"] .w2, .vol[data-lvl="1"] .w2 { display: none; }
 .vol[data-lvl="0"] .mx { display: block; }
@@ -228,7 +227,7 @@ svg { display: block; }
 /* Ablage */
 .v-tray { position: relative; min-height: 92px; }
 .drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: 96px; border: 1.5px dashed rgba(255, 255, 255, 0.18); border-radius: 16px; color: var(--fg2); font-size: 12px; transition: border-color 0.15s, background 0.15s, color 0.15s; }
-.drop svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.drop svg { width: 22px; height: 22px; }
 .v-tray.has-files .drop { display: none; }
 #notch.dragging .v-tray .drop { display: flex; position: absolute; inset: 0; height: auto; z-index: 3; background: rgba(0, 0, 0, 0.82); border-color: var(--fg); color: var(--fg); }
 .files { display: grid; grid-template-columns: repeat(auto-fill, 76px); gap: 6px 8px; max-height: 196px; overflow-y: auto; scrollbar-width: none; }

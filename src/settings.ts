@@ -10,7 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { build, bpmOf, needed, plan, planKey, PulseGate, sourceOf, TIMER_ID, type CAct, type Plan } from "./compact";
-import { glassLight, lightScroller, liquid, segments, windowControls } from "./nojo/nojo-ui";
+import { glassLight, icon, iconNode, iconUrl, lightScroller, liquid, segments, windowControls, type IconName } from "./nojo/nojo-ui";
 import { clone, DEFAULTS, FULLSCREEN_MODES, LAYERS, MUSIC_REACT, normalize, SOURCES, SPORT_EXPAND, type CompactSettings, type FullscreenMode, type Layer, type MusicReact, type SourceId, type SportExpand } from "./settings-model";
 
 const q = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector(s) as T;
@@ -20,25 +20,12 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   if (text != null) e.textContent = text;
   return e;
 }
-function svg(d: string) {
-  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  s.setAttribute("viewBox", "0 0 24 24");
-  s.setAttribute("aria-hidden", "true");
-  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  p.setAttribute("d", d);
-  s.append(p);
-  return s;
-}
+/** Symbol aus der Bibliothek als Element */
+const svg = (name: IconName) => iconNode(name);
 
-const GLYPH: Record<SourceId, string> = {
-  glucose: "M12 2.6c3.7 4.5 6.6 8.3 6.6 11.7a6.6 6.6 0 0 1-13.2 0c0-3.4 2.9-7.2 6.6-11.7z",
-  music: "M19 3v12.2a3 3 0 1 1-2-2.83V7.3l-8 1.6v8.3a3 3 0 1 1-2-2.83V5.4z",
-  timer: "M10 2h4v2h-4zm2 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm0 2a6 6 0 1 0 0 12 6 6 0 0 0 0-12zm-1 2h2v4.6l2.7 1.6-1 1.7L11 15.7z",
-  pulse: "M12 20.6S4 15.8 4 10.2A4.4 4.4 0 0 1 12 7.7a4.4 4.4 0 0 1 8 2.5c0 5.6-8 10.4-8 10.4z",
-  folio: "M6 2h8.6L20 7.4V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.8V8h4.2zM8 12v1.6h8V12zm0 3.4V17h6v-1.6z",
-  other: "M4 4h7v7H4zm9 0h7v7h-7zM4 13h7v7H4zm9 0h7v7h-7z",
-};
-const GRIP = "M9 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm9-13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z";
+/** Symbol je Quelle — dieselben wie ueberall im Oekosystem (Herz = Puls, Tropfen = Blutzucker …) */
+const GLYPH: Record<SourceId, IconName> = { glucose: "drop", music: "music", timer: "timer-fill", pulse: "heart", folio: "document", other: "apps" };
+const GRIP: IconName = "grip";
 
 // ---------- Zustand ----------
 
@@ -64,7 +51,7 @@ const demoGate = new PulseGate();
 
 const dataUrl = (svgText: string) => `data:image/svg+xml;utf8,${encodeURIComponent(svgText)}`;
 const DEMO_COVER = dataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6b6b"/><stop offset="0.55" stop-color="#845ef7"/><stop offset="1" stop-color="#22223b"/></linearGradient></defs><rect width="60" height="60" fill="url(#g)"/><circle cx="40" cy="22" r="9" fill="#ffd166" opacity="0.9"/></svg>`);
-const ico = (d: string, c: string) => dataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="${c}" d="${d}"/></svg>`);
+const ico = (name: IconName, c: string) => iconUrl(name, c);
 
 function demoActs(): CAct[] {
   const now = Date.now();
@@ -832,12 +819,9 @@ type ShareDev = { fp: string; alias: string; model: string; kind: string; recent
 type ShareState = { on: boolean; running: boolean; error: string; ip: string; port: number; alias: string; folder: string; devices: ShareDev[] };
 let share: ShareState | null = null;
 
-function svgLine(d: string) {
-  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
-}
-const ICON_PHONE = svgLine('<rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18h2"/>');
-const ICON_QR = svgLine('<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2v2M20 14v6h-4M14 18v2"/>');
-const ICON_FOLDER = svgLine('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>');
+const ICON_PHONE = icon("phone");
+const ICON_QR = icon("qr");
+const ICON_FOLDER = icon("folder");
 
 /** Zustand in wenigen Worten; leuchtet, wenn bereit */
 function shareStatus(): [string, string] {

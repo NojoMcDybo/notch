@@ -8,7 +8,12 @@ import { fillCard, isBg, type ChartData } from "./glucose";
 import { build, needed, plan, planKey, planSig, PulseGate, sourceOf, type Plan } from "./compact";
 import { DEFAULTS, normalize, type CompactSettings } from "./settings-model";
 import { MusicReactor, type Spectrum } from "./music-react";
-import { liquid } from "./nojo/nojo-ui";
+import { iconNode, liquid, NOJO_ICONS, type IconName } from "./nojo/nojo-ui";
+
+// Symbole aus der Bibliothek einsetzen (index.html hat nur Platzhalter <svg data-icon="…">), bevor jemand sie sucht
+document.querySelectorAll<SVGElement>("svg[data-icon]").forEach((s) => {
+  s.replaceWith(iconNode(s.dataset.icon as IconName, { cls: s.getAttribute("class") ?? undefined }));
+});
 import { bannerEl, cardEl, cardSig, kickoff, midEl, midSig as sportSig, Pitch, type SportMatch, type SportNews, type SportPlay, type SportState } from "./sport";
 
 // ---------- Typen ----------
@@ -289,30 +294,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
-const ICONS: Record<string, string> = {
-  play: "M8 5v14l11-7z",
-  pause: "M7 5h4v14H7zM13 5h4v14h-4z",
-  stop: "M6 6h12v12H6z",
-  check: "M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6L20.5 8l-1.4-1.4z",
-  close: "M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z",
-  folder: "M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
-  open: "M14 4h6v6h-2V7.4l-7.3 7.3-1.4-1.4L16.6 6H14zM5 6h6v2H6v10h10v-5h2v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z",
-  restart: "M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z",
-  plus: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z",
-  search: "M10.5 4a6.5 6.5 0 0 1 5.2 10.4l4.4 4.4-1.4 1.4-4.4-4.4A6.5 6.5 0 1 1 10.5 4zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z",
-  up: "M12 8.6 18.4 15 17 16.4l-5-5-5 5L5.6 15z",
-  down: "M12 15.4 5.6 9 7 7.6l5 5 5-5L18.4 9z",
-};
-
+/** Symbol aus der Bibliothek (auch fuer Namen, die Apps in Live Activities schicken: check, close, open …) */
 function svgIcon(name: string) {
-  const d = ICONS[name];
-  if (!d) return null;
-  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  s.setAttribute("viewBox", "0 0 24 24");
-  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  p.setAttribute("d", d);
-  s.append(p);
-  return s;
+  return name in NOJO_ICONS ? iconNode(name as IconName) : null;
 }
 
 function iconEl(a: Activity) {

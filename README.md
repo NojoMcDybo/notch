@@ -42,7 +42,7 @@ Exklusives Vollbild (manche Spiele) lässt kein Fenster darüber zu; dort bleibt
 
 ## Aussehen der Einstellungen
 
-Das Einstellungsfenster spricht dieselbe Designsprache wie Folio, Haze und Helio (Quelle `D:\Dev\nojo-design`, Kopie unter `src/nojo/`): Folio-Grau, Fensterknöpfe als Glaspille, **Liquid Glass** wie in Folio (die Reiter schweben über dem Inhalt, der darunter durchscrollt; ihr Rand bricht ihn), Segmente als Glasrinne mit gleitender Perle, Karten statt Rahmen, Schalter leuchten, wenn sie an sind. Statt einer Bildlaufleiste zeigt eine dünne **Lichtleiste** am rechten Rand, wo man ist (leuchtet beim Scrollen kurz auf, lässt sich ziehen). Die Notch selbst bleibt schwarz.
+Das Einstellungsfenster spricht dieselbe Designsprache wie Folio, Haze und Helio (Quelle `D:\Dev\nojo-design`, Kopie unter `src/nojo/`): Folio-Grau, Fensterknöpfe als Glaspille, **Liquid Glass** wie in Folio (die Reiter schweben über dem Inhalt, der darunter durchscrollt; ihr Rand bricht ihn), Segmente als Glasrinne mit gleitender Perle, Karten statt Rahmen, Schalter leuchten, wenn sie an sind. Statt einer Bildlaufleiste zeigt eine dünne **Lichtleiste** am rechten Rand, wo man ist (leuchtet beim Scrollen kurz auf, lässt sich ziehen). Die Notch selbst bleibt schwarz. Alle Symbole (Notch und Einstellungen) kommen aus der gemeinsamen Bibliothek (`src/nojo/nojo-icons.ts`, Quelle `nojo-design/assets/icons.mjs`); `index.html` enthält nur Platzhalter `<svg data-icon="…">`.
 
 ## Andocken: oben, links, rechts
 

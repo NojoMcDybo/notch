@@ -160,6 +160,15 @@
 }
 .n-liquid[data-lq]:hover::after, .n-liquid[data-lq].lit::after { opacity: 1; }
 
+/* ---------- Symbole (nojo-icons.ts, Quelle assets/icons.mjs) ----------
+ * Linie bleibt Linie und Flaeche bleibt Flaeche, auch wenn eine App "svg { fill: … }" setzt. Groesse bestimmt die App
+ * (Vorgabe 1em). Einzelne Teile duerfen eigene Klassen haben (z. B. Lautstaerke: w1, w2, mx). */
+:where(svg.n-i) { flex: none; width: 1em; height: 1em; } /* ohne Gewicht: die App bestimmt die Groesse */
+svg.n-i-line { stroke-width: 1.6; }
+svg.n-i-line, svg.n-i-line * { fill: none !important; stroke: currentColor; }
+svg.n-i-glyph { fill: currentColor; }
+svg.n-i-glyph * { stroke: none; }
+
 /* ---------- Symbolknoepfe (Folio) ---------- */
 
 .n-ico {
