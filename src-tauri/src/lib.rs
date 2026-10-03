@@ -256,7 +256,7 @@ pub(crate) fn show_settings(app: &AppHandle, tab: Option<&str>) -> tauri::Result
         // (data-tauri-drag-region); shadow gibt unter Windows 11 Schatten + runde Ecken zurück
         .decorations(false)
         .shadow(true)
-        .background_color(tauri::window::Color(14, 20, 20, 255))
+        .background_color(tauri::window::Color(28, 28, 30, 255))
         .additional_browser_args(
             "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required",
         )

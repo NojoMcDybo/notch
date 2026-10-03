@@ -1,0 +1,263 @@
+/* Nojo UI — gemeinsame Designsprache von Folio, Haze, Helio und den Notch-Einstellungen.
+ *
+ * Quelle: D:\Dev\nojo-design (dort aendern, dann tools\sync.ps1). In den Apps liegt nur eine Kopie
+ * unter src/nojo/ — dort nicht von Hand aendern.
+ *
+ * Grundlage ist Folio: graue Flaechen, feines Schwarz-Weiss-Grau, Glas, das ueber dem Inhalt schwebt,
+ * Licht als Information (die Lichtleiste zeigt, wo man ist, und laesst einen springen). Alles mit
+ * Praefix n- / --n-, damit es neben dem bestehenden CSS der Apps stehen kann.
+ */
+
+:root {
+  color-scheme: dark;
+  /* Flaechen: das Grau aus Folio */
+  --n-bg: #1c1c1e;
+  --n-bg-deep: #161618;
+  --n-surface: #242426;
+  --n-surface-2: #2c2c2e;
+  --n-surface-3: #3a3a3c;
+  --n-line: rgba(255, 255, 255, 0.07);
+  --n-line-2: rgba(255, 255, 255, 0.12);
+  /* Schrift: Weiss, Grau, leises Grau */
+  --n-ink: #f5f5f7;
+  --n-dim: #a1a1a6;
+  --n-faint: #6e6e73;
+  /* Licht */
+  --n-accent: #75b8ff;
+  --n-accent-ink: #102030;
+  --n-light: #ffffff;
+  --n-glow: 0 0 7px rgba(255, 255, 255, 0.28), 0 0 18px rgba(255, 255, 255, 0.12);
+  /* Bedeutung (sparsam) */
+  --n-ok: #30d158;
+  --n-warn: #edbc56;
+  --n-low: #ff7971;
+  --n-heart: #ff5a6e;
+  /* Glas */
+  --n-glass: rgba(58, 58, 62, 0.52);
+  --n-glass-solid: #343437;
+  --n-glass-ink: #f5f5f7;
+  --n-glass-hover: rgba(255, 255, 255, 0.09);
+  --n-glass-rim: rgba(255, 255, 255, 0.1);
+  --n-glass-spec: rgba(255, 255, 255, 0.2);
+  --n-glass-blur: blur(22px) saturate(170%);
+  --n-shadow: 0 4px 16px rgba(0, 0, 0, 0.16), 0 1px 3px rgba(0, 0, 0, 0.1);
+  --n-shadow-lift: 0 14px 34px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.14);
+  /* Bewegung (Folio) */
+  --n-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --n-spring: cubic-bezier(0.22, 1.18, 0.36, 1);
+  /* Form */
+  --n-r-card: 18px;
+  --n-r-ctl: 12px;
+  --n-font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --n-font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+}
+
+/* Hell (nur wo eine App es anbietet, z. B. Haze): dieselbe Sprache in Weiss-Grau */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --n-bg: #f2f2f4;
+  --n-bg-deep: #e8e8eb;
+  --n-surface: #ffffff;
+  --n-surface-2: #ebebee;
+  --n-surface-3: #dcdce0;
+  --n-line: rgba(0, 0, 0, 0.07);
+  --n-line-2: rgba(0, 0, 0, 0.12);
+  --n-ink: #1c1c1e;
+  --n-dim: #6e6e73;
+  --n-faint: #a1a1a6;
+  --n-accent: #0a6cd6;
+  --n-accent-ink: #ffffff;
+  --n-light: #1c1c1e;
+  --n-glow: 0 0 0 1px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.16);
+  --n-warn: #9a6a00;
+  --n-low: #c33a31;
+  --n-glass: rgba(255, 255, 255, 0.62);
+  --n-glass-solid: #ffffff;
+  --n-glass-ink: #1c1c1e;
+  --n-glass-hover: rgba(0, 0, 0, 0.06);
+  --n-glass-rim: rgba(0, 0, 0, 0.07);
+  --n-glass-spec: rgba(255, 255, 255, 0.9);
+  --n-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
+  --n-shadow-lift: 0 14px 34px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+/* ---------- Fenster ---------- */
+
+.n-window {
+  margin: 0;
+  background: var(--n-bg);
+  color: var(--n-ink);
+  font: 13px/1.4 var(--n-font);
+  -webkit-font-smoothing: antialiased;
+}
+.n-window :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--n-accent); outline-offset: 3px; }
+
+/* Rahmenloses Fenster: unsichtbarer Streifen oben zum Ziehen */
+.n-dragbar { position: fixed; top: 0; left: 0; right: 0; height: 34px; z-index: 30; }
+
+/* ---------- Glas ----------
+ * Schwebt ueber dem Inhalt: weichgezeichneter Hintergrund, oben eine Lichtkante, ein feiner Rand.
+ * ::before ist das Licht, das der Maus folgt (nojo-ui.ts setzt --lx/--ly). */
+.n-glass {
+  position: relative;
+  background: var(--n-glass);
+  -webkit-backdrop-filter: var(--n-glass-blur);
+  backdrop-filter: var(--n-glass-blur);
+  box-shadow: inset 0 1px 0 var(--n-glass-spec), inset 0 0 0 1px var(--n-glass-rim), var(--n-shadow);
+  color: var(--n-glass-ink);
+  border-radius: 22px;
+}
+.n-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(140px circle at var(--lx, 50%) var(--ly, -60%), rgba(255, 255, 255, 0.13), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.35s var(--n-ease);
+}
+.n-glass.lit::before { opacity: 1; }
+:root[data-theme="light"] .n-glass::before { background: radial-gradient(140px circle at var(--lx, 50%) var(--ly, -60%), rgba(255, 255, 255, 0.85), transparent 70%); }
+
+/* ---------- Symbolknoepfe (Folio) ---------- */
+
+.n-ico {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  display: inline-grid;
+  place-items: center;
+  color: inherit;
+  cursor: pointer;
+  transition: color 0.2s var(--n-ease), background 0.2s var(--n-ease), transform 0.38s var(--n-spring);
+}
+.n-ico.sm { width: 30px; height: 30px; }
+.n-ico svg { width: 19px; height: 19px; pointer-events: none; }
+.n-ico.sm svg { width: 14px; height: 14px; }
+.n-ico:hover { background: var(--n-glass-hover); }
+.n-ico:active { transform: scale(0.93); transition-duration: 0.08s; }
+.n-ico:disabled { opacity: 0.3; pointer-events: none; }
+.n-ico.on { color: #9bccff; background: rgba(10, 132, 255, 0.18); }
+.n-ico.danger:hover { background: #df4944; color: #fff; }
+/* kleiner Punkt am Symbol: es gibt etwas Neues (z. B. Update) */
+.n-ico .n-dot { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--n-accent); box-shadow: 0 0 8px var(--n-accent); }
+.n-ico.sm .n-dot { top: 3px; right: 3px; width: 6px; height: 6px; }
+
+/* Fensterknoepfe: Glaspille oben rechts */
+.n-wc { position: fixed; top: 12px; right: 14px; z-index: 40; display: flex; gap: 2px; padding: 4px; border-radius: 17px; }
+
+/* ---------- Karten ---------- */
+
+.n-card {
+  background: var(--n-surface);
+  border-radius: var(--n-r-card);
+  box-shadow: inset 0 0 0 1px var(--n-line), inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 8px 22px rgba(0, 0, 0, 0.14);
+}
+:root[data-theme="light"] .n-card { box-shadow: inset 0 0 0 1px var(--n-line), 0 6px 18px rgba(0, 0, 0, 0.05); }
+.n-card.lift { transition: transform 0.42s var(--n-spring), box-shadow 0.42s var(--n-ease); }
+.n-card.lift:hover { transform: translateY(-2px); box-shadow: inset 0 0 0 1px var(--n-line-2), var(--n-shadow-lift); }
+
+/* ---------- Schrift ---------- */
+
+.n-eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--n-dim); }
+.n-num { font-variant-numeric: tabular-nums; }
+.n-display { font-family: var(--n-font-display); font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+
+/* ---------- Segmente: Glasrinne, der gewaehlte Teil ist eine helle Glasperle ---------- */
+
+.n-seg { position: relative; display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px var(--n-line); }
+:root[data-theme="light"] .n-seg { background: rgba(0, 0, 0, 0.05); }
+.n-seg > button { position: relative; z-index: 1; flex: 1; border: 0; background: none; color: var(--n-dim); padding: 7px 14px; border-radius: 999px; font: inherit; font-size: 12px; font-weight: 550; cursor: pointer; transition: color 0.2s var(--n-ease); }
+.n-seg > button:hover { color: var(--n-ink); }
+.n-seg > button.active, .n-seg > button[aria-pressed="true"] { color: var(--n-ink); }
+.n-seg-thumb { position: absolute; z-index: 0; top: 3px; bottom: 3px; left: 0; width: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.15); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 1px 5px rgba(0, 0, 0, 0.28); transition: left 0.42s var(--n-spring), width 0.42s var(--n-spring); pointer-events: none; }
+:root[data-theme="light"] .n-seg-thumb { background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14), inset 0 0 0 1px rgba(0, 0, 0, 0.04); }
+
+/* ---------- Schalter: aus = Rinne, an = Licht ---------- */
+
+.n-switch { position: relative; flex: none; width: 40px; height: 24px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); box-shadow: inset 0 0 0 1px var(--n-line); transition: background 0.25s var(--n-ease), box-shadow 0.25s var(--n-ease); }
+.n-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--n-dim); transition: left 0.38s var(--n-spring), background 0.25s; }
+input:checked + .n-switch { background: rgba(255, 255, 255, 0.86); box-shadow: 0 0 12px rgba(255, 255, 255, 0.22); }
+input:checked + .n-switch::after { left: 19px; background: var(--n-bg); }
+:root[data-theme="light"] .n-switch { background: rgba(0, 0, 0, 0.1); }
+:root[data-theme="light"] input:checked + .n-switch { background: var(--n-ink); box-shadow: none; }
+:root[data-theme="light"] input:checked + .n-switch::after { background: #fff; }
+input:focus-visible + .n-switch { outline: 2px solid var(--n-accent); outline-offset: 3px; }
+
+/* ---------- Knoepfe ---------- */
+
+.n-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 34px; padding: 0 16px; border: 0; border-radius: 11px; background: rgba(255, 255, 255, 0.1); color: var(--n-ink); font: inherit; font-weight: 550; cursor: pointer; transition: background 0.2s var(--n-ease), transform 0.3s var(--n-spring); }
+.n-btn:hover { background: rgba(255, 255, 255, 0.18); }
+.n-btn:active { transform: scale(0.95); }
+.n-btn.primary { background: var(--n-accent); color: var(--n-accent-ink); font-weight: 600; }
+.n-btn.primary:hover { background: #9acbff; }
+:root[data-theme="light"] .n-btn { background: rgba(0, 0, 0, 0.06); }
+:root[data-theme="light"] .n-btn:hover { background: rgba(0, 0, 0, 0.1); }
+:root[data-theme="light"] .n-btn.primary { background: var(--n-accent); color: #fff; }
+
+/* ---------- Pillen, Lichtstriche ---------- */
+
+.n-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); font-size: 11px; color: var(--n-dim); }
+.n-pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.8; }
+/* duenner Fortschritt mit Leuchten (Folio: Lesefortschritt unter dem Deckel) */
+.n-bar { height: 2px; border-radius: 1px; background: var(--n-accent); box-shadow: 0 0 10px var(--n-accent); }
+
+/* ---------- Eingaben ---------- */
+
+.n-input { height: 36px; padding: 0 12px; border: 0; border-radius: 11px; background: rgba(255, 255, 255, 0.06); box-shadow: inset 0 0 0 1px var(--n-line); color: var(--n-ink); font: inherit; outline: none; transition: box-shadow 0.2s var(--n-ease), background 0.2s; }
+.n-input:focus { background: rgba(255, 255, 255, 0.09); box-shadow: inset 0 0 0 1px rgba(117, 184, 255, 0.55); }
+.n-input::placeholder { color: var(--n-faint); }
+
+/* ---------- Lichtleiste (Bildlauf wie in Folio) ----------
+ * Duenn: ein leuchtender Stab, der zeigt, wo man ist. Verweilt die Maus, wird er zur Glasleiste mit
+ * Abschnittsmarken: Ziel antippen = dorthin springen, Mausrad = Abschnitt fuer Abschnitt. */
+.n-scroll { scrollbar-width: none; }
+.n-scroll::-webkit-scrollbar { width: 0; height: 0; }
+.n-scroller {
+  position: fixed;
+  z-index: 35;
+  width: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: var(--n-glow);
+  cursor: grab;
+  opacity: 0;
+  transition: top 0.45s var(--n-ease), height 0.36s var(--n-spring), width 0.36s var(--n-spring), right 0.36s var(--n-spring), left 0.36s var(--n-spring), opacity 0.3s var(--n-ease), background 0.3s, box-shadow 0.25s;
+}
+.n-scroller.show { opacity: 1; }
+.n-scroller.dragging { cursor: grabbing; transition: width 0.15s var(--n-ease); }
+:root[data-theme="light"] .n-scroller { background: rgba(28, 28, 30, 0.55); }
+/* breit: wird zur Glasleiste mit Fenster (sichtbarer Teil) und Marken */
+.n-scroller.wide {
+  background: var(--n-glass);
+  -webkit-backdrop-filter: var(--n-glass-blur);
+  backdrop-filter: var(--n-glass-blur);
+  box-shadow: inset 0 1px 0 var(--n-glass-spec), inset 0 0 0 1px var(--n-glass-rim), 0 0 10px rgba(255, 255, 255, 0.12), var(--n-shadow);
+  cursor: pointer;
+}
+.n-scroller-view { position: absolute; left: 3px; right: 3px; border-radius: 999px; background: rgba(255, 255, 255, 0.85); box-shadow: var(--n-glow); opacity: 0; transition: top 0.3s var(--n-ease), height 0.3s var(--n-ease), opacity 0.25s; pointer-events: none; }
+:root[data-theme="light"] .n-scroller-view { background: rgba(28, 28, 30, 0.7); }
+.n-scroller.wide .n-scroller-view { opacity: 1; }
+.n-scroller-mark { position: absolute; left: 6px; right: 6px; height: 1px; background: var(--n-glass-ink); opacity: 0; transition: opacity 0.25s, left 0.2s, right 0.2s; pointer-events: none; }
+.n-scroller.wide .n-scroller-mark { opacity: 0.4; }
+.n-scroller-mark.near { opacity: 1 !important; left: 3px; right: 3px; }
+.n-scroller-tip { position: fixed; z-index: 36; padding: 6px 11px; border-radius: 13px; font-size: 12px; white-space: nowrap; pointer-events: none; opacity: 0; transform: translate(calc(-100% - 10px), -50%); transition: opacity 0.18s; }
+.n-scroller-tip.show { opacity: 1; }
+
+/* ---------- Ruhe, Kontrast ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .n-glass::before { display: none; }
+  .n-ico, .n-seg-thumb, .n-switch::after, .n-scroller, .n-card.lift { transition-duration: 0.01ms !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .n-glass, .n-scroller.wide { background: var(--n-glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (forced-colors: active) {
+  .n-glass, .n-card, .n-seg, .n-scroller { border: 1px solid CanvasText; background: Canvas; }
+  .n-glass::before { display: none; }
+}

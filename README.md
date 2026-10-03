@@ -40,6 +40,10 @@ Bei Vollbild-Programmen auf dem Hauptmonitor verhält sich die Notch nach **Eins
 
 Exklusives Vollbild (manche Spiele) lässt kein Fenster darüber zu; dort bleibt die Notch in jedem Fall unsichtbar.
 
+## Aussehen der Einstellungen
+
+Das Einstellungsfenster spricht dieselbe Designsprache wie Folio, Haze und Helio (Quelle `D:\Dev\nojo-design`, Kopie unter `src/nojo/`): Folio-Grau, Fensterknöpfe als Glaspille, Reiter und Segmente als Glasrinne mit gleitender Perle, Karten statt Rahmen, Schalter leuchten, wenn sie an sind. Statt einer Bildlaufleiste zeigt die **Lichtleiste** am rechten Rand, wo man ist; verweilt die Maus dort, wird sie zur Sprungleiste mit den Abschnitten des Reiters. Die Notch selbst bleibt schwarz.
+
 ## Andocken: oben, links, rechts
 
 Die Form (nicht Knöpfe/Regler/Dateien) mit gedrückter Maus greifen und Richtung Kante ziehen, beim Loslassen dockt sie an: linkes Viertel des Bildschirms → links, rechtes → rechts, Mitte → oben. Alternativ im Tray-Menü. Die Wahl wird gespeichert (`%APPDATA%\de.nojo.notch\config.json`).

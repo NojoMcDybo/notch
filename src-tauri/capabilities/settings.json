@@ -3,5 +3,5 @@
   "identifier": "settings",
   "description": "Einstellungsfenster ohne Titelleiste: sich selbst schliessen und am Kopf ziehen",
   "windows": ["settings"],
-  "permissions": ["core:window:allow-close", "core:window:allow-start-dragging"]
+  "permissions": ["core:window:allow-close", "core:window:allow-start-dragging", "core:window:allow-minimize"]
 }

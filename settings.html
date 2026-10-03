@@ -4,24 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Notch – Einstellungen</title>
+    <link rel="stylesheet" href="/src/nojo/nojo-ui.css" />
     <link rel="stylesheet" href="/src/compact.css" />
     <link rel="stylesheet" href="/src/settings.css" />
     <script type="module" src="/src/settings.ts" defer></script>
   </head>
-  <body>
-    <!-- Aufbau wie das Einstellungsfenster von Haze. Keine Windows-Titelleiste:
-         der Kopf ist die Zieh-Fläche, Schließen oben rechts. -->
+  <body class="n-window">
+    <!-- Gemeinsame Designsprache (src/nojo). Keine Windows-Titelleiste: der Kopf ist die Zieh-Fläche,
+         Fensterknöpfe als Glaspille oben rechts (settings.ts). -->
     <section class="settings-panel" aria-label="Einstellungen">
       <div class="panel-head" data-tauri-drag-region>
         <div data-tauri-drag-region>
           <div class="eyebrow" data-tauri-drag-region>DEINE NOTCH</div>
           <h2 data-tauri-drag-region>Einstellungen</h2>
         </div>
-        <button class="icon-button close" aria-label="Schließen" title="Schließen (Esc)">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
-        </button>
       </div>
-      <nav class="settings-tabs" role="tablist" data-tauri-drag-region>
+      <nav class="settings-tabs n-seg" role="tablist">
         <button role="tab" data-tab="display">Anzeige</button>
         <button role="tab" data-tab="dock">Andocken</button>
         <button role="tab" data-tab="sport">Sport</button>
