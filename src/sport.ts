@@ -274,7 +274,8 @@ export function cardEl(focus: SportMatch, others: SportMatch[], o: CardOpts) {
   if (o.court) body.append(o.court.el);
   else {
     if (o.pitch) body.append(o.pitch.el);
-    body.append(tickerEl(focus, o.pitch ? (o.side ? 3 : 5) : 4));
+    // unter dem breiten Spielfeld nur die letzten drei Meldungen
+    body.append(tickerEl(focus, o.pitch ? 3 : 4));
   }
   card.append(body);
   wrap.append(card);

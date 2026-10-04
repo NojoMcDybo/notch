@@ -511,7 +511,8 @@ const LIVE_DOT = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://ww
 function clockAct(): CAct[] {
   const m = sportMid();
   if (!m) return [];
-  const value = clockOf(m);
+  // vor dem Spiel mit Anpfiffzeit (die Mitte zeigt dann Wappen – Wappen)
+  const value = m.state === "pre" && !noLive(m) ? `Anpfiff ${kickoff(m)}` : clockOf(m);
   if (!value) return [];
   const live = m.state === "in";
   return [{
@@ -670,7 +671,8 @@ const court = new Court(true);
 const sportMatch = (key: string) => sport.matches.find((m) => m.key === key);
 const hotNews = () => (hot && Date.now() < hot.until ? hot.n : null);
 
-/** Kandidaten fuer die Mitte: laufende Spiele (Lieblingsteams zuerst), sonst Lieblingsteams kurz vor/nach dem Spiel */
+/** Kandidaten fuer die Mitte: laufende Spiele (Lieblingsteams zuerst), sonst Lieblingsteams kurz vor/nach dem Spiel,
+ * sonst alle Spiele der gewaehlten Ligen in der Stunde vor dem Anpfiff */
 function centerCandidates(): SportMatch[] {
   const sp = settings.sport;
   if (!sp.on || !sp.center) return [];
@@ -679,8 +681,9 @@ function centerCandidates(): SportMatch[] {
   if (favLive.length) return favLive;
   if (live.length) return live;
   const now = Date.now();
-  return sport.matches.filter((m) => m.fav && (
-    (m.state === "pre" && m.start - now < 60 * 60_000) || (m.state === "post" && now - m.start < 150 * 60_000)));
+  const soon = (m: SportMatch) => m.state === "pre" && m.start - now < 60 * 60_000;
+  const fav = sport.matches.filter((m) => m.fav && (soon(m) || (m.state === "post" && now - m.start < 150 * 60_000)));
+  return fav.length ? fav : sport.matches.filter(soon);
 }
 
 /** Spiel in der Mitte der kleinen Notch (mehrere laufende: alle 8 s das naechste, Konferenz) */

@@ -536,8 +536,8 @@ canvas.react { position: fixed; inset: 0; width: 100%; height: 100%; pointer-eve
 .sp-num i { font-style: normal; color: var(--fg2); font-weight: 500; }
 .sp-ko { font-size: 15px; font-weight: 600; color: var(--fg2); letter-spacing: 0; }
 .sp-body { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
-.sp-body.with-pitch { grid-template-columns: 214px 1fr; }
-#notch[data-dock="left"] .sp-body.with-pitch, #notch[data-dock="right"] .sp-body.with-pitch { grid-template-columns: 1fr; }
+/* Spielfeld ueber die ganze Breite der Karte, Ticker darunter */
+.sp-body.with-pitch { grid-template-columns: 1fr; }
 
 /* Ticker: neueste Meldung oben, Wappen statt Vereinsname */
 .sp-ticker { list-style: none; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -606,7 +606,7 @@ canvas.react { position: fixed; inset: 0; width: 100%; height: 100%; pointer-eve
 .sp-body.with-court { grid-template-columns: 1fr; }
 .court { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
 /* nicht hoeher als die Fussballkarte: Feld schmaler, mittig */
-#notch[data-dock="top"] .sp-body.with-court .court { max-width: 400px; width: 100%; margin: 0 auto; }
+#notch[data-dock="top"] .sp-body.with-court .court { width: 100%; }
 .court-field { position: relative; }
 .court-svg { width: 100%; height: auto; display: block; border-radius: 10px;
   background: radial-gradient(ellipse at 50% 50%, rgba(214, 150, 84, 0.16), rgba(214, 150, 84, 0.05)); }
