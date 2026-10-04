@@ -5,16 +5,17 @@ import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { Voice, type VoiceState } from "./voice";
 import { Wheel } from "./wheel";
 import { fillCard, isBg, type ChartData } from "./glucose";
-import { build, needed, plan, planKey, planSig, PulseGate, sourceOf, type Plan } from "./compact";
+import { build, CLOCK_ID, needed, plan, planKey, planSig, PulseGate, sourceOf, type CAct, type Plan } from "./compact";
+import { morph } from "./morph";
 import { DEFAULTS, normalize, type CompactSettings } from "./settings-model";
 import { MusicReactor, type Spectrum } from "./music-react";
-import { iconNode, liquid, NOJO_ICONS, type IconName } from "./nojo/nojo-ui";
+import { iconNode, iconUrl, liquid, NOJO_ICONS, type IconName } from "./nojo/nojo-ui";
 
 // Symbole aus der Bibliothek einsetzen (index.html hat nur Platzhalter <svg data-icon="…">), bevor jemand sie sucht
 document.querySelectorAll<SVGElement>("svg[data-icon]").forEach((s) => {
   s.replaceWith(iconNode(s.dataset.icon as IconName, { cls: s.getAttribute("class") ?? undefined }));
 });
-import { bannerEl, cardEl, cardSig, kickoff, midEl, midSig as sportSig, Pitch, type SportMatch, type SportNews, type SportPlay, type SportState } from "./sport";
+import { bannerEl, cardEl, cardSig, clockOf, Court, kickoff, midEl, midSig as sportSig, Pitch, type SportMatch, type SportNews, type SportPlay, type SportState } from "./sport";
 
 // ---------- Typen ----------
 
@@ -502,9 +503,27 @@ function watchFolio(list: Activity[]) {
   for (const id of [...folioPages.keys()]) if (!seen.has(id)) folioPages.delete(id);
 }
 
+/**
+ * Spielzeit als eigenes Element am Rand: aus dem Spiel in der Mitte, reiht sich wie jede Quelle in die Rangliste
+ * ein (Einstellungen › Anzeige). Steht sie am Rand, zeigt die Mitte nur Wappen–Stand–Wappen.
+ */
+const LIVE_DOT = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="#ff453a"><animate attributeName="opacity" values="1;.35;1" dur="1.6s" repeatCount="indefinite"/></circle></svg>')}`;
+function clockAct(): CAct[] {
+  const m = sportMid();
+  if (!m) return [];
+  const value = clockOf(m);
+  if (!value) return [];
+  const live = m.state === "in";
+  return [{
+    id: CLOCK_ID, app: "Live-Sport", title: "Spielzeit", value, priority: 0, updated: 0,
+    color: live ? "#ffffff" : "#a1a1a6",
+    icon: live ? LIVE_DOT : iconUrl("ball", "#a1a1a6"),
+  }];
+}
+
 function currentPlan(): Plan {
   return plan({
-    acts,
+    acts: [...acts, ...clockAct()],
     music: musicVisible(),
     s: settings,
     gate: pulseGate,
@@ -576,13 +595,12 @@ function midSig() {
   return k === "sport" ? "sport:" + sportMidSig() : k === "arm" ? `arm:${armUntil}` : k;
 }
 
-function fillMid() {
+/** clockAtEdge: die Spielzeit steht als eigenes Element am Rand -> nicht noch einmal in der Mitte */
+function fillMid(clockAtEdge = false) {
   const k = midKind();
   mid.dataset.kind = k;
-  mid.replaceChildren();
-  if (k === "arm") mid.append(armEl());
-  else if (k === "voice") mid.append(vminiEl());
-  else if (k === "sport") mid.append(sportMidEl());
+  // morph: neue Minute oder neuer Stand aendern nur ihre Zahl, die Wappen bleiben stehen (kein Aufblinken)
+  morph(mid, k === "arm" ? [armEl()] : k === "voice" ? [vminiEl()] : k === "sport" ? [midEl(sportMid()!, glowNews(), !clockAtEdge)] : []);
 }
 
 // ---------- iPhone-Austausch (share.rs) ----------
@@ -647,6 +665,8 @@ let sportFlashUntil = 0;
 const sportFlash = () => Date.now() < sportFlashUntil;
 let rotate = 0;
 const pitch = new Pitch();
+/** Basketball: Wurfbild (Treffer und Fehlwuerfe) statt Ballverlauf */
+const court = new Court(true);
 const sportMatch = (key: string) => sport.matches.find((m) => m.key === key);
 const hotNews = () => (hot && Date.now() < hot.until ? hot.n : null);
 
@@ -674,7 +694,6 @@ function sportMid(): SportMatch | null {
 /** Tor-Leuchten nur in den ersten Sekunden nach der Meldung */
 const glowNews = () => { const h = hotNews(); return h && Date.now() - h.at < 8000 ? h : null; };
 const sportMidSig = () => { const m = sportMid(); return m ? sportSig(m, glowNews()) : ""; };
-const sportMidEl = () => midEl(sportMid()!, glowNews());
 
 /** Spiel fuer die Karte: gewaehlt > letzte Meldung > Lieblingsteam live > erstes laufendes; sonst nur Lieblingsteams in der Naehe */
 function cardFocus(): SportMatch | undefined {
@@ -704,19 +723,23 @@ const openArena = (key = "") => invoke("open", { target: key ? `arena://spiel/${
 function renderSport() {
   const f = cardFocus();
   const usePitch = !!f && f.pitch && f.source === "espn" && settings.sport.pitch && f.state !== "pre";
+  const useCourt = !!f && !!f.court && f.source === "espn" && settings.sport.pitch && f.state !== "pre";
   const others = f ? sport.matches.filter((m) => m.key !== f.key && m.state === "in") : [];
   if (f) checkArena();
-  const sig = f ? cardSig(f, others, dock !== "top", usePitch, arena) : "";
+  const sig = f ? cardSig(f, others, dock !== "top", usePitch, arena) + (useCourt ? "|court" : "") : "";
   if (sig !== sportCardSig) {
     sportCardSig = sig;
     if (f && usePitch) pitch.setMatch(f);
-    sportSlot.replaceChildren(...(f ? [cardEl(f, others, {
+    if (f && useCourt) court.setMatch(f);
+    // morph: nur Geaendertes anfassen — Wappen, Spielfeld und Ticker blinken nicht bei jeder neuen Minute
+    morph(sportSlot, f ? [cardEl(f, others, {
       pitch: usePitch ? pitch : null,
+      court: useCourt ? court : null,
       side: dock !== "top",
       onOpen: (m) => { if (m.link) invoke("open", { target: m.link }).catch(() => {}); },
       onArena: arena ? (m) => void openArena(m.key) : undefined,
       onFocus: (key) => { sportFocus = key; hot = null; render(); },
-    })] : []));
+    })] : []);
   }
   sportSlot.hidden = !f;
   // Meldung oben (unter der Leiste), solange sie frisch ist
@@ -764,15 +787,15 @@ let watching = "";
 let watchAt = 0;
 function tickWatch() {
   const f = cardFocus();
-  const visible = state === "expanded" && (view === "home" || dock !== "top") && !!f && pitch.el.isConnected &&
-    settings.sport.pitch && f.state !== "pre";
+  const visible = state === "expanded" && (view === "home" || dock !== "top") && !!f &&
+    (pitch.el.isConnected || court.el.isConnected) && settings.sport.pitch && f.state !== "pre";
   const key = visible ? f!.key : "";
   if (key !== watching || (key && Date.now() - watchAt > 8000)) {
     watching = key;
     watchAt = Date.now();
     invoke("sport_watch", { key: key || null }).catch(() => {});
   }
-  pitch.run(!!key);
+  pitch.run(!!key && pitch.el.isConnected);
 }
 
 let compactSig = "";
@@ -797,7 +820,7 @@ function renderCompact() {
   const animate = compactKey !== "" && key !== compactKey;
   compactKey = key;
   build(lead, trail, p, s, { coverSrc, musicPlaying: !!media?.playing, iconEl: (a) => iconEl(a as Activity), eq }, animate);
-  fillMid();
+  fillMid(p.slots.some((x) => x.src === "clock"));
   const side = dock !== "top";
   midOnly = !!midKind() && !lead.childElementCount && !trail.childElementCount;
   const base = midOnly ? (side ? 90 : 120) : side ? SIDE.compact.h : SIZE.compact.w;
@@ -1749,6 +1772,10 @@ async function main() {
   await listen<SportNews>("sport-news", (e) => onSportNews(e.payload));
   await listen<{ key: string; reset: boolean; plays: SportPlay[] }>("sport-plays", (e) => {
     const p = e.payload;
+    if (p.key === court.matchKey && court.el.isConnected) {
+      if (p.reset) court.reset(p.plays); else court.add(p.plays);
+      return;
+    }
     if (p.key !== pitch.matchKey) return;
     if (p.reset) pitch.reset(p.plays); else pitch.add(p.plays);
   });

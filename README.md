@@ -24,8 +24,10 @@ Beenden über das Tray-Symbol → „Notch beenden".
 
 Was die zugeklappte Notch zeigt, entscheidet eine Rangliste (`src/compact.ts`, Schema in `src/settings-model.ts`, gespeichert unter `compact` in `config.json`). Einstellungen öffnen: Zahnrad in der aufgeklappten Notch oder Tray → „Einstellungen …“ — eigenes Fenster, nicht in der Notch.
 
-- Quellen: Blutzucker (Haze / Activity mit `chart`), Musik, Timer (`notch:timer`), Puls (Activity mit `pulse`: Garmin über Haze `haze:hr`, sonst Helio — die höhere `priority` gewinnt, aufgeklappt steht nur eine Puls-Zeile), Folio (`app: "Folio"`), Andere Apps.
-- Standard: Blutzucker, Musik, Timer, Puls, Folio, Andere — zwei Plätze gleichzeitig.
+- Quellen: Blutzucker (Haze / Activity mit `chart`), Musik, Timer (`notch:timer`), **Spielzeit** (Minute bzw. Viertel des Spiels in der Mitte, aus dem Live-Sport), Puls (Activity mit `pulse`: Garmin über Haze `haze:hr`, sonst Helio — die höhere `priority` gewinnt, aufgeklappt steht nur eine Puls-Zeile), Folio (`app: "Folio"`), Andere Apps.
+- Standard: Blutzucker, Musik, Timer, Spielzeit, Puls, Folio, Andere — zwei Plätze gleichzeitig.
+- Spielzeit am Rand: Live-Punkt + „68'“ als eigenes Element; die Mitte zeigt dann nur Wappen–Stand–Wappen. Bekommt sie keinen Platz (oder ist ausgeblendet), steht die Minute wie bisher klein in der Mitte.
+- Neue Werte (Minute, Stand, Blutzucker …) ändern nur ihre Zahl (`src/morph.ts`): nichts wird neu gebaut, Wappen, Cover und Pegel blinken nicht.
 - Musik + etwas anderes: Pegel-Balken wandern neben das Cover statt zu verschwinden.
 - Timer läuft: die Notch wird breiter, der Timer hängt sich rechts an und verdrängt nichts (abschaltbar → reiht sich ein).
 - Puls ab Schwelle (Standard 140 bpm) ganz nach oben, zurück erst unter Schwelle − 5.
@@ -207,6 +209,8 @@ Einstellungen › **Sport**: oben eine Live-Leiste (Wappen 2:1 Wappen), Liebling
 - **Kleine Notch:** In der Mitte steht der Spielstand (Wappen `2:2` Wappen `• 68'`). Laufen mehrere Spiele, wechseln sie sich alle 8 s ab (Konferenz); nach einem Tor steht dieses Spiel eine Minute vorn, der Stand leuchtet kurz in der Farbe des Torschützen und sein Wappen hebt sich. Lieblingsteams zusätzlich eine Stunde vor Anpfiff und kurz nach Abpfiff.
 - **Meldungen:** Bei Toren (einstellbar: Toren / Wichtigem / Allem / Nie) klappt die Notch 6,5 s auf; die Meldung schwebt ganz oben als Liquid Glass über einem Licht in der Teamfarbe („Tor! · Machino (Elfmeter) · 68'“, rechts Wappen 2:2 Wappen). Im Vollbild klappt nichts auf; bei *Am Rand* / *Nur anzeigen* zeigt sie 7 s den Spielstand klein (abschaltbar).
 - **Aufgeklappt:** Karte mit Wappen, Spielstand und Minute, Ticker (Tore, Karten, Wechsel, Halbzeit, bei angesehenen Spielen auch Chancen, Ecken, Abseits, Videobeweis), weitere laufende Spiele zum Antippen, „Spielseite“ öffnet das Spiel im Browser.
+- **Wurfbild** (Basketball über ESPN, Schalter „Spielfeld: Ballverlauf, Wurfbild“): ganzes Feld, Heim wirft rechts, Gast links; Treffer als Punkt in der Teamfarbe, Fehlwürfe als Kreuz, der letzte Wurf leuchtet auf, die Glaspille nennt ihn („3. 5:12 · Herro · Dreier ✓“). Darunter je Team Würfe (mit Quote), Dreier und Freiwürfe. Beim Ansehen werden einmal alle Würfe des Spiels geladen (ESPN Core, Ort in Fuß, Korb bei y ≈ 1 – gegen die Distanzen im Spieltext geprüft), danach nur neue.
+- Aktualisierungen ändern in der Karte nur Neues: Stand und Minute als Text, neue Tickerzeilen laufen oben ein, Wappen und Spielfeld bleiben stehen.
 - **Spielfeld mit Ballverlauf** (nur Fußball über ESPN): Echte Positionsdaten aller Spieler gibt es live nirgends frei. Die Notch nimmt stattdessen jede Ballaktion mit Feldposition und Uhrzeit (Pass von wo nach wo, Flanke, Schuss, Zweikampf, Ballgewinn …) und spielt sie im echten Takt nach: der Ball wandert, beteiligte Spieler erscheinen mit Rückennummer in Teamfarbe und gleiten zu ihrer neuen Position, Schüsse als Linie aufs Tor; blasse Wappen in jeder Hälfte, die Beschriftung der Aktion schwebt als Glaspille über dem Feld. Beim Aufklappen laufen die letzten acht Aktionen als Zusammenfassung — klappt die Notch für ein Tor auf, sieht man den Angriff. Geladen wird nur, solange die Karte zu sehen ist (alle ~6 s, etwa 10–15 MB pro Stunde Zuschauen).
 - **Sprachassistent** kennt die Spielstände (Werkzeug `sport`): „Wie steht es bei Gladbach?“
 - **Arena** (eigene Sport-App, `D:\Dev\arena`): Spielplan, Tabellen, Teams und das Spielfeld groß. Ist sie installiert, zeigt die Sportkarte den Knopf **In Arena öffnen** (öffnet genau dieses Spiel über `arena://spiel/<schlüssel>`), Einstellungen › Sport einen Verweis. Die Sport-Einstellungen bleiben vollständig hier und gelten in Arena genauso: Arena liest und schreibt sie über `GET`/`PUT http://127.0.0.1:47800/sport/settings` (nur Loopback, bereinigt wie im Einstellungsfenster).
@@ -258,7 +262,8 @@ Neue Version veröffentlichen: Version in `package.json`, `src-tauri/Cargo.toml`
 - `src-tauri/src/open.rs` — öffnen / nach vorn holen / localhost-Rückmeldung
 - `src-tauri/src/timer.rs` — Timer als Activity
 - `src-tauri/src/update.rs` — Update-Prüfung und -Installation als Activity
-- `src-tauri/src/sport.rs`, `src/sport.ts` — Live-Sport: Quellen, Ticker, Ballverlauf, Anzeige
+- `src-tauri/src/sport.rs`, `src/sport.ts` — Live-Sport: Quellen, Ticker, Ballverlauf, Wurfbild, Anzeige
+- `src/morph.ts` — Inhalte abgleichen statt neu bauen (kein Aufblinken); identisch in Arena
 - `src-tauri/src/share.rs`, `share-page.html` — iPhone-Austausch: LocalSend-Protokoll, Browser-Seite, QR-Code
 - `src-tauri/src/gamepad.rs` — Controller-Kürzel (XInput)
 - `src-tauri/src/shelf.rs`, `convert.rs` — Ablage und Konvertieren

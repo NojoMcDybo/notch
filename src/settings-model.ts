@@ -4,14 +4,15 @@
  * "settings" an alle Fenster. Schema, Standardwerte und Pruefung leben hier.
  */
 
-export type SourceId = "glucose" | "music" | "timer" | "pulse" | "folio" | "other";
+export type SourceId = "glucose" | "music" | "timer" | "clock" | "pulse" | "folio" | "other";
 
-export const SOURCE_IDS: SourceId[] = ["glucose", "music", "timer", "pulse", "folio", "other"];
+export const SOURCE_IDS: SourceId[] = ["glucose", "music", "timer", "clock", "pulse", "folio", "other"];
 
 export const SOURCES: Record<SourceId, { name: string; from: string; color: string }> = {
   glucose: { name: "Blutzucker", from: "Haze", color: "#ff7971" },
   music: { name: "Musik", from: "Windows-Medien", color: "#30d158" },
   timer: { name: "Timer", from: "Notch", color: "#ffb340" },
+  clock: { name: "Spielzeit", from: "Live-Sport (Spiel in der Mitte)", color: "#ff453a" },
   pulse: { name: "Puls", from: "Garmin über Haze, sonst Helio", color: "#ff5a6e" },
   folio: { name: "Folio", from: "Seitenzahl", color: "#f5f5f7" },
   other: { name: "Andere Apps", from: "Live Activities", color: "#64d2ff" },
@@ -84,7 +85,7 @@ export const FULLSCREEN_MODES: FullscreenMode[] = ["hide", "peek", "show"];
 
 export const DEFAULTS: CompactSettings = {
   v: 1,
-  order: ["glucose", "music", "timer", "pulse", "folio", "other"],
+  order: ["glucose", "music", "timer", "clock", "pulse", "folio", "other"],
   hidden: [],
   slots: 2,
   glucose: { delta: true, outOfRangeTop: true },

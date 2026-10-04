@@ -601,8 +601,39 @@ canvas.react { position: fixed; inset: 0; width: 100%; height: 100%; pointer-eve
 .pl-crest.mono { font-size: 7.5px; min-width: 13px; }
 .pl-who { color: var(--fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .pl-what { margin-left: auto; flex: none; }
+
+/* Basketball: Wurfbild (Treffer gefuellt in der Teamfarbe, Fehlwuerfe als Kreuz; der letzte Wurf leuchtet auf) */
+.sp-body.with-court { grid-template-columns: 1fr; }
+.court { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+/* nicht hoeher als die Fussballkarte: Feld schmaler, mittig */
+#notch[data-dock="top"] .sp-body.with-court .court { max-width: 400px; width: 100%; margin: 0 auto; }
+.court-field { position: relative; }
+.court-svg { width: 100%; height: auto; display: block; border-radius: 10px;
+  background: radial-gradient(ellipse at 50% 50%, rgba(214, 150, 84, 0.16), rgba(214, 150, 84, 0.05)); }
+.cl rect, .cl circle, .cl path, .cl line { fill: none; stroke: rgba(255, 255, 255, 0.22); stroke-width: 0.3; }
+.cl .paint { fill: rgba(255, 255, 255, 0.035); }
+.cl .board { stroke: rgba(255, 255, 255, 0.5); stroke-width: 0.45; }
+.cl .rim { stroke: #ff9f43; stroke-width: 0.3; }
+.court-tag { opacity: 0.13; }
+.court-tag text { font: 800 9px/1 "Segoe UI", system-ui, sans-serif; stroke: none; }
+.court-tag.h text { fill: var(--hc); }
+.court-tag.a text { fill: var(--ac); }
+.shot circle { stroke: rgba(0, 0, 0, 0.55); stroke-width: 0.22; }
+.shot path { fill: none; stroke-width: 0.38; stroke-linecap: round; opacity: 0.8; }
+.shot.new circle, .shot.new path { animation: shot-new 1.8s ease-out; transform-box: fill-box; transform-origin: center; }
+@keyframes shot-new { 0% { transform: scale(2.6); filter: drop-shadow(0 0 1.5px #fff); } 100% { transform: none; filter: none; } }
+.court-label .pl-what.hit { color: var(--fg); }
+.court-label .pl-what.miss { color: var(--fg2); }
+.court-tally { display: flex; justify-content: center; gap: 22px; flex-wrap: wrap; }
+.ct-row { display: flex; align-items: center; gap: 7px; font-size: 10.5px; color: var(--fg2); font-variant-numeric: tabular-nums; }
+.ct-row .crest { width: 14px; height: 14px; }
+.ct-row .crest.mono { font-size: 7.5px; min-width: 14px; }
+.ct-cell { display: inline-flex; align-items: baseline; gap: 3px; white-space: nowrap; }
+.ct-cell small { font-size: 9px; color: rgba(255, 255, 255, 0.45); }
+.ct-cell b { color: var(--fg); font-weight: 600; }
+.ct-cell i { font-style: normal; font-size: 9.5px; }
 @media (prefers-reduced-motion: reduce) {
-  .sp-news-wrap, .spn-glow, .spn-shine, .sp-news.big .tk-i, .sp-ticker li:first-child, .net.hit, .pitch.goal .pitch-svg { animation: none; }
+  .sp-news-wrap, .spn-glow, .spn-shine, .sp-news.big .tk-i, .sp-ticker li:first-child, .net.hit, .pitch.goal .pitch-svg, .shot.new circle, .shot.new path { animation: none; }
   .actor, .crest { transition: none; }
 }
 

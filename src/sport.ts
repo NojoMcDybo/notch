@@ -14,12 +14,15 @@
  */
 
 import { icon } from "./nojo/nojo-ui";
+import { morph } from "./morph";
 
 export type SportTeam = { id: string; name: string; short: string; abbr: string; logo: string; color: string; score: string };
 export type SportEv = { id: string; minute: string; kind: string; side: string; title: string; text: string; big: number };
 export type SportMatch = {
   key: string; league: string; league_name: string; sport: string; home: SportTeam; away: SportTeam;
   state: "pre" | "in" | "post"; clock: string; start: number; fav: boolean; link: string; pitch: boolean;
+  /** Basketball (ESPN): Wurfbild verfuegbar */
+  court?: boolean;
   events: SportEv[]; source: string;
 };
 export type SportState = { matches: SportMatch[]; error?: string; updated?: number; off?: boolean };
@@ -27,6 +30,8 @@ export type SportNews = { key: string; ev: SportEv; score: string; at: number };
 export type SportPlay = {
   id: string; t: number; minute: string; kind: string; side: string; jersey: string; who: string;
   x: number; y: number; x2?: number | null; y2?: number | null;
+  /** Basketball: Treffer, Punkte des Versuchs (kind "2" | "3" | "ft") */
+  made?: boolean; pts?: number;
 };
 
 function mk<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) {
@@ -63,25 +68,33 @@ function smallLogo(url: string) {
   return m ? `https://a.espncdn.com/combiner/i?img=${m[1]}&h=96&w=96` : url;
 }
 
+/** Wappen-Adressen, die nicht laden (bzw. deren kleine Fassung nicht): beim Neuzeichnen gleich richtig */
+const logoBroken = new Set<string>();
+
 /** Wappen statt Name; ohne Bild das Kuerzel mit einem Strich in der Teamfarbe */
 export function crestEl(t: SportTeam, cls = "crest") {
   const c = mk("span", cls);
   c.style.setProperty("--c", t.color);
   c.title = t.name;
-  const mono = () => {
+  const abbr = (t.abbr || t.short || t.name).slice(0, 3).toUpperCase();
+  const small = t.logo ? smallLogo(t.logo) : "";
+  const src = !t.logo || logoBroken.has(t.logo) ? "" : logoBroken.has(small) ? t.logo : small;
+  if (!src) {
     c.classList.add("mono");
-    c.textContent = (t.abbr || t.short || t.name).slice(0, 3).toUpperCase();
-  };
-  if (!t.logo) { mono(); return c; }
+    c.textContent = abbr;
+    return c;
+  }
   const img = new Image();
   img.alt = "";
   img.draggable = false;
-  const small = smallLogo(t.logo);
-  img.src = small;
+  img.src = src;
+  // das Wappen kann inzwischen in einem anderen Element stecken (morph behaelt das alte): an den echten Eltern
   img.onerror = () => {
-    if (img.src !== t.logo && small !== t.logo) { img.src = t.logo; return; }
+    logoBroken.add(img.src === small ? small : t.logo);
+    if (img.src === small && small !== t.logo) { img.src = t.logo; return; }
+    const host = img.parentElement;
     img.remove();
-    mono();
+    if (host) { host.classList.add("mono"); host.textContent = abbr; }
   };
   c.append(img);
   return c;
@@ -109,7 +122,7 @@ function bugEl(m: SportMatch, score: string, cls = "bug", lit = "") {
 }
 
 const scoreOf = (m: SportMatch) => (m.state === "pre" ? "–" : `${m.home.score || 0}:${m.away.score || 0}`);
-const clockOf = (m: SportMatch) => (m.state === "pre" ? kickoff(m) : m.clock || (m.state === "post" ? "Ende" : ""));
+export const clockOf = (m: SportMatch) => (m.state === "pre" ? kickoff(m) : m.clock || (m.state === "post" ? "Ende" : ""));
 
 /** Farbe der Mannschaft, die die Meldung betrifft (Tor: der Torschuetze) */
 export function newsColor(n: SportNews, m?: SportMatch) {
@@ -125,7 +138,8 @@ export function midSig(m: SportMatch, hot: SportNews | null) {
   return [m.key, m.home.score, m.away.score, clockOf(m), m.state, hot?.ev.id ?? ""].join("|");
 }
 
-export function midEl(m: SportMatch, hot: SportNews | null) {
+/** clock: Minute in der Mitte zeigen (aus, wenn die Spielzeit als eigenes Element am Rand steht) */
+export function midEl(m: SportMatch, hot: SportNews | null, clock = true) {
   const box = mk("div", `sm ${m.state}` + (hot ? " hot" : ""));
   box.style.setProperty("--hc", m.home.color);
   box.style.setProperty("--ac", m.away.color);
@@ -134,7 +148,9 @@ export function midEl(m: SportMatch, hot: SportNews | null) {
   const h = crestEl(m.home, "sm-t h"), a = crestEl(m.away, "sm-t a");
   if (hot?.ev.side === "home") h.classList.add("lit");
   if (hot?.ev.side === "away") a.classList.add("lit");
-  box.append(h, mk("span", "sm-s", scoreOf(m)), a, mk("small", "sm-c", clockOf(m)));
+  box.dataset.key = m.key;
+  box.append(h, mk("span", "sm-s", scoreOf(m)), a);
+  if (clock) box.append(mk("small", "sm-c", clockOf(m)));
   return box;
 }
 
@@ -175,6 +191,8 @@ export function bannerEl(n: SportNews, m: SportMatch | undefined) {
 
 export type CardOpts = {
   pitch: Pitch | null;
+  /** Basketball: Wurfbild statt Ticker */
+  court?: Court | null;
   onOpen: (m: SportMatch) => void;
   /** Arena (eigene Sport-App) ist installiert: Spiel dort gross oeffnen */
   onArena?: (m: SportMatch) => void;
@@ -192,6 +210,7 @@ function tickerEl(m: SportMatch, n: number) {
   }
   for (const e of evs) {
     const li = mk("li", `k-${e.kind}` + (e.big >= 3 ? " big" : ""));
+    li.dataset.key = e.id;
     li.style.setProperty("--c", e.side === "away" ? m.away.color : e.side === "home" ? m.home.color : "var(--fg2)");
     li.append(mk("span", "tk-m", e.minute), kindIcon(e.kind, m.sport));
     const t = mk("span", "tk-t");
@@ -214,6 +233,7 @@ export function cardSig(focus: SportMatch | undefined, others: SportMatch[], sid
 
 export function cardEl(focus: SportMatch, others: SportMatch[], o: CardOpts) {
   const wrap = mk("section", "sport");
+  wrap.dataset.key = focus.key;
   const card = mk("div", `sp-card ${focus.state}`);
   card.style.setProperty("--hc", focus.home.color);
   card.style.setProperty("--ac", focus.away.color);
@@ -246,9 +266,12 @@ export function cardEl(focus: SportMatch, others: SportMatch[], o: CardOpts) {
   score.append(crestEl(focus.home, "crest sp-crest h"), num, crestEl(focus.away, "crest sp-crest a"));
   card.append(head, score);
 
-  const body = mk("div", "sp-body" + (o.pitch ? " with-pitch" : ""));
-  if (o.pitch) body.append(o.pitch.el);
-  body.append(tickerEl(focus, o.pitch ? (o.side ? 3 : 5) : 4));
+  const body = mk("div", "sp-body" + (o.pitch ? " with-pitch" : "") + (o.court ? " with-court" : ""));
+  if (o.court) body.append(o.court.el);
+  else {
+    if (o.pitch) body.append(o.pitch.el);
+    body.append(tickerEl(focus, o.pitch ? (o.side ? 3 : 5) : 4));
+  }
   card.append(body);
   wrap.append(card);
 
@@ -256,6 +279,7 @@ export function cardEl(focus: SportMatch, others: SportMatch[], o: CardOpts) {
     const more = mk("div", "sp-more");
     for (const m of others.slice(0, 6)) {
       const c = mk("button", `sp-chip n-liquid ${m.state}`);
+      c.dataset.key = m.key;
       c.title = `${m.home.name} – ${m.away.name} · ${m.league_name}`;
       c.append(bugEl(m, scoreOf(m), "sp-bug"), mk("small", "", clockOf(m)));
       c.addEventListener("click", (e) => { e.stopPropagation(); o.onFocus(m.key); });
@@ -321,6 +345,9 @@ export class Pitch {
 
   constructor() {
     this.el = mk("div", "pitch");
+    // lebt selbst weiter: morph() setzt es nur ein, baut es nie nach
+    this.el.dataset.key = "pitch";
+    this.el.dataset.keep = "";
     this.svg = sv("svg", { viewBox: `-3 -3 ${W + 6} ${H + 6}`, class: "pitch-svg", "aria-hidden": "true" });
     const lines = sv("g", { class: "pl" });
     lines.append(
@@ -555,5 +582,196 @@ export class Pitch {
 
   private place() {
     this.ball.setAttribute("transform", `translate(${this.pos.x.toFixed(2)} ${this.pos.y.toFixed(2)})`);
+  }
+}
+
+// ---------- Basketball: Wurfbild (Abschluesse, Treffer und Fehlwuerfe) ----------
+//
+// ESPN liefert jeden Wurf mit Ort in Fuss (x quer 0..50, y laengs, Korb bei y ≈ 1; gegen die Distanzen im
+// Spieltext geprueft) — fuer beide Teams auf "ihren" Korb gerechnet. Hier auf einem ganzen Feld (94 × 50 ft):
+// Heim wirft rechts, Gast links (wie beim Fussball: Heim spielt nach rechts). Treffer gefuellt in der Teamfarbe,
+// Fehlwuerfe als Kreuz; der letzte Wurf leuchtet auf. Freiwuerfe haben keinen Ort und zaehlen nur in der Bilanz.
+
+const CW = 94, CH = 50;
+/** Abstand Grundlinie–Korbmitte (Regel 5,25 ft); ESPN-Korb bei y = 1 */
+const RIM = 5.25, ESPN_RIM_Y = 1;
+
+type Tally = { fg: [number, number]; three: [number, number]; ft: [number, number] };
+const emptyTally = (): Tally => ({ fg: [0, 0], three: [0, 0], ft: [0, 0] });
+const pct = (a: [number, number]) => (a[1] ? `${Math.round((a[0] / a[1]) * 100)} %` : "–");
+
+export class Court {
+  readonly el: HTMLElement;
+  private svg: SVGSVGElement;
+  private shotG: SVGGElement;
+  private tagH: SVGGElement;
+  private tagA: SVGGElement;
+  private label: HTMLElement;
+  private tally: HTMLElement;
+  private key = "";
+  private teams: { home: SportTeam; away: SportTeam } | null = null;
+  private shots = new Map<string, SportPlay>();
+  private compact: boolean;
+
+  /** compact: Bilanz in einer Zeile je Team (Notch); sonst ausfuehrlich (Arena) */
+  constructor(compact = false) {
+    this.compact = compact;
+    this.el = mk("div", "court");
+    this.el.dataset.key = "court";
+    this.el.dataset.keep = "";
+    this.svg = sv("svg", { viewBox: `-2 -2 ${CW + 4} ${CH + 4}`, class: "court-svg", "aria-hidden": "true" });
+    const lines = sv("g", { class: "cl" });
+    lines.append(
+      sv("rect", { x: 0, y: 0, width: CW, height: CH, rx: 0.6 }),
+      sv("line", { x1: CW / 2, y1: 0, x2: CW / 2, y2: CH }),
+      sv("circle", { cx: CW / 2, cy: CH / 2, r: 6 }),
+      sv("circle", { cx: CW / 2, cy: CH / 2, r: 2 }),
+    );
+    for (const right of [false, true]) {
+      const X = (x: number) => (right ? CW - x : x);
+      const sweep = right ? 0 : 1;
+      lines.append(
+        sv("rect", { x: right ? CW - 19 : 0, y: 17, width: 19, height: 16, class: "paint" }),
+        sv("circle", { cx: X(19), cy: CH / 2, r: 6 }),
+        sv("path", { d: `M${X(0)} 3 L${X(14.2)} 3 A23.75 23.75 0 0 ${sweep} ${X(14.2)} 47 L${X(0)} 47` }),
+        sv("path", { d: `M${X(RIM)} 21 A4 4 0 0 ${sweep} ${X(RIM)} 29` }),
+        sv("line", { x1: X(4), y1: 22, x2: X(4), y2: 28, class: "board" }),
+        sv("circle", { cx: X(RIM), cy: CH / 2, r: 0.75, class: "rim" }),
+      );
+    }
+    // Wappen blass in der Haelfte, in der die Wuerfe des Teams landen
+    this.tagH = sv("g", { class: "court-tag h" });
+    this.tagA = sv("g", { class: "court-tag a" });
+    this.shotG = sv("g", { class: "court-shots" });
+    this.svg.append(lines, this.tagH, this.tagA, this.shotG);
+    this.label = mk("div", "pitch-label court-label n-liquid", "Würfe werden geladen …");
+    const field = mk("div", "court-field");
+    field.append(this.svg, this.label);
+    this.tally = mk("div", "court-tally");
+    this.el.append(field, this.tally);
+  }
+
+  get matchKey() {
+    return this.key;
+  }
+
+  setMatch(m: SportMatch) {
+    this.teams = { home: m.home, away: m.away };
+    this.el.style.setProperty("--hc", m.home.color);
+    this.el.style.setProperty("--ac", m.away.color);
+    this.tag(this.tagH, m.home, (CW * 3) / 4);
+    this.tag(this.tagA, m.away, CW / 4);
+    if (m.key !== this.key) {
+      this.key = m.key;
+      this.shots.clear();
+      this.draw();
+      this.label.textContent = m.state === "pre" ? "Würfe ab Spielbeginn" : "Würfe werden geladen …";
+    }
+  }
+
+  private tag(g: SVGGElement, t: SportTeam, cx: number) {
+    const sig = t.logo || t.abbr;
+    if (g.dataset.sig === sig) return;
+    g.dataset.sig = sig;
+    if (t.logo) {
+      const img = sv("image", { x: cx - 10, y: CH / 2 - 10, width: 20, height: 20, preserveAspectRatio: "xMidYMid meet" });
+      img.setAttribute("href", smallLogo(t.logo));
+      g.replaceChildren(img);
+    } else {
+      const tx = sv("text", { x: cx, y: CH / 2 + 3, "text-anchor": "middle" });
+      tx.textContent = t.abbr;
+      g.replaceChildren(tx);
+    }
+  }
+
+  /** alle Wuerfe des Spiels (erste Ladung) */
+  reset(plays: SportPlay[]) {
+    this.shots.clear();
+    this.add(plays, false);
+  }
+
+  /** neue Wuerfe: nur sie kommen dazu, der letzte leuchtet auf */
+  add(plays: SportPlay[], fresh = true) {
+    for (const p of plays) if (p.kind === "2" || p.kind === "3" || p.kind === "ft") this.shots.set(p.id, p);
+    this.draw(fresh ? plays.filter((p) => this.shots.has(p.id)).map((p) => p.id) : []);
+  }
+
+  /** ESPN-Ort -> Feld: Heim wirft rechts, Gast links */
+  private spot(p: SportPlay): [number, number] | null {
+    if (p.x < 0 || p.x > 50 || p.y < -6 || p.y > 90) return null;
+    const d = p.y - ESPN_RIM_Y + RIM; // Abstand zur Grundlinie
+    return p.side === "home" ? [CW - d, CH - p.x] : [d, p.x];
+  }
+
+  private draw(fresh: string[] = []) {
+    const color = (side: string) => (side === "home" ? this.teams?.home.color : this.teams?.away.color) ?? "#fff";
+    // Treffer und Fehlwuerfe als feste Elemente je Wurf: vorhandene bleiben stehen, neue kommen dazu
+    const have = new Map<string, SVGGElement>();
+    for (const g of Array.from(this.shotG.children) as SVGGElement[]) have.set(g.dataset.id ?? "", g);
+    const keep = new Set<string>();
+    for (const p of this.shots.values()) {
+      const at = this.spot(p);
+      if (!at) continue;
+      keep.add(p.id);
+      if (have.has(p.id)) continue;
+      const g = sv("g", { class: `shot ${p.made ? "made" : "miss"} ${p.side}` });
+      g.dataset.id = p.id;
+      g.setAttribute("transform", `translate(${at[0].toFixed(2)} ${at[1].toFixed(2)})`);
+      const c = color(p.side);
+      if (p.made) g.append(sv("circle", { r: 0.85, fill: c }));
+      else g.append(sv("path", { d: "M-0.65 -0.65 L0.65 0.65 M0.65 -0.65 L-0.65 0.65", stroke: c }));
+      this.shotG.append(g);
+    }
+    for (const [id, g] of have) if (!keep.has(id)) g.remove();
+    for (const id of fresh) {
+      const g = this.shotG.querySelector<SVGGElement>(`[data-id="${CSS.escape(id)}"]`);
+      if (g) { g.classList.remove("new"); void g.getBoundingClientRect(); g.classList.add("new"); }
+    }
+    this.renderTally();
+    const last = [...this.shots.values()].pop();
+    if (last) this.say(last);
+    else if (this.key) this.label.textContent = "Noch keine Würfe";
+  }
+
+  private say(p: SportPlay) {
+    const team = p.side === "home" ? this.teams?.home : p.side === "away" ? this.teams?.away : undefined;
+    const what = p.kind === "ft" ? "Freiwurf" : p.kind === "3" ? "Dreier" : "Wurf";
+    this.label.replaceChildren(
+      mk("span", "pl-min", p.minute),
+      team ? crestEl(team, "crest pl-crest") : mk("i", "pl-dot"),
+      mk("span", "pl-who", p.who),
+      mk("span", `pl-what ${p.made ? "hit" : "miss"}`, `${what} ${p.made ? "✓" : "✗"}`),
+    );
+  }
+
+  private renderTally() {
+    const t = { home: emptyTally(), away: emptyTally() };
+    for (const p of this.shots.values()) {
+      const s = t[p.side as "home" | "away"];
+      if (!s) continue;
+      const add = (a: [number, number]) => { a[1]++; if (p.made) a[0]++; };
+      if (p.kind === "ft") add(s.ft);
+      else {
+        add(s.fg);
+        if (p.kind === "3") add(s.three);
+      }
+    }
+    const row = (side: "home" | "away") => {
+      const team = side === "home" ? this.teams?.home : this.teams?.away;
+      const s = t[side];
+      const r = mk("div", `ct-row ${side}`);
+      r.dataset.key = side;
+      if (team) r.append(crestEl(team, "crest"));
+      const cell = (label: string, a: [number, number], withPct: boolean) => {
+        const c = mk("span", "ct-cell");
+        c.append(mk("small", "", label), mk("b", "", `${a[0]}/${a[1]}`));
+        if (withPct) c.append(mk("i", "", pct(a)));
+        return c;
+      };
+      r.append(cell("Würfe", s.fg, true), cell("Dreier", s.three, !this.compact), cell("Freiwürfe", s.ft, !this.compact));
+      return r;
+    };
+    // Gast links wie auf dem Feld
+    morph(this.tally, [row("away"), row("home")]);
   }
 }

@@ -13,6 +13,7 @@
 
 import { bgOutOfRange, bgSig, fillCompact, isBg, type ChartData } from "./glucose";
 import { PULSE_HYST, type CompactSettings, type SourceId } from "./settings-model";
+import { morph } from "./morph";
 
 export type CAct = {
   id: string; app: string; title: string; value?: string; unit?: string; icon?: string; color?: string;
@@ -20,9 +21,12 @@ export type CAct = {
 };
 
 export const TIMER_ID = "notch:timer";
+/** Spielzeit des Spiels in der Mitte (main.ts baut sie aus dem Live-Sport, kein Eintrag in Rust) */
+export const CLOCK_ID = "notch:sport-clock";
 
 export function sourceOf(a: CAct): SourceId {
   if (a.id === TIMER_ID) return "timer";
+  if (a.id === CLOCK_ID) return "clock";
   // Puls zuerst: Haze schickt neben dem Blutzucker auch den Garmin-Puls (haze:hr, mit `pulse`)
   if ((a.pulse ?? 0) > 0 || a.app === "Helio") return "pulse";
   if (isBg(a) || a.app === "Haze") return "glucose";
@@ -152,6 +156,7 @@ function valueEl(a: CAct, s: CompactSettings) {
 function chipEl(a: CAct, s: CompactSettings, ctx: BuildCtx, src: SourceId) {
   const c = mk("div", "chip");
   c.dataset.src = src;
+  c.dataset.key = `chip:${src}`;
   if (a.color) c.style.setProperty("--accent", a.color);
   // Blutzucker ist am Pfeil erkennbar, braucht kein Symbol
   if (!isBg(a)) c.append(ctx.iconEl(a));
@@ -162,6 +167,7 @@ function chipEl(a: CAct, s: CompactSettings, ctx: BuildCtx, src: SourceId) {
 function timerEl(a: CAct, ctx: BuildCtx) {
   const t = mk("div", "chip c-timer");
   t.dataset.src = "timer";
+  t.dataset.key = "timer";
   t.style.setProperty("--accent", a.color ?? "#ffb340");
   t.append(ctx.iconEl(a), mk("span", "chip-v", a.value ?? ""));
   return t;
@@ -174,8 +180,6 @@ function timerEl(a: CAct, ctx: BuildCtx) {
  * - Timer-Erweiterung: rechts angehaengt, die Notch wird so breit wie noetig
  */
 export function build(lead: HTMLElement, trail: HTMLElement, p: Plan, s: CompactSettings, ctx: BuildCtx, animate = false) {
-  lead.replaceChildren();
-  trail.replaceChildren();
   trail.className = "c-trail";
   trail.style.removeProperty("--accent");
 
@@ -184,19 +188,20 @@ export function build(lead: HTMLElement, trail: HTMLElement, p: Plan, s: Compact
   const L: HTMLElement[] = [];
   const R: HTMLElement[] = [];
 
+  const keyed = (e: HTMLElement, k: string) => { e.dataset.key = k; return e; };
   if (music) {
-    L.push(coverEl(ctx));
+    L.push(keyed(coverEl(ctx), "cover"));
     const rightBusy = rest.length > 0 || !!p.timer;
-    if (!rightBusy) R.push(ctx.eq(ctx.musicPlaying));
-    else if (s.music.eqBesideCover) L.push(ctx.eq(ctx.musicPlaying));
+    if (!rightBusy) R.push(keyed(ctx.eq(ctx.musicPlaying), "eq"));
+    else if (s.music.eqBesideCover) L.push(keyed(ctx.eq(ctx.musicPlaying), "eq"));
     if (rest[0]?.act) R.push(chipEl(rest[0].act, s, ctx, rest[0].src));
   } else if (rest.length === 1 && rest[0].act) {
     // eine Quelle allein: klassisch aufgeteilt
     const a = rest[0].act;
-    L.push(ctx.iconEl(a));
+    L.push(keyed(ctx.iconEl(a), `icon:${rest[0].src}`));
     const v = valueEl(a, s);
     v.dataset.src = rest[0].src;
-    R.push(v);
+    R.push(keyed(v, `value:${rest[0].src}`));
   } else if (rest.length >= 2) {
     if (rest[0].act) L.push(chipEl(rest[0].act, s, ctx, rest[0].src));
     if (rest[1].act) R.push(chipEl(rest[1].act, s, ctx, rest[1].src));
@@ -205,13 +210,13 @@ export function build(lead: HTMLElement, trail: HTMLElement, p: Plan, s: Compact
   if (p.timer) {
     if (!L.length && !R.length) {
       // nur der Timer: Symbol links, Zeit rechts
-      L.push(ctx.iconEl(p.timer));
-      const v = mk("div", "chip-v");
+      L.push(keyed(ctx.iconEl(p.timer), "icon:timer"));
+      const v = keyed(mk("div", "chip-v"), "value:timer");
       v.style.setProperty("--accent", p.timer.color ?? "#ffb340");
       v.append(mk("span", "", p.timer.value ?? ""));
       R.push(v);
     } else {
-      if (R.length) R.push(mk("i", "c-sep"));
+      if (R.length) R.push(keyed(mk("i", "c-sep"), "sep"));
       R.push(timerEl(p.timer, ctx));
     }
   }
@@ -221,8 +226,9 @@ export function build(lead: HTMLElement, trail: HTMLElement, p: Plan, s: Compact
     const flash = e.dataset.src === "folio" && p.slots.some((x) => x.flash);
     if (flash) e.classList.add("flash");
   }
-  lead.append(...L);
-  trail.append(...R);
+  // nur aendern, was sich geaendert hat: Cover, Pegel und Wappen bleiben stehen, Zahlen wechseln still
+  morph(lead, L);
+  morph(trail, R);
 }
 
 /**

@@ -9,7 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { build, bpmOf, needed, plan, planKey, PulseGate, sourceOf, TIMER_ID, type CAct, type Plan } from "./compact";
+import { build, bpmOf, CLOCK_ID, needed, plan, planKey, PulseGate, sourceOf, TIMER_ID, type CAct, type Plan } from "./compact";
 import { glassLight, icon, iconNode, iconUrl, lightScroller, liquid, segments, windowControls, type IconName } from "./nojo/nojo-ui";
 import { clone, DEFAULTS, FULLSCREEN_MODES, LAYERS, MUSIC_REACT, normalize, SOURCES, SPORT_EXPAND, type CompactSettings, type FullscreenMode, type Layer, type MusicReact, type SourceId, type SportExpand } from "./settings-model";
 
@@ -24,7 +24,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 const svg = (name: IconName) => iconNode(name);
 
 /** Symbol je Quelle — dieselben wie ueberall im Oekosystem (Herz = Puls, Tropfen = Blutzucker …) */
-const GLYPH: Record<SourceId, IconName> = { glucose: "drop", music: "music", timer: "timer-fill", pulse: "heart", folio: "document", other: "apps" };
+const GLYPH: Record<SourceId, IconName> = { glucose: "drop", music: "music", timer: "timer-fill", clock: "ball", pulse: "heart", folio: "document", other: "apps" };
 const GRIP: IconName = "grip";
 
 // ---------- Zustand ----------
@@ -41,7 +41,7 @@ let pausedAt = 0;
 const liveGate = new PulseGate();
 
 // Beispielwerte zum Ausprobieren
-const demoOn = new Set<SourceId>(["glucose", "music", "timer", "pulse", "folio"]);
+const demoOn = new Set<SourceId>(["glucose", "music", "timer", "clock", "pulse", "folio"]);
 let demoBpm = 96;
 let demoBg = 112;
 let demoPage = 12;
@@ -52,6 +52,17 @@ const demoGate = new PulseGate();
 const dataUrl = (svgText: string) => `data:image/svg+xml;utf8,${encodeURIComponent(svgText)}`;
 const DEMO_COVER = dataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6b6b"/><stop offset="0.55" stop-color="#845ef7"/><stop offset="1" stop-color="#22223b"/></linearGradient></defs><rect width="60" height="60" fill="url(#g)"/><circle cx="40" cy="22" r="9" fill="#ffd166" opacity="0.9"/></svg>`);
 const ico = (name: IconName, c: string) => iconUrl(name, c);
+/** wie in der Notch: roter, atmender Punkt vor der laufenden Spielzeit */
+const LIVE_DOT = dataUrl('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="#ff453a"><animate attributeName="opacity" values="1;.35;1" dur="1.6s" repeatCount="indefinite"/></circle></svg>');
+
+/** Live: Spielzeit des Spiels, das die Notch in der Mitte zeigt (Lieblingsteam live vor anderen) — fuer Vorschau und Status */
+function liveClockActs(): CAct[] {
+  if (!s.sport.on || !s.sport.center || !sportLive) return [];
+  const live = sportLive.matches.filter((m) => m.state === "in");
+  const m = live.find((x) => x.fav) ?? live[0];
+  if (!m) return [];
+  return [{ id: CLOCK_ID, app: "Live-Sport", title: `${m.home.name} – ${m.away.name}`, value: clockOf(m), color: "#ffffff", icon: LIVE_DOT, priority: 0, updated: 0 }];
+}
 
 function demoActs(): CAct[] {
   const now = Date.now();
@@ -66,6 +77,7 @@ function demoActs(): CAct[] {
       icon: ico(GLYPH.glucose, "#ff7971"), priority: 1, updated: now, chart: { low: 70, high: 180, points: [[now - 300_000, demoBg - 2], [now - 1000, demoBg]] },
     });
   }
+  if (demoOn.has("clock")) list.push({ id: CLOCK_ID, app: "Live-Sport", title: "Spielzeit", value: "68'", color: "#ffffff", icon: LIVE_DOT, priority: 0, updated: now });
   if (demoOn.has("pulse")) list.push({ id: "demo:puls", app: "Helio", title: "Puls", value: String(demoBpm), unit: "bpm", pulse: demoBpm, color: "#ff5a6e", icon: ico(GLYPH.pulse, "#ff5a6e"), priority: 0, updated: now });
   if (demoOn.has("folio")) list.push({ id: "demo:folio", app: "Folio", title: "Skript.pdf", value: String(demoPage), unit: "/ 240", color: "#ffffff", icon: ico(GLYPH.folio, "#f5f5f7"), priority: 0, updated: now });
   if (demoOn.has("other")) list.push({ id: "demo:export", app: "Export", title: "Video umwandeln", value: "64", unit: "%", color: "#64d2ff", icon: ico(GLYPH.other, "#64d2ff"), priority: 0, updated: now });
@@ -82,7 +94,8 @@ function current(): { acts: CAct[]; music: boolean; cover: string | null; playin
     return { acts, music, cover: DEMO_COVER, playing: true, plan: plan({ acts, music, s, gate: demoGate, folioFlash: Date.now() < demoFlashUntil ? "demo:folio" : null }) };
   }
   const music = liveMusic();
-  return { acts: liveActs, music, cover: liveCover, playing: !!liveMedia?.playing, plan: plan({ acts: liveActs, music, s, gate: liveGate }) };
+  const acts = [...liveActs, ...liveClockActs()];
+  return { acts, music, cover: liveCover, playing: !!liveMedia?.playing, plan: plan({ acts, music, s, gate: liveGate }) };
 }
 
 // ---------- Speichern ----------
@@ -149,6 +162,7 @@ function statusText(id: SourceId, c: ReturnType<typeof current>): string {
       if (!liveMedia) return "Gerade keine Musik";
       return `${liveMedia.playing ? "Spielt" : "Pausiert"} · ${liveMedia.title || "unbekannter Titel"}`;
     case "timer": return a ? `${a.title.includes("abgelaufen") ? "Abgelaufen" : "Läuft"} · ${a.value ?? ""}` : "Kein Timer";
+    case "clock": return a ? `${a.value} · ${mode === "demo" ? "Beispielspiel" : a.title}` : s.sport.on && s.sport.center ? "Gerade kein Spiel in der Mitte" : "Spielstand in der Mitte ist aus (Reiter Sport)";
     case "pulse": return a ? `${bpmOf(a)} bpm · ${a.app === "Haze" ? "Garmin über Haze" : a.app}` : "Kein Pulsmesser verbunden";
     case "folio": return a ? `${a.title} · Seite ${a.value ?? "?"} ${a.unit ?? ""}`.trim() : "Kein Dokument offen";
     case "other": {
@@ -327,6 +341,10 @@ function extras(id: SourceId): HTMLElement[] {
     case "timer": return [
       optToggle("Notch verbreitern statt Platz nehmen", () => s.timer.expand, (v) => { s.timer.expand = v; }),
     ];
+    case "clock": {
+      const hint = el("p", "s-hint", "Minute bzw. Viertel des Spiels in der Mitte als eigenes Element am Rand – die Mitte zeigt dann nur Wappen und Stand. Bekommt sie keinen Platz (oder ist sie ausgeblendet), steht sie wie bisher klein in der Mitte.");
+      return [hint];
+    }
     case "pulse": return [
       optToggle("Bei hohem Puls nach oben", () => s.pulse.boost, (v) => { s.pulse.boost = v; }),
       optRange("Ab", 90, 200, 5, DEFAULTS.pulse.threshold, (v) => `${v} bpm`, () => s.pulse.threshold, (v) => { s.pulse.threshold = v; }, () => s.pulse.boost),
@@ -794,7 +812,7 @@ function renderSport() {
   }
   ex.append(exHead, exSeg, exHint);
   const center = optToggle("Spielstand in der Mitte", () => s.sport.center, (v) => { s.sport.center = v; });
-  const pitch = optToggle("Spielfeld mit Ballverlauf", () => s.sport.pitch, (v) => { s.sport.pitch = v; });
+  const pitch = optToggle("Spielfeld: Ballverlauf, Wurfbild", () => s.sport.pitch, (v) => { s.sport.pitch = v; });
   pitch.title = "Lädt nur, solange das Spielfeld zu sehen ist (etwa 10–15 MB pro Stunde).";
   const full = optToggle("Tore auch im Vollbild", () => s.sport.fullscreen, (v) => { s.sport.fullscreen = v; });
   full.title = "Nur wenn die Notch im Vollbild am Rand bleibt (Reiter Andocken).";
@@ -1052,7 +1070,7 @@ async function main() {
   invoke<LeagueInfo[]>("sport_leagues").then((l) => { leagues = l; renderSport(); }).catch(() => {});
   invoke<boolean>("arena_installed").then((v) => { arenaThere = v; if (v) renderSport(); }).catch(() => {});
   sportLive = (snap as { sport?: SportLive } | null)?.sport ?? null;
-  await listen<SportLive>("sport", (e) => { sportLive = e.payload; renderSportLive(); });
+  await listen<SportLive>("sport", (e) => { sportLive = e.payload; renderSportLive(); refresh(); });
 
   // iPhone-Austausch: Zustand aus share.rs (laeuft, Adresse, Geraete in der Naehe)
   invoke<ShareState>("share_status").then((x) => { share = x; renderShare(); }).catch(() => {});

@@ -116,6 +116,8 @@ pub struct Match {
     pub link: String,
     /// Ballverlauf verfuegbar (ESPN-Fussball)
     pub pitch: bool,
+    /// Wurfbild verfuegbar (ESPN-Basketball)
+    pub court: bool,
     /// Ticker, aelteste zuerst
     pub events: Vec<Ev>,
     pub source: String,
@@ -144,6 +146,9 @@ pub struct Play {
     pub y: f32,
     pub x2: Option<f32>,
     pub y2: Option<f32>,
+    /// Basketball: Treffer und Punkte des Versuchs (kind "2" | "3" | "ft"; x/y dann in Fuss, Korb bei y ≈ 1)
+    pub made: bool,
+    pub pts: u8,
 }
 
 // ---------- Hilfen ----------
@@ -474,6 +479,7 @@ pub fn parse_espn(v: &Value, sport: &str, path: &str) -> Vec<Match> {
             away,
             link,
             pitch: sport == "soccer",
+            court: sport == "basketball",
             events,
             source: "espn".into(),
             ..Default::default()
@@ -807,6 +813,50 @@ pub fn play_of(it: &Value, home_id: &str) -> Option<Play> {
         y,
         x2,
         y2,
+        made: false,
+        pts: 0,
+    })
+}
+
+/// Basketball: Wurf aus einer Aktion (ESPN Core). Ort in Fuss wie geliefert (x quer 0..50, y laengs, Korb bei
+/// y ≈ 1 — gegen die Distanzen im Spieltext geprueft); Freiwuerfe ohne Ort (x = -1). Kein Wurf -> None.
+pub fn shot_of(it: &Value, home_id: &str) -> Option<Play> {
+    if it["shootingPlay"].as_bool() != Some(true) {
+        return None;
+    }
+    let tid = team_id_of_ref(&s(&it["team"]["$ref"]));
+    let side = if tid.is_empty() { "" } else if tid == home_id { "home" } else { "away" };
+    let text = s(&it["text"]);
+    let pts = it["pointsAttempted"].as_u64().unwrap_or(0) as u8;
+    let ft = pts == 1 || s(&it["type"]["text"]).to_lowercase().contains("free throw");
+    let kind = if ft { "ft" } else if pts == 3 { "3" } else { "2" };
+    let (cx, cy) = (it["coordinate"]["x"].as_f64(), it["coordinate"]["y"].as_f64());
+    let (x, y) = match (cx, cy) {
+        (Some(x), Some(y)) if !ft && (-1.0..=51.0).contains(&x) && (-10.0..=95.0).contains(&y) => (x as f32, y as f32),
+        _ => (-1.0, -1.0),
+    };
+    // "Bam Adebayo misses 22-foot …", "X makes …"; geblockt: "Y blocks X 's …" -> der Werfer ist X
+    let who = if let Some((_, rest)) = text.split_once(" blocks ") {
+        rest.split(" 's ").next().unwrap_or(rest).split("'s ").next().unwrap_or(rest).trim().to_string()
+    } else {
+        [" makes ", " misses "].iter().find_map(|w| text.split_once(w).map(|(a, _)| a.trim().to_string())).unwrap_or_default()
+    };
+    let period = it["period"]["number"].as_u64().unwrap_or(0);
+    let clock = s(&it["clock"]["displayValue"]);
+    Some(Play {
+        id: s(&it["id"]),
+        t: parse_utc(&s(&it["wallclock"])).unwrap_or(0),
+        minute: if period > 4 { format!("OT {clock}") } else if period > 0 { format!("{period}. {clock}") } else { clock },
+        kind: kind.into(),
+        side: side.into(),
+        jersey: String::new(),
+        who,
+        x,
+        y,
+        x2: None,
+        y2: None,
+        made: it["scoringPlay"].as_bool().unwrap_or(false),
+        pts,
     })
 }
 
@@ -851,6 +901,8 @@ struct Watch {
     home_id: String,
     /// so viele Aktionen sind verarbeitet
     next: usize,
+    /// Basketball: Wuerfe statt Ballaktionen, beim ersten Mal das ganze Spiel
+    court: bool,
     started: bool,
     due: Option<Instant>,
     ids: HashSet<String>,
@@ -859,15 +911,16 @@ struct Watch {
 /// Neue Ballaktionen holen (beim ersten Mal die letzten 40). Danach kleine Seiten: ESPN liefert immer die
 /// ganze Seite, und jede Aktion ist ~1,5 KB — so bleibt es bei etwa 10–15 MB pro Stunde Zuschauen.
 fn fetch_plays(agent: &ureq::Agent, w: &mut Watch) -> Result<Vec<(Play, String)>, String> {
-    let size = if w.started { 10 } else { 40 };
+    // Basketball: das Wurfbild braucht alle Wuerfe -> erste Ladung in grossen Seiten von vorn (~1,7 KB je Aktion)
+    let size = if w.started { 10 } else if w.court { 100 } else { 40 };
     if !w.started {
         let v = get_json(agent, &format!("{}?limit=1&page=1", w.url))?;
         let count = v["count"].as_u64().unwrap_or(0) as usize;
-        w.next = count.saturating_sub(40);
+        w.next = if w.court { 0 } else { count.saturating_sub(40) };
         w.started = true;
     }
     let mut out = Vec::new();
-    for _ in 0..5 {
+    for _ in 0..if w.court { 8 } else { 5 } {
         let page = w.next / size + 1;
         let v = get_json(agent, &format!("{}?limit={size}&page={page}", w.url))?;
         let items = v["items"].as_array().cloned().unwrap_or_default();
@@ -876,7 +929,8 @@ fn fetch_plays(agent: &ureq::Agent, w: &mut Watch) -> Result<Vec<(Play, String)>
             if (page - 1) * size + i < w.next {
                 continue;
             }
-            if let Some(p) = play_of(it, &w.home_id) {
+            let p = if w.court { shot_of(it, &w.home_id) } else { play_of(it, &w.home_id) };
+            if let Some(p) = p {
                 if w.ids.insert(p.id.clone()) {
                     out.push((p, s(&it["text"])));
                 }
@@ -1147,7 +1201,7 @@ pub fn spawn(app: AppHandle) {
                 .map(|(k, _)| k);
             let mut plays_out: Option<(bool, Vec<Play>)> = None;
             let mut play_news: Vec<(String, Ev)> = Vec::new();
-            match wkey.as_ref().and_then(|k| list.iter().find(|m| &m.key == k && m.pitch && m.source == "espn" && m.state != "pre")) {
+            match wkey.as_ref().and_then(|k| list.iter().find(|m| &m.key == k && (m.pitch || m.court) && m.source == "espn" && m.state != "pre")) {
                 Some(m) => {
                     if watch.key != m.key {
                         // neues Spiel: Adresse der Ballaktionen aus dem Schluessel "soccer/ger.1:123"
@@ -1157,6 +1211,7 @@ pub fn spawn(app: AppHandle) {
                             key: m.key.clone(),
                             url: format!("{CORE}/{sport}/leagues/{lg}/events/{id}/competitions/{id}/plays"),
                             home_id: m.home.id.rsplit(':').next().unwrap_or("").to_string(),
+                            court: m.court,
                             ..Default::default()
                         };
                     }
@@ -1374,6 +1429,30 @@ mod tests {
         assert_eq!(n.len(), 1);
         assert_eq!(n[0].kind, "score");
         assert_eq!(n[0].title, "Tor für Bremen!");
+    }
+
+    #[test]
+    fn basketball_wurf() {
+        let it = serde_json::json!({
+            "id": "40190264461", "type": { "text": "Jump Shot" }, "text": "Davion Mitchell misses 26-foot three point jumper",
+            "period": { "number": 1 }, "clock": { "displayValue": "8:00" }, "scoringPlay": false, "shootingPlay": true,
+            "pointsAttempted": 3, "coordinate": { "x": 36, "y": 24 },
+            "team": { "$ref": "http://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/2027/teams/14?lang=en" },
+            "wallclock": "2026-10-03T23:20:49Z"
+        });
+        let p = shot_of(&it, "28").unwrap();
+        assert_eq!((p.kind.as_str(), p.made, p.pts, p.side.as_str()), ("3", false, 3, "away"));
+        assert_eq!((p.x, p.y), (36.0, 24.0));
+        assert_eq!(p.who, "Davion Mitchell");
+        assert_eq!(p.minute, "1. 8:00");
+        // Freiwurf: kein Ort, Treffer zaehlt
+        let ft = serde_json::json!({ "id": "1", "type": { "text": "Free Throw - 1 of 2" }, "text": "R. Barrett makes free throw 1 of 2",
+            "shootingPlay": true, "scoringPlay": true, "pointsAttempted": 1, "coordinate": { "x": -214748340, "y": -214748365 },
+            "team": { "$ref": ".../teams/28?lang=en" }, "period": { "number": 5 }, "clock": { "displayValue": "1:02" } });
+        let p = shot_of(&ft, "28").unwrap();
+        assert_eq!((p.kind.as_str(), p.made, p.x, p.side.as_str(), p.minute.as_str()), ("ft", true, -1.0, "home", "OT 1:02"));
+        // kein Wurf
+        assert!(shot_of(&serde_json::json!({ "shootingPlay": false }), "28").is_none());
     }
 
     #[test]
