@@ -579,7 +579,7 @@ function renderDock() {
 
 // ---------- Live-Sport ----------
 
-type LeagueInfo = { id: string; name: string; group: string; sport: string; source: string };
+type LeagueInfo = { id: string; name: string; group: string; sport: string; source: string; auto?: boolean };
 type TeamInfo = { key: string; name: string; logo: string };
 type LiveTeam = { name: string; abbr?: string; logo?: string; color?: string; score: string };
 type LiveMatch = { key?: string; state: string; fav: boolean; league_name: string; home: LiveTeam; away: LiveTeam; clock: string; start?: number };
@@ -1067,7 +1067,7 @@ async function main() {
   if (startTab === "app") q<HTMLInputElement>(".key-input").focus();
 
   // Live-Sport: Wettbewerbe aus sport.rs, Stand live mitlesen
-  invoke<LeagueInfo[]>("sport_leagues").then((l) => { leagues = l; renderSport(); }).catch(() => {});
+  invoke<LeagueInfo[]>("sport_leagues").then((l) => { leagues = l.filter((x) => !x.auto); renderSport(); }).catch(() => {});
   invoke<boolean>("arena_installed").then((v) => { arenaThere = v; if (v) renderSport(); }).catch(() => {});
   sportLive = (snap as { sport?: SportLive } | null)?.sport ?? null;
   await listen<SportLive>("sport", (e) => { sportLive = e.payload; renderSportLive(); refresh(); });
