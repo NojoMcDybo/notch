@@ -122,6 +122,10 @@ function bugEl(m: SportMatch, score: string, cls = "bug", lit = "") {
 }
 
 const scoreOf = (m: SportMatch) => (m.state === "pre" ? "–" : `${m.home.score || 0}:${m.away.score || 0}`);
+/** Anstoss vorbei, ESPN meldet aber noch nichts (manche Testspiele ueberträgt ESPN gar nicht live; wie in Arena) */
+export const noLive = (m: SportMatch) => m.state === "pre" && m.source === "espn" && Date.now() - m.start > 15 * 60_000;
+const NO_LIVE = "ESPN überträgt dieses Spiel nicht live";
+
 export const clockOf = (m: SportMatch) => (m.state === "pre" ? kickoff(m) : m.clock || (m.state === "post" ? "Ende" : ""));
 
 /** Farbe der Mannschaft, die die Meldung betrifft (Tor: der Torschuetze) */
@@ -205,7 +209,7 @@ function tickerEl(m: SportMatch, n: number) {
   const ol = mk("ol", "sp-ticker");
   const evs = [...m.events].reverse().slice(0, n);
   if (!evs.length) {
-    ol.append(mk("li", "sp-empty", m.state === "pre" ? `Anstoß ${kickoff(m)}` : m.source === "openligadb" ? "Tore erscheinen hier" : "Noch keine Meldungen"));
+    ol.append(mk("li", "sp-empty", noLive(m) ? NO_LIVE : m.state === "pre" ? `Anstoß ${kickoff(m)}` : m.source === "openligadb" ? "Tore erscheinen hier" : "Noch keine Meldungen"));
     return ol;
   }
   for (const e of evs) {
@@ -227,7 +231,7 @@ function tickerEl(m: SportMatch, n: number) {
 
 /** Signatur der Karte: nur neu bauen, wenn sich Sichtbares aendert (der Ballverlauf lebt weiter) */
 export function cardSig(focus: SportMatch | undefined, others: SportMatch[], side: boolean, pitchOn: boolean, arena = false) {
-  const f = focus ? [focus.key, focus.home.score, focus.away.score, focus.clock, focus.state, focus.events.map((e) => e.id).join(",")] : [];
+  const f = focus ? [focus.key, focus.home.score, focus.away.score, focus.clock, focus.state, noLive(focus), focus.events.map((e) => e.id).join(",")] : [];
   return JSON.stringify([f, others.map((m) => [m.key, m.home.score, m.away.score, m.clock]), side, pitchOn, arena]);
 }
 
@@ -240,7 +244,7 @@ export function cardEl(focus: SportMatch, others: SportMatch[], o: CardOpts) {
 
   const head = mk("div", "sp-head");
   head.append(mk("span", "sp-league", focus.league_name));
-  head.append(mk("span", `sp-clock ${focus.state}`, clockOf(focus)));
+  head.append(mk("span", `sp-clock ${focus.state}`, noLive(focus) ? `${kickoff(focus)} · keine Live-Daten` : clockOf(focus)));
   const open = mk("button", "sp-open n-liquid");
   open.innerHTML = OPEN_SVG;
   open.title = "Spiel im Browser öffnen";
@@ -392,6 +396,8 @@ export class Pitch {
       this.clear();
       this.label.textContent = m.state === "pre" ? "Ballverlauf ab Anpfiff" : "Ballverlauf wird geladen …";
     }
+    // ohne Ballaktionen bisher: Hinweis, wenn ESPN das Spiel gar nicht ueberträgt
+    if (noLive(m) && !this.trail.length) this.label.textContent = NO_LIVE;
   }
 
   /** blasses Wappen (oder Kuerzel) mitten in der Haelfte */

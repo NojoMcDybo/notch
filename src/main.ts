@@ -15,7 +15,7 @@ import { iconNode, iconUrl, liquid, NOJO_ICONS, type IconName } from "./nojo/noj
 document.querySelectorAll<SVGElement>("svg[data-icon]").forEach((s) => {
   s.replaceWith(iconNode(s.dataset.icon as IconName, { cls: s.getAttribute("class") ?? undefined }));
 });
-import { bannerEl, cardEl, cardSig, clockOf, Court, kickoff, midEl, midSig as sportSig, Pitch, type SportMatch, type SportNews, type SportPlay, type SportState } from "./sport";
+import { bannerEl, cardEl, cardSig, clockOf, Court, kickoff, midEl, noLive, midSig as sportSig, Pitch, type SportMatch, type SportNews, type SportPlay, type SportState } from "./sport";
 
 // ---------- Typen ----------
 
@@ -253,7 +253,7 @@ const voice = new Voice({
       spiele: sport.matches.map((m) => ({
         wettbewerb: m.league_name, heim: m.home.name, gast: m.away.name, lieblingsteam: m.fav,
         stand: m.state === "pre" ? null : `${m.home.score}:${m.away.score}`,
-        status: m.state === "pre" ? `Anstoß ${kickoff(m)}` : m.clock,
+        status: m.state === "pre" ? `Anstoß ${kickoff(m)}${noLive(m) ? " – ESPN liefert keine Live-Daten" : ""}` : m.clock,
         letzte_meldungen: m.events.slice(-4).map((e) => [e.minute, e.title, e.text].filter(Boolean).join(" ")),
       })),
       hinweis: settings.sport.on ? undefined : "Live-Sport ist in den Einstellungen aus",
