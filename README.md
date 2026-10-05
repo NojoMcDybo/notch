@@ -54,7 +54,7 @@ Seitlich ist die Notch eine senkrechte Pille; aufgeklappt zeigt sie **alles auf 
 
 ## Sprachassistent (OpenAI Realtime)
 
-Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (erstes freies aus Strg+Alt+Leertaste → Strg+Umschalt+Alt+Leertaste → Strg+Alt+N; das aktive steht im Tooltip des Knopfs). Nochmal drücken = auflegen.
+Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standard: erstes freies aus Strg+Alt+Leertaste → Strg+Umschalt+Alt+Leertaste → Strg+Alt+N; eigenes unter Einstellungen › App › Tastatur › **Ändern**; das aktive steht im Tooltip des Knopfs). Nochmal drücken = auflegen.
 
 - **Sofort losreden:** Das Mikrofon läuft ab dem Drücken mit, auch während die Verbindung noch aufgebaut wird („Hört zu · verbindet …“). Steht sie, geht das schon Gesagte als Audio hinterher (`conversation.item.create` mit `input_audio`, PCM16 24 kHz, in Stücken von höchstens 2,5 s), danach läuft das Mikro live weiter. War man beim Verbinden schon fertig, antwortet er direkt darauf.
 - **Schließt von selbst:** Ist die Antwort zu Ende gesprochen, hört er noch 8 s auf eine Rückfrage, dann legt er auf und die Notch klappt zu. Per Controller verschwindet die Notch sofort nach der Antwort; die Verbindung wartet unsichtbar 20 s auf den nächsten Druck. Ohne Gespräch legt er spätestens nach 40 s auf.
@@ -193,6 +193,8 @@ Browser-Seiten dürfen nur von `localhost`/`127.0.0.1`/`tauri://` aus schreiben 
 ## Controller
 
 Xbox-Controller und alles, was sich per XInput meldet (GameSir, Steam Input …), auch während ein Spiel vorne ist (`src-tauri/src/gamepad.rs`, ohne Controller wird nur alle 250 ms nachgesehen):
+
+Alle drei Kombinationen lassen sich unter Einstellungen › App › Controller selbst belegen (**Aufnehmen**, Tasten gleichzeitig halten, loslassen): mindestens zwei Tasten, keine doppelt; halten mehrere Kombinationen gleichzeitig, gewinnt die längste. Standard:
 
 | Kombination | Wirkung |
 |---|---|

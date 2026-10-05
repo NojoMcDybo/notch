@@ -11,7 +11,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { build, bpmOf, CLOCK_ID, needed, plan, planKey, PulseGate, sourceOf, TIMER_ID, type CAct, type Plan } from "./compact";
 import { glassLight, icon, iconNode, iconUrl, lightScroller, liquid, segments, windowControls, type IconName } from "./nojo/nojo-ui";
-import { clone, DEFAULTS, FULLSCREEN_MODES, LAYERS, MUSIC_REACT, normalize, SOURCES, SPORT_EXPAND, type CompactSettings, type FullscreenMode, type Layer, type MusicReact, type SourceId, type SportExpand } from "./settings-model";
+import { clone, DEFAULTS, FULLSCREEN_MODES, LAYERS, MUSIC_REACT, normalize, PAD_ACTIONS, SOURCES, SPORT_EXPAND, type CompactSettings, type PadAction, type PadButton, type FullscreenMode, type Layer, type MusicReact, type SourceId, type SportExpand } from "./settings-model";
 
 const q = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => root.querySelector(s) as T;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) {
@@ -982,12 +982,217 @@ function renderShare() {
   renderShareStatus();
 }
 
+// ---------- Tastenkuerzel (shortcuts.rs, gamepad.rs) ----------
+
+const PAD_LABEL: Record<PadButton, string> = {
+  "dpad-up": "▲", "dpad-down": "▼", "dpad-left": "◀", "dpad-right": "▶", a: "A", b: "B", x: "X", y: "Y",
+  lb: "LB", rb: "RB", lt: "LT", rt: "RT", l3: "L3", r3: "R3", back: "View", start: "Menü",
+};
+const PAD_TITLE: Record<PadButton, string> = {
+  "dpad-up": "Steuerkreuz oben", "dpad-down": "Steuerkreuz unten", "dpad-left": "Steuerkreuz links", "dpad-right": "Steuerkreuz rechts",
+  a: "A (Kreuz)", b: "B (Kreis)", x: "X (Quadrat)", y: "Y (Dreieck)", lb: "LB (L1)", rb: "RB (R1)", lt: "LT (L2)", rt: "RT (R2)",
+  l3: "linker Stick drücken (L3)", r3: "rechter Stick drücken (R3)", back: "View (Select)", start: "Menü (Start)",
+};
+const PAD_NAME: Record<PadAction, [string, string]> = {
+  voice: ["Sprachassistent", "halten: nach 1,5 s hört er zu"],
+  compact: ["Notch klein heraus", "im Vollbild mit „Am Rand“"],
+  expanded: ["Notch aufgeklappt heraus", "im Vollbild mit „Am Rand“"],
+};
+
+let voiceLabel = "";
+/** gerade aufgenommen wird: Tastatur oder eine Controller-Aktion */
+let capture: { kind: "key" } | { kind: "pad"; action: PadAction; seen: PadButton[]; timer: number } | null = null;
+let shortcutMsg: { text: string; error: boolean } | null = null;
+
+function keyChips(label: string) {
+  const box = el("span", "keys");
+  if (!label) { box.append(el("span", "faint", "keins")); return box; }
+  for (const k of label.split("+")) box.append(el("kbd", "", k));
+  return box;
+}
+
+function padChips(list: PadButton[]) {
+  const box = el("span", "keys");
+  list.forEach((b, i) => {
+    if (i) box.append(el("i", "plus", "+"));
+    const k = el("kbd", "", PAD_LABEL[b]);
+    k.title = PAD_TITLE[b];
+    box.append(k);
+  });
+  return box;
+}
+
+/** Tastendruck -> Kuerzel im Format des Plugins ("ctrl+alt+KeyN"); null = nur Zusatztasten */
+function accel(e: KeyboardEvent) {
+  if (["Control", "Alt", "Shift", "Meta", "AltGraph"].includes(e.key)) return null;
+  const mods = [e.ctrlKey && "ctrl", e.altKey && "alt", e.shiftKey && "shift", e.metaKey && "super"].filter(Boolean);
+  return [...mods, e.code].join("+");
+}
+
+function stopCapture() {
+  if (capture?.kind === "pad") { clearTimeout(capture.timer); invoke("pad_capture", { on: false }).catch(() => {}); }
+  if (capture?.kind === "key") invoke("shortcut_pause", { pause: false }).catch(() => {});
+  capture = null;
+  window.removeEventListener("keydown", onCaptureKey, true);
+}
+
+async function onCaptureKey(e: KeyboardEvent) {
+  if (capture?.kind !== "key") return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.metaKey) { stopCapture(); shortcutMsg = null; renderShortcuts(); return; }
+  const acc = accel(e);
+  if (!acc) return;
+  window.removeEventListener("keydown", onCaptureKey, true);
+  capture = null;
+  try {
+    voiceLabel = await invoke<string>("shortcut_set", { key: acc });
+    s.shortcuts.voiceKey = acc;
+    commit();
+    shortcutMsg = { text: `Sprachassistent jetzt mit ${voiceLabel}.`, error: false };
+    announce(shortcutMsg.text);
+  } catch (err) {
+    invoke("shortcut_pause", { pause: false }).catch(() => {});
+    shortcutMsg = { text: String(err), error: true };
+  }
+  renderShortcuts();
+}
+
+/** Controller: alle Tasten, die gleichzeitig gehalten wurden; beim Loslassen aller Tasten fertig */
+function onPadButtons(list: PadButton[]) {
+  if (capture?.kind !== "pad") return;
+  const c = capture;
+  if (list.length > c.seen.length) c.seen = list.slice(0, 4);
+  renderShortcuts();
+  if (list.length || !c.seen.length) return;
+  const action = c.action, combo = [...c.seen];
+  stopCapture();
+  const sig = (l: PadButton[]) => [...l].sort().join("+");
+  const other = PAD_ACTIONS.find((a) => a !== action && sig(s.shortcuts.pad[a]) === sig(combo));
+  if (combo.length < 2) {
+    shortcutMsg = { text: "Bitte mindestens zwei Tasten gleichzeitig halten – eine allein löst im Spiel zu leicht aus.", error: true };
+  } else if (other) {
+    shortcutMsg = { text: `Diese Kombination nutzt schon „${PAD_NAME[other][0]}“.`, error: true };
+  } else {
+    s.shortcuts.pad[action] = combo;
+    commit();
+    shortcutMsg = { text: `${PAD_NAME[action][0]}: ${combo.map((b) => PAD_TITLE[b]).join(" + ")}.`, error: false };
+    announce(shortcutMsg.text);
+  }
+  renderShortcuts();
+}
+
+function renderShortcuts() {
+  const box = q(".shortcut-options");
+  if (!box) return;
+  const parts: HTMLElement[] = [];
+
+  // Tastatur
+  const kb = el("section", "s-card");
+  const kh = el("div", "s-head");
+  kh.append(el("span", "eyebrow", "Tastatur"));
+  kb.append(kh);
+  const row = el("div", "sc-row");
+  const name = el("div", "sc-name");
+  name.append(el("b", "", "Sprachassistent an/aus"), el("small", "", s.shortcuts.voiceKey ? "eigenes Kürzel" : "automatisch: erstes freies"));
+  const keys = capture?.kind === "key" ? el("span", "keys rec", "Drücke die neue Kombination …") : keyChips(voiceLabel);
+  const acts = el("div", "sc-acts");
+  if (capture?.kind === "key") {
+    const cancel = el("button", "button secondary", "Abbrechen");
+    cancel.addEventListener("click", () => { stopCapture(); renderShortcuts(); });
+    acts.append(cancel);
+  } else {
+    const change = el("button", "button secondary", "Ändern");
+    change.disabled = !!capture;
+    change.addEventListener("click", async () => {
+      shortcutMsg = null;
+      await invoke("shortcut_pause", { pause: true }).catch(() => {});
+      capture = { kind: "key" };
+      window.addEventListener("keydown", onCaptureKey, true);
+      renderShortcuts();
+    });
+    acts.append(change);
+    if (s.shortcuts.voiceKey) {
+      const auto = el("button", "link-button", "Automatisch");
+      auto.addEventListener("click", async () => {
+        try {
+          voiceLabel = await invoke<string>("shortcut_set", { key: "" });
+          shortcutMsg = null;
+        } catch (err) { shortcutMsg = { text: String(err), error: true }; }
+        s.shortcuts.voiceKey = "";
+        commit();
+        renderShortcuts();
+      });
+      acts.append(auto);
+    }
+  }
+  row.append(name, keys, acts);
+  kb.append(row);
+  parts.push(kb);
+
+  // Controller
+  const pad = el("section", "s-card");
+  const ph = el("div", "s-head");
+  ph.append(el("span", "eyebrow", "Controller"));
+  pad.append(ph);
+  for (const a of PAD_ACTIONS) {
+    const r = el("div", "sc-row");
+    const n = el("div", "sc-name");
+    n.append(el("b", "", PAD_NAME[a][0]), el("small", "", PAD_NAME[a][1]));
+    const rec = capture?.kind === "pad" && capture.action === a;
+    const chips = rec
+      ? (capture as { seen: PadButton[] }).seen.length ? padChips((capture as { seen: PadButton[] }).seen) : el("span", "keys rec", "Tasten am Controller halten …")
+      : padChips(s.shortcuts.pad[a]);
+    if (rec) chips.classList.add("rec");
+    const acts2 = el("div", "sc-acts");
+    if (rec) {
+      const cancel = el("button", "button secondary", "Abbrechen");
+      cancel.addEventListener("click", () => { stopCapture(); renderShortcuts(); });
+      acts2.append(cancel);
+    } else {
+      const go = el("button", "button secondary", "Aufnehmen");
+      go.disabled = !!capture;
+      go.addEventListener("click", async () => {
+        shortcutMsg = null;
+        await invoke("pad_capture", { on: true }).catch(() => {});
+        // ohne Eingabe nach 12 s aufgeben
+        const timer = window.setTimeout(() => { stopCapture(); shortcutMsg = { text: "Keine Taste erkannt – ist der Controller verbunden?", error: true }; renderShortcuts(); }, 12_000);
+        capture = { kind: "pad", action: a, seen: [], timer };
+        renderShortcuts();
+      });
+      acts2.append(go);
+      const def = DEFAULTS.shortcuts.pad[a];
+      if (def.join("+") !== s.shortcuts.pad[a].join("+")) {
+        const std = el("button", "link-button", "Standard");
+        std.addEventListener("click", () => {
+          const clash = PAD_ACTIONS.find((b) => b !== a && [...s.shortcuts.pad[b]].sort().join("+") === [...def].sort().join("+"));
+          if (clash) s.shortcuts.pad[clash] = [...DEFAULTS.shortcuts.pad[clash]];
+          s.shortcuts.pad[a] = [...def];
+          commit();
+          renderShortcuts();
+        });
+        acts2.append(std);
+      }
+    }
+    r.append(n, chips, acts2);
+    pad.append(r);
+  }
+  parts.push(pad);
+
+  const msg = el("p", "fine tight sc-msg" + (shortcutMsg?.error ? " error" : ""), shortcutMsg?.text ?? "");
+  msg.setAttribute("role", "status");
+  parts.push(msg);
+  parts.push(el("p", "fine", "Controller: mindestens zwei Tasten gleichzeitig (Xbox und alles, was sich als solcher meldet – GameSir, Steam Input). Das Spiel sieht dieselben Tasten; wer das nicht will, legt die Kombination z. B. in Steam Input auf Tasten, die das Spiel nicht nutzt. Tastatur: mit Strg, Alt oder Win – F13 bis F24 gehen auch allein."));
+  box.replaceChildren(...parts);
+}
+
 function renderAll() {
   syncSegs();
   renderList();
   renderDock();
   renderSport();
   renderShare();
+  renderShortcuts();
 }
 
 async function main() {
@@ -1091,7 +1296,11 @@ async function main() {
 
   // App
   getVersion().then((v) => { q(".app-version").textContent = `Version ${v}`; }).catch(() => {});
-  q(".voice-key").textContent = snap?.voice_key || "kein freies Kürzel gefunden";
+  voiceLabel = snap?.voice_key ?? "";
+  await listen<string>("voice-key", (e) => { voiceLabel = e.payload; if (!capture) renderShortcuts(); });
+  await listen<PadButton[]>("pad-buttons", (e) => onPadButtons(e.payload));
+  // Fenster zu oder versteckt: Aufnehmen beenden (sonst bliebe das Kuerzel abgemeldet)
+  window.addEventListener("beforeunload", () => stopCapture());
   // OpenAI-Schluessel: wird nur hingeschickt (Rust prueft und verschluesselt), nie zurueckgelesen
   type KeyStatus = { source: "env" | "app" | "none"; hint: string | null };
   const keyInput = q<HTMLInputElement>(".key-input"), keyStatus = q(".key-status");

@@ -1,20 +1,21 @@
 //! Controller-Kuerzel (XInput — funktioniert auch, waehrend ein Spiel vorne ist; Xbox-Controller und
 //! alles, was sich als solcher meldet: GameSir, Steam Input …). RB = R1, RT = R2, rechter Stick = R3.
 //!
+//! Die Kombinationen sind einstellbar (Einstellungen › App › Controller, settings "/shortcuts/pad"); Standard:
 //!   Steuerkreuz links + RB   Notch klein heraus   } nur im Vollbild mit "Im Vollbild: Am Rand";
 //!   Steuerkreuz links + RT   Notch aufgeklappt    } nochmal = weg, sonst nach 10 s von selbst
 //!   Steuerkreuz links + R3   Sprachassistent: nach 1,5 s Halten hoert er zu, solange gedrueckt (immer)
+//! Druecken mehrere Kombinationen gleichzeitig, gewinnt die laengste (L+RB+R3 schlaegt L+RB).
 //!
 //! Schickt "pad" ("off" | "compact" | "expanded"), "voice-arm" (ms bis zum Zuhoeren, 0 = abgebrochen)
-//! und "voice-ptt" (true/false) an die Notch.
+//! und "voice-ptt" (true/false) an die Notch. Beim Aufnehmen im Einstellungsfenster (pad_capture) loest
+//! nichts aus; stattdessen geht "pad-buttons" (gedrueckte Tasten) ans Fenster.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
-use windows::Win32::UI::Input::XboxController::{
-    XInputGetState, XINPUT_GAMEPAD_DPAD_LEFT, XINPUT_GAMEPAD_RIGHT_SHOULDER, XINPUT_GAMEPAD_RIGHT_THUMB, XINPUT_STATE,
-};
+use windows::Win32::UI::Input::XboxController::{XInputGetState, XINPUT_STATE};
 
 const SHOW_FOR: Duration = Duration::from_secs(10);
 /// ab hier zaehlt der Trigger als gedrueckt (0..255)
@@ -42,25 +43,114 @@ impl Mode {
     }
 }
 
-/// Was ist gerade gedrueckt? (Steuerkreuz links muss jeweils dabei sein)
+/// Tasten mit ihren XInput-Bits (Trigger LT/RT kommen getrennt als Wert 0..255)
+pub const BUTTONS: [(&str, u16); 14] = [
+    ("dpad-up", 0x0001), ("dpad-down", 0x0002), ("dpad-left", 0x0004), ("dpad-right", 0x0008),
+    ("start", 0x0010), ("back", 0x0020), ("l3", 0x0040), ("r3", 0x0080),
+    ("lb", 0x0100), ("rb", 0x0200), ("a", 0x1000), ("b", 0x2000), ("x", 0x4000), ("y", 0x8000),
+];
+
+/// Eine Kombination: alle Tasten gleichzeitig gehalten
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Combo {
+    mask: u16,
+    lt: bool,
+    rt: bool,
+}
+
+impl Combo {
+    pub fn of(names: &[&str]) -> Self {
+        let mut c = Combo::default();
+        for n in names {
+            match *n {
+                "lt" => c.lt = true,
+                "rt" => c.rt = true,
+                _ => {
+                    if let Some((_, b)) = BUTTONS.iter().find(|(k, _)| k == n) {
+                        c.mask |= b;
+                    }
+                }
+            }
+        }
+        c
+    }
+    fn len(&self) -> u32 {
+        self.mask.count_ones() + self.lt as u32 + self.rt as u32
+    }
+    fn held(&self, buttons: u16, lt: u8, rt: u8) -> bool {
+        self.len() >= 2 && buttons & self.mask == self.mask && (!self.lt || lt >= TRIGGER) && (!self.rt || rt >= TRIGGER)
+    }
+}
+
+/// Die drei einstellbaren Kombinationen
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PadCfg {
+    pub voice: Combo,
+    pub compact: Combo,
+    pub expanded: Combo,
+}
+
+impl Default for PadCfg {
+    fn default() -> Self {
+        PadCfg {
+            voice: Combo::of(&["dpad-left", "r3"]),
+            compact: Combo::of(&["dpad-left", "rb"]),
+            expanded: Combo::of(&["dpad-left", "rt"]),
+        }
+    }
+}
+
+/// Aus den Einstellungen (ungueltige oder zu kurze Eintraege: Standard)
+pub fn pad_cfg() -> PadCfg {
+    let d = PadCfg::default();
+    let v = crate::settings_value("/shortcuts/pad").unwrap_or(serde_json::Value::Null);
+    let get = |k: &str, def: Combo| {
+        let names: Vec<&str> = v[k].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+        let c = Combo::of(&names);
+        if (2..=4).contains(&c.len()) { c } else { def }
+    };
+    PadCfg { voice: get("voice", d.voice), compact: get("compact", d.compact), expanded: get("expanded", d.expanded) }
+}
+
+/// Namen der gedrueckten Tasten (fuer das Aufnehmen in den Einstellungen)
+pub fn names(buttons: u16, lt: u8, rt: u8) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = BUTTONS.iter().filter(|(_, b)| buttons & b != 0).map(|(n, _)| *n).collect();
+    if lt >= TRIGGER {
+        out.push("lt");
+    }
+    if rt >= TRIGGER {
+        out.push("rt");
+    }
+    out
+}
+
+/// Was ist gerade gedrueckt? Halten mehrere Kombinationen, zaehlen nur die laengsten.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Pressed {
     pub peek: Mode,
     pub talk: bool,
 }
 
-pub fn read(buttons: u16, right_trigger: u8) -> Pressed {
-    let left = buttons & XINPUT_GAMEPAD_DPAD_LEFT.0 != 0;
-    let peek = if !left {
-        Mode::Off
-    } else if right_trigger >= TRIGGER {
+pub fn read(buttons: u16, left_trigger: u8, right_trigger: u8, cfg: &PadCfg) -> Pressed {
+    let held = |c: &Combo| c.held(buttons, left_trigger, right_trigger).then(|| c.len()).unwrap_or(0);
+    let (v, c, e) = (held(&cfg.voice), held(&cfg.compact), held(&cfg.expanded));
+    let top = v.max(c).max(e);
+    let peek = if top > 0 && e == top {
         Mode::Expanded
-    } else if buttons & XINPUT_GAMEPAD_RIGHT_SHOULDER.0 != 0 {
+    } else if top > 0 && c == top {
         Mode::Compact
     } else {
         Mode::Off
     };
-    Pressed { peek, talk: left && buttons & XINPUT_GAMEPAD_RIGHT_THUMB.0 != 0 }
+    Pressed { peek, talk: top > 0 && v == top }
+}
+
+/// Einstellungsfenster nimmt gerade eine Kombination auf: nichts ausloesen, Tasten melden
+pub static CAPTURE: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+pub fn pad_capture(on: bool) {
+    CAPTURE.store(on, Ordering::Relaxed);
 }
 
 /// Umschalten bei jedem neuen Druck einer Kombination, Ablauf nach SHOW_FOR.
@@ -161,7 +251,17 @@ pub fn spawn(app: AppHandle) {
         let mut talk = TalkGate::new();
         let mut connected = [false; 4];
         let mut last_scan: Option<Instant> = None;
+        let mut cfg = pad_cfg();
+        let mut cfg_at = Instant::now();
+        let mut shown: Vec<&'static str> = Vec::new();
         loop {
+            // Einstellungen alle 0,5 s neu lesen (aendern sich selten)
+            if cfg_at.elapsed() > Duration::from_millis(500) {
+                cfg = pad_cfg();
+                cfg_at = Instant::now();
+            }
+            let capture = CAPTURE.load(Ordering::Relaxed);
+            let mut all: Vec<&'static str> = Vec::new();
             // nicht verbundene Plaetze nur alle 2 s abfragen (XInput ist dort langsam)
             let scan = last_scan.is_none_or(|t| t.elapsed() > Duration::from_secs(2));
             if scan {
@@ -175,12 +275,29 @@ pub fn spawn(app: AppHandle) {
                 let mut st = XINPUT_STATE::default();
                 *c = unsafe { XInputGetState(i as u32, &mut st) } == 0;
                 if *c {
-                    let p = read(st.Gamepad.wButtons.0, st.Gamepad.bRightTrigger);
+                    let (b, lt, rt) = (st.Gamepad.wButtons.0, st.Gamepad.bLeftTrigger, st.Gamepad.bRightTrigger);
+                    if capture {
+                        for n in names(b, lt, rt) {
+                            if !all.contains(&n) {
+                                all.push(n);
+                            }
+                        }
+                        continue;
+                    }
+                    let p = read(b, lt, rt, &cfg);
                     if p.peek != Mode::Off {
                         pressed.peek = p.peek;
                     }
                     pressed.talk |= p.talk;
                 }
+            }
+
+            // Aufnehmen: gedrueckte Tasten ans Einstellungsfenster (nur bei Aenderung)
+            if capture && all != shown {
+                shown = all.clone();
+                let _ = app.emit("pad-buttons", &shown);
+            } else if !capture {
+                shown.clear();
             }
 
             // Sprachassistent: erst nach 1,5 s Halten zuhoeren, Loslassen weitergeben
@@ -209,20 +326,35 @@ pub fn spawn(app: AppHandle) {
 mod tests {
     use super::*;
 
-    const LEFT: u16 = XINPUT_GAMEPAD_DPAD_LEFT.0;
-    const RB: u16 = XINPUT_GAMEPAD_RIGHT_SHOULDER.0;
-    const R3: u16 = XINPUT_GAMEPAD_RIGHT_THUMB.0;
+    const LEFT: u16 = 0x0004;
+    const RB: u16 = 0x0200;
+    const R3: u16 = 0x0080;
+    const Y: u16 = 0x8000;
 
     #[test]
     fn kombinationen() {
-        assert_eq!(read(LEFT | RB, 0).peek, Mode::Compact);
-        assert_eq!(read(LEFT, 255).peek, Mode::Expanded);
-        assert_eq!(read(LEFT | RB, 200).peek, Mode::Expanded, "RT gewinnt");
-        assert_eq!(read(RB, 255).peek, Mode::Off, "ohne Steuerkreuz links nichts");
-        assert_eq!(read(LEFT, 50).peek, Mode::Off, "Trigger nur angetippt");
-        assert!(read(LEFT | R3, 0).talk);
-        assert!(!read(R3, 0).talk, "R3 allein ist im Spiel oft belegt");
-        assert_eq!(read(LEFT | R3, 0).peek, Mode::Off, "Sprechen holt nicht zusaetzlich die Notch");
+        let d = PadCfg::default();
+        assert_eq!(read(LEFT | RB, 0, 0, &d).peek, Mode::Compact);
+        assert_eq!(read(LEFT, 0, 255, &d).peek, Mode::Expanded);
+        assert_eq!(read(LEFT | RB, 0, 200, &d).peek, Mode::Expanded, "gleich lang: aufgeklappt gewinnt");
+        assert_eq!(read(RB, 0, 255, &d).peek, Mode::Off, "ohne Steuerkreuz links nichts");
+        assert_eq!(read(LEFT, 0, 50, &d).peek, Mode::Off, "Trigger nur angetippt");
+        assert!(read(LEFT | R3, 0, 0, &d).talk);
+        assert!(!read(R3, 0, 0, &d).talk, "R3 allein ist im Spiel oft belegt");
+        assert_eq!(read(LEFT | R3, 0, 0, &d).peek, Mode::Off, "Sprechen holt nicht zusaetzlich die Notch");
+    }
+
+    #[test]
+    fn eigene_kombinationen() {
+        // Sprechen: LB + Y, klein: LT + RT
+        let c = PadCfg { voice: Combo::of(&["lb", "y"]), compact: Combo::of(&["lt", "rt"]), expanded: Combo::of(&["lt", "rt", "y"]) };
+        assert!(read(0x0100 | Y, 0, 0, &c).talk);
+        assert_eq!(read(0, 255, 255, &c).peek, Mode::Compact);
+        assert_eq!(read(Y, 255, 255, &c).peek, Mode::Expanded, "die laengere Kombination gewinnt");
+        assert!(!read(LEFT | R3, 0, 0, &c).talk, "alte Kombination tut nichts mehr");
+        assert_eq!(names(LEFT | Y, 0, 200), vec!["dpad-left", "y", "rt"]);
+        assert_eq!(Combo::of(&["y"]).len(), 1);
+        assert!(!Combo::of(&["y"]).held(Y, 0, 0), "eine Taste allein loest nie aus");
     }
 
     #[test]

@@ -10,6 +10,7 @@ mod share;
 mod shelf;
 mod spectrum;
 mod sport;
+mod shortcuts;
 mod timer;
 mod update;
 mod voice;
@@ -454,7 +455,7 @@ pub fn run() {
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
-            // Strg+Alt+Leertaste: Sprachassistent an/aus — egal, welches Programm vorne ist
+            // Tastenkuerzel (shortcuts.rs): Sprachassistent an/aus — egal, welches Programm vorne ist
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, ev| {
                     if ev.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
@@ -510,6 +511,9 @@ pub fn run() {
             sport::sport_leagues,
             sport::sport_teams,
             sport::arena_installed,
+            shortcuts::shortcut_set,
+            shortcuts::shortcut_pause,
+            gamepad::pad_capture,
             share::share_status,
             share::share_qr,
             share::share_offer,
@@ -524,23 +528,8 @@ pub fn run() {
             win::enforce(hwnd, true);
             win::show_noactivate(hwnd);
             let _ = w.with_webview(|wv| voice::allow_microphone(wv.controller()));
-            {
-                // Erstes freies Kuerzel nehmen (Strg+Alt+Leertaste belegt z. B. die Claude-App)
-                use tauri_plugin_global_shortcut::GlobalShortcutExt;
-                for (key, label) in [
-                    ("ctrl+alt+space", "Strg+Alt+Leertaste"),
-                    ("ctrl+shift+alt+space", "Strg+Umschalt+Alt+Leertaste"),
-                    ("ctrl+alt+n", "Strg+Alt+N"),
-                ] {
-                    match app.global_shortcut().register(key) {
-                        Ok(()) => {
-                            *VOICE_KEY.lock().unwrap() = label.into();
-                            break;
-                        }
-                        Err(e) => eprintln!("[notch] Kuerzel {label} belegt: {e}"),
-                    }
-                }
-            }
+            // Tastenkuerzel des Sprachassistenten: eigenes aus den Einstellungen, sonst das erste freie
+            shortcuts::init(app.handle());
 
             let settings = MenuItem::with_id(app, "settings", "Einstellungen …", true, None::<&str>)?;
             let sep0 = PredefinedMenuItem::separator(app)?;

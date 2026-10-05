@@ -1725,6 +1725,11 @@ async function main() {
   if (snap.sport) sport = snap.sport;
   dock = snap.dock;
   voiceKey = snap.voice_key;
+  // Kuerzel in den Einstellungen geaendert: Tooltip und Hinweise nachziehen
+  await listen<string>("voice-key", (e) => {
+    voiceKey = e.payload;
+    micBtn.title = voiceKey ? `Sprachassistent (${voiceKey})` : "Sprachassistent";
+  });
   micBtn.title = voiceKey ? `Sprachassistent (${voiceKey})` : "Sprachassistent";
   fullscreen = snap.fullscreen;
   peek = !!snap.peek;

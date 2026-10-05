@@ -38,6 +38,8 @@ export type CompactSettings = {
   fullscreen: { mode: FullscreenMode };
   /** Live-Sport (sport.rs): Wettbewerbe, Lieblingsteams, wann die Notch aufklappt */
   sport: SportSettings;
+  /** eigene Kuerzel (shortcuts.rs, gamepad.rs): Tastatur fuer den Sprachassistenten, Controller-Kombinationen */
+  shortcuts: Shortcuts;
   /** iPhone-Austausch (share.rs): LocalSend + Browser-Seite im WLAN */
   share: ShareSettings;
 };
@@ -80,6 +82,18 @@ export const LAYERS: Layer[] = ["spikes", "wave", "pulse"];
 /** welche Stile bei „Eigene“ gleichzeitig laufen */
 export type Layers = Record<Layer, boolean>;
 
+/** Controller-Tasten (XInput-Namen, wie gamepad.rs sie kennt) */
+export const PAD_BUTTONS = ["dpad-up", "dpad-down", "dpad-left", "dpad-right", "a", "b", "x", "y", "lb", "rb", "lt", "rt", "l3", "r3", "back", "start"] as const;
+export type PadButton = (typeof PAD_BUTTONS)[number];
+export type PadAction = "voice" | "compact" | "expanded";
+export const PAD_ACTIONS: PadAction[] = ["voice", "compact", "expanded"];
+export type Shortcuts = {
+  /** Tastatur, Format des Global-Shortcut-Plugins ("ctrl+alt+Space"); leer = automatisch das erste freie */
+  voiceKey: string;
+  /** je Aktion alle Tasten, die gleichzeitig gehalten werden (2 bis 4) */
+  pad: Record<PadAction, PadButton[]>;
+};
+
 export type FullscreenMode = "hide" | "peek" | "show";
 export const FULLSCREEN_MODES: FullscreenMode[] = ["hide", "peek", "show"];
 
@@ -96,6 +110,7 @@ export const DEFAULTS: CompactSettings = {
   fullscreen: { mode: "hide" },
   sport: { on: true, leagues: ["bl1", "dfbteam"], teams: [], scope: "all", expand: "goals", center: true, pitch: true, fullscreen: true },
   share: { on: false, name: "", folder: "", trusted: [] },
+  shortcuts: { voiceKey: "", pad: { voice: ["dpad-left", "r3"], compact: ["dpad-left", "rb"], expanded: ["dpad-left", "rt"] } },
 };
 
 /** Puls faellt erst so viele bpm unter der Schwelle wieder zurueck (kein Hin- und Herspringen) */
@@ -135,6 +150,7 @@ export function normalize(raw: unknown): CompactSettings {
     folio: { flash: bool(f.flash, DEFAULTS.folio.flash), flashSec: num(f.flashSec, 0.5, 8, DEFAULTS.folio.flashSec) },
     fullscreen: { mode: FULLSCREEN_MODES.includes(fs.mode as FullscreenMode) ? (fs.mode as FullscreenMode) : DEFAULTS.fullscreen.mode },
     sport: sport(sp),
+    shortcuts: shortcuts(obj(r.shortcuts)),
     share: {
       on: bool(sh.on, DEFAULTS.share.on),
       name: typeof sh.name === "string" ? sh.name.slice(0, 40) : "",
@@ -145,6 +161,23 @@ export function normalize(raw: unknown): CompactSettings {
         .slice(0, 20),
     },
   };
+}
+
+/** Kuerzel: Tastatur als Text (kurz, nur erlaubte Zeichen); je Controller-Aktion 2 bis 4 bekannte Tasten,
+ *  keine zwei Aktionen mit derselben Kombination (sonst Standard) */
+function shortcuts(sc: Record<string, unknown>): Shortcuts {
+  const key = typeof sc.voiceKey === "string" && /^[A-Za-z0-9+]{0,60}$/.test(sc.voiceKey) ? sc.voiceKey : "";
+  const pad = obj(sc.pad);
+  const out = {} as Record<PadAction, PadButton[]>;
+  for (const a of PAD_ACTIONS) {
+    const list = [...new Set((Array.isArray(pad[a]) ? pad[a] : []).filter((b): b is PadButton => PAD_BUTTONS.includes(b as PadButton)))];
+    out[a] = list.length >= 2 && list.length <= 4 ? list : [...DEFAULTS.shortcuts.pad[a]];
+  }
+  const sig = (l: PadButton[]) => [...l].sort().join("+");
+  for (const a of PAD_ACTIONS) {
+    if (PAD_ACTIONS.some((b) => b !== a && sig(out[b]) === sig(out[a]))) out[a] = [...DEFAULTS.shortcuts.pad[a]];
+  }
+  return { voiceKey: key, pad: out };
 }
 
 function sport(sp: Record<string, unknown>): SportSettings {
