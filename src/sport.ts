@@ -306,10 +306,14 @@ const PLAY_DE: Record<string, string> = {
   "penalty---scored": "TOR (Elfmeter)", "keeper-sweeper": "Torwart kommt raus", "shield-ball-opp": "Ball abgeschirmt",
   "drop-of-ball": "Schiedsrichterball", handball: "Handspiel", substitution: "Wechsel", "corner-kick": "Ecke",
   "keeper-pick-up": "Torwart nimmt auf", claim: "Torwart fängt", punch: "Torwart faustet", smother: "Torwart klärt",
+  kickoff: "Anstoß", "end-regular-time": "Abpfiff", "end-first-half": "Halbzeit", "start-second-half": "Wiederanpfiff",
+  "start-delay": "Unterbrechung", "end-delay": "Weiter", "assists-shot": "Torschussvorlage", "yellow-card": "Gelbe Karte",
+  "red-card": "Rote Karte", "own-goal": "Eigentor", "penalty---saved": "Elfmeter gehalten", "penalty---missed": "Elfmeter vorbei",
 };
 const playName = (k: string) => PLAY_DE[k] ?? (k.startsWith("penalty") ? "Elfmeter" : k.startsWith("goal") ? "TOR" : k.replace(/-/g, " "));
-const isShot = (k: string) => k.startsWith("shot") || k.startsWith("goal") || k.startsWith("penalty");
-const isGoal = (k: string) => k.startsWith("goal") || k === "penalty---scored";
+/** Tor: "goal", "goal---header" …, Elfmeter, Eigentor — aber nicht "goal-kick" (Abstoss) */
+const isGoal = (k: string) => k === "goal" || k.startsWith("goal---") || k === "penalty---scored" || k === "own-goal";
+const isShot = (k: string) => k.startsWith("shot") || isGoal(k) || k.startsWith("penalty");
 
 const W = 105, H = 68;
 const px = (x: number) => Math.max(-1.5, Math.min(W + 1.5, (x / 100) * W));
