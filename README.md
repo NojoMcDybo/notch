@@ -159,6 +159,21 @@ Optionaler Feldblock an `POST /activity` — sobald `chart` da ist, zeichnet die
 - **Doppelklick auf den Wert** (die große Zahl im Kopf, nur bei `app: "Haze"`): Ereignis `{"activity":"haze:bg","action":"widget"}` in `GET /events` — Haze blendet sein Widget ein oder aus (ab Haze 1.3.2). Ein einfacher Klick auf die Zahl tut nichts.
 - Zum Testen ohne Haze: `.\tools\bg-demo.ps1` (Optionen `-AgeMin 15`, `-Ttl 20`, `-Alert`, `-Remove`).
 
+### LoL-Profispiele (Vantage)
+
+Vantage (`esnotch.rs`) schickt laufende Serien gefolgter Teams und die in Vantage geöffnete Serie als Activity
+`vantage:esports:<serie>` mit dem Feld `esports` (fertige Daten; Ansicht in `src/esports.ts`):
+
+- **Klein (Mitte):** Logo – Gold – Spielzeit – Gold – Logo, wenn sonst nichts in der kleinen Notch steht; teilt sie
+  sich den Platz, nur der Goldvorsprung als positive Zahl auf der Seite des Führenden. Draft: Logos und „Draft“.
+- **Auf:** Karte wie in der Übertragung — Kopfleiste (Logo, Kürzel, Türme, Gold, gespiegelt; Kills in der Mitte),
+  Baron, Inhibitoren, Drachen und Spielzeit, je Lane Rune mit Level, Items, K/D/A, CS, Champion-Bild und
+  Goldvorsprung, Goldverlauf, Serienstand. Schriften wie in Vantage (Cinzel, Saira Semi Condensed, Source Sans 3).
+- **Klick** auf die Karte öffnet `open` (`vantage://pro/<serie>/<spiel>`): Vantage zeigt Serie und Spiel.
+- **Sprachassistent:** Werkzeug `esports` liefert Stand, Objectives und Lanes.
+- Bilder nur von Data Dragon und lolesports. Der Live-Feed liegt etwa vier Minuten hinter dem Spiel; Bans und Picks
+  während des Drafts liefert er nicht.
+
 Eingabefeld: Tippen landet (entprellt) als Ereignis `input`, Enter als `submit`, Umschalt+Enter als `submit-prev`,
 jeweils mit `value` in `GET /events`. Bei Enter holt die Notch außerdem `open` nach vorn. Solange das Feld den Fokus
 hat, behält die Notch die Tastatur; ist das Feld leer und die Maus weg, gibt sie sie sofort zurück.

@@ -1,0 +1,114 @@
+/* LoL-Profispiele (esports.ts): Schriften wie in Vantage — Cinzel für Kürzel und Rollen, Saira Semi Condensed für
+   Zahlen, Source Sans 3 für Namen; blau links, gold rechts, Verläufe wie in der Übertragung */
+
+.esports-slot[hidden] { display: none; }
+.es {
+  --es-num: "Saira Semi Condensed", "Segoe UI", sans-serif; --es-body: "Source Sans 3 Variable", "Segoe UI", sans-serif; --es-disp: "Cinzel", Georgia, serif;
+  --es-blue: #9cc4ff; --es-gold: #f0d38f; --es-dim: #8e97aa;
+  container-type: inline-size; position: relative; overflow: hidden; border-radius: 16px; background: #05070b; color: #eef1f6; font-family: var(--es-body); cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); transition: box-shadow 0.2s;
+}
+.es:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
+.es-ic { display: inline-block; width: 16px; height: 16px; flex: none; }
+.es-ic svg { display: block; width: 100%; height: 100%; }
+.es .none { visibility: hidden; }
+.es-logo { flex: none; object-fit: contain; display: block; }
+.es-gap { flex: 1; }
+.es-stat { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font: 600 15px/1 var(--es-num); font-variant-numeric: tabular-nums; }
+
+/* Kopfleiste: gespiegelt */
+.es-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); height: 46px; }
+.es-bar .es-side { display: flex; align-items: center; gap: 8px; padding: 0 11px; min-width: 0; }
+.es-bar .es-side.b { background: linear-gradient(90deg, #2459c9 0%, #163a85 48%, rgba(10, 16, 30, 0.95) 100%); }
+.es-bar .es-side.r { flex-direction: row-reverse; background: linear-gradient(270deg, #b88f34 0%, #74591f 48%, rgba(10, 16, 30, 0.95) 100%); }
+.es-bar .es-logo { width: 28px; height: 28px; }
+.es-code { font: 700 14px/1 var(--es-disp); letter-spacing: 0.05em; white-space: nowrap; }
+.es-bar .es-stat.tw { min-width: 30px; }
+.es-bar .es-stat.gd { min-width: 62px; }
+.es-bar .es-side.r .es-stat { justify-content: flex-end; }
+.es-mid-k { display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; background: #0a0f1b; font-family: var(--es-num); }
+.es-mid-k b { font-weight: 700; font-size: 21px; min-width: 18px; text-align: center; }
+.es-mid-k.series { gap: 8px; font-size: 12.5px; color: #9aa6c0; }
+.es-mid-k.series b { font-size: 15px; color: #eef1f6; min-width: 0; }
+
+/* Objectives und Spielzeit */
+.es-sub { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; height: 28px; padding: 0 11px;
+  background: linear-gradient(90deg, rgba(36, 89, 201, 0.22), rgba(8, 11, 18, 0.9) 40%, rgba(8, 11, 18, 0.9) 60%, rgba(184, 143, 52, 0.2)); border-bottom: 1px solid #131b2c; }
+.es-sub .es-side { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.es-sub .es-side.r { flex-direction: row-reverse; }
+.es-sub .es-stat { font-size: 13px; gap: 3px; }
+.es-sub .es-ic { width: 15px; height: 15px; }
+.es-drakes { display: flex; gap: 1px; }
+.es-clock { padding: 0 12px; font: 700 13.5px/1 var(--es-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.es-clock::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ff453a; box-shadow: 0 0 6px #ff453a; margin-right: 6px; vertical-align: 2px; }
+.es-clock.paused::before { background: #8e97aa; box-shadow: none; }
+.es-clock.end::before { display: none; }
+.es-clock.end { color: var(--es-gold); }
+
+/* Lanes: Level | Items | K/D/A | Champion → Vorsprung ← Champion | K/D/A | Items | Level */
+.es-rows { padding: 2px 8px 0; }
+.es-row { position: relative; display: grid; grid-template-columns: 22px auto 40px minmax(0, 1fr) 50px minmax(0, 1fr) 40px auto 22px; align-items: center; height: 40px; border-bottom: 1px solid rgba(255, 255, 255, 0.045); }
+.es-row::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(36, 89, 201, 0.16), transparent 30%, transparent 70%, rgba(184, 143, 52, 0.14)); pointer-events: none; }
+.es-lvl { position: relative; z-index: 2; display: grid; place-items: center; }
+.es-rune { width: 18px; height: 18px; border-radius: 50%; background: #0b1020; }
+.es-lvl b { position: absolute; bottom: -7px; font: 700 10px/1 var(--es-num); padding: 1px 3px; border-radius: 4px; background: #0b1020; }
+.es-items { position: relative; z-index: 2; display: flex; gap: 2px; padding: 0 2px; }
+.es-item { width: 13px; height: 13px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12); }
+i.es-item { visibility: visible !important; background: rgba(255, 255, 255, 0.05); }
+.es-kda { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 2px; padding: 0 3px; font-family: var(--es-num); font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px #000; white-space: nowrap; }
+.es-kda.r { align-items: flex-end; }
+.es-kda b { font-weight: 700; font-size: 13px; line-height: 1; }
+.es-kda span { font-weight: 500; font-size: 10.5px; color: #b9c1d2; line-height: 1; }
+/* Gesicht nah an der Mitte; außen weich auslaufend (unter K/D/A nur ein Hauch), zur Mitte knapp und hart */
+.es-art { position: relative; height: 40px; }
+.es-art i { position: absolute; top: 0; bottom: 0; left: -24px; right: 0; background-size: 180px auto; background-repeat: no-repeat; background-position: left -28px top 24%;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(0, 0, 0, 0.25) 24px, #000 52%, #000 90%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0, rgba(0, 0, 0, 0.25) 24px, #000 52%, #000 90%, transparent 100%); }
+.es-art.r i { left: 0; right: -24px; transform: scaleX(-1); }
+.es-name { position: absolute; z-index: 2; top: 3px; font: 600 10px/1 var(--es-body); color: rgba(238, 241, 246, 0.7); text-shadow: 0 1px 2px #000; white-space: nowrap; }
+.es-name.b { left: 26px; }
+.es-name.r { right: 26px; }
+.es-diff { position: relative; z-index: 2; display: flex; font: 700 12px/1 var(--es-num); font-variant-numeric: tabular-nums; }
+.es-diff span { padding: 3px 4px; border-radius: 5px; background: rgba(0, 0, 0, 0.45); }
+.es-diff.b { justify-content: flex-start; color: var(--es-blue); }
+.es-diff.r { justify-content: flex-end; color: var(--es-gold); }
+.es-diff.even { justify-content: center; color: var(--es-dim); }
+
+/* Goldverlauf und Fuß */
+.es-gl { position: relative; margin: 6px 10px 0; }
+.es-goldline { display: block; width: calc(100% - 70px); height: 36px; }
+.es-gl-v { position: absolute; right: 0; bottom: 2px; font: 600 11px/1 var(--es-num); color: var(--es-dim); }
+.es-gl-v.b { color: var(--es-blue); }
+.es-gl-v.r { color: var(--es-gold); }
+.es-foot { display: flex; justify-content: space-between; gap: 10px; padding: 6px 12px 9px; font: 500 11px/1.2 var(--es-num); color: #6f7a92; }
+.es-draft { display: flex; flex-direction: column; gap: 4px; padding: 14px 14px 6px; font-size: 12.5px; color: var(--es-dim); }
+.es-draft b { font: 700 13px/1.2 var(--es-disp); letter-spacing: 0.06em; color: #eef1f6; }
+
+/* schmal (seitlich angedockt): Items kleiner, Namen weg */
+@container (max-width: 440px) {
+  .es-item { width: 10px; height: 10px; border-radius: 2px; }
+  .es-name { display: none; }
+  .es-bar .es-stat.gd { min-width: 54px; }
+  .es-code { font-size: 12px; }
+}
+
+/* kleine Notch: Logo – Gold – Zeit – Gold – Logo */
+.es-mid { display: inline-grid; grid-template-columns: var(--es-sw) auto var(--es-sw); align-items: center; column-gap: 10px; font-family: "Saira Semi Condensed", "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; color: #eef1f6; }
+.es-m-side { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.es-m-side.r { flex-direction: row-reverse; }
+.es-mid .es-logo { width: 20px; height: 20px; }
+.es-m-gold { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.es-m-gold .es-ic { width: 13px; height: 13px; }
+.es-m-lead { font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.es-m-lead.b { color: #9cc4ff; }
+.es-m-lead.r { color: #f0d38f; }
+.es-m-clock { font-weight: 700; font-size: 13px; white-space: nowrap; }
+.es-m-clock.paused, .es-m-clock.end { color: #f0d38f; font-size: 12px; }
+.es-m-draft { font: 700 10px/1 "Cinzel", Georgia, serif; letter-spacing: 0.1em; color: #9aa6c0; white-space: nowrap; text-transform: uppercase; }
+.es-mid.full { --es-sw: 84px; }
+.es-mid.shared { --es-sw: 62px; }
+.es-mid.draft { --es-sw: 24px; }
+/* seitlich angedockt: Logos und Zeit untereinander, ohne Gold */
+[data-dock="left"] .es-mid, [data-dock="right"] .es-mid { display: flex; flex-direction: column; gap: 6px; }
+[data-dock="left"] .es-mid .es-m-gold, [data-dock="right"] .es-mid .es-m-gold,
+[data-dock="left"] .es-mid .es-m-lead, [data-dock="right"] .es-mid .es-m-lead { display: none; }
+[data-dock="left"] .es-m-clock, [data-dock="right"] .es-m-clock { font-size: 11px; }

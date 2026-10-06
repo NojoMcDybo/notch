@@ -15,6 +15,8 @@ import { iconNode, iconUrl, liquid, NOJO_ICONS, type IconName } from "./nojo/noj
 document.querySelectorAll<SVGElement>("svg[data-icon]").forEach((s) => {
   s.replaceWith(iconNode(s.dataset.icon as IconName, { cls: s.getAttribute("class") ?? undefined }));
 });
+import { esCard, esMid, esSig, esVoice, type Esports } from "./esports";
+import "./esports.css";
 import { bannerEl, cardEl, cardSig, clockOf, Court, kickoff, midEl, noLive, midSig as sportSig, Pitch, type SportMatch, type SportNews, type SportPlay, type SportState } from "./sport";
 
 // ---------- Typen ----------
@@ -36,6 +38,8 @@ type Activity = {
   id: string; app: string; title: string; subtitle?: string; value?: string; unit?: string;
   icon?: string; color?: string; progress?: number; priority: number; alert: boolean;
   open?: string; actions: Action[]; updated: number;
+  /** LoL-Profispiel von Vantage: eigene Ansicht (esports.ts) statt einer Zeile */
+  esports?: Esports;
   /** Countdown-Ende (ms seit 1970) -> Balken laeuft fluessig */
   ends_at?: number;
   /** Eingabefeld in der Zeile, z. B. Folios Suche */
@@ -240,7 +244,7 @@ const voice = new Voice({
     status: async () => ({
       uhrzeit: new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }),
       musik: media ? { titel: media.title, kuenstler: media.artist, quelle: appName(media.source), spielt: media.playing } : null,
-      eintraege: acts.map((a) => ({ app: a.app, titel: a.title, wert: [a.value, a.unit].filter(Boolean).join(" "), info: a.subtitle ?? "" })),
+      eintraege: acts.filter((a) => !a.esports).map((a) => ({ app: a.app, titel: a.title, wert: [a.value, a.unit].filter(Boolean).join(" "), info: a.subtitle ?? "" })),
       ablage: shelf.map((i) => i.name),
     }),
     datei_oeffnen: async (a) => {
@@ -248,6 +252,12 @@ const voice = new Voice({
       if (!it) return { fehler: "nicht in der Ablage", ablage: shelf.map((i) => i.name) };
       await invoke("open", { target: it.path });
       return { geoeffnet: it.name };
+    },
+    esports: async () => {
+      const list = acts.filter((a) => a.esports);
+      return list.length
+        ? { spiele: list.map((a) => ({ paarung: a.title, ...esVoice(a.esports!) })) }
+        : { hinweis: "Gerade kein LoL-Profispiel in der Notch (Vantage zeigt laufende Spiele gefolgter Teams und die in Vantage geöffnete Serie)." };
     },
     sport: async () => ({
       spiele: sport.matches.map((m) => ({
@@ -524,7 +534,7 @@ function clockAct(): CAct[] {
 
 function currentPlan(): Plan {
   return plan({
-    acts: [...acts, ...clockAct()],
+    acts: [...acts.filter((a) => !a.esports), ...clockAct()],
     music: musicVisible(),
     s: settings,
     gate: pulseGate,
@@ -551,13 +561,33 @@ function wanted(): State {
 // ---------- Mitte der kleinen Notch: Ladering, Antwort-Animation, Spielstand ----------
 
 const mid = q(".c-mid");
-type MidKind = "" | "arm" | "voice" | "sport";
+type MidKind = "" | "arm" | "voice" | "esports" | "sport";
 
 function midKind(): MidKind {
   if (arming()) return "arm";
   if (voiceMode() === "mini") return "voice";
+  if (esFocus()) return "esports";
   if (sportMid()) return "sport";
   return "";
+}
+
+// ---------- LoL-Profispiele (Vantage, esports.ts) ----------
+
+/** wichtigstes Profispiel (Liste ist nach Prioritaet sortiert: laufende vor Draft) */
+const esFocus = () => acts.find((a) => a.esports);
+const esSlot = q(".esports-slot");
+let esCardSig = "";
+/** Klick: das Spiel in Vantage oeffnen (vantage://… aus der Activity) */
+const esOpen = (id: string) => invoke("activity_open", { id }).catch(() => {});
+
+function renderEsports() {
+  const a = esFocus();
+  const sig = a ? a.id + esSig(a.esports!, false) + dock : "";
+  if (sig !== esCardSig) {
+    esCardSig = sig;
+    morph(esSlot, a ? [esCard(a.esports!, () => void esOpen(a.id))] : []);
+  }
+  esSlot.hidden = !a;
 }
 
 /** Ladering: fuellt sich in der Restzeit bis zum Zuhoeren */
@@ -593,15 +623,18 @@ function vminiLevel(l: number) {
 
 function midSig() {
   const k = midKind();
-  return k === "sport" ? "sport:" + sportMidSig() : k === "arm" ? `arm:${armUntil}` : k;
+  return k === "sport" ? "sport:" + sportMidSig() : k === "esports" ? "es:" + esSig(esFocus()!.esports!, false) : k === "arm" ? `arm:${armUntil}` : k;
 }
 
-/** clockAtEdge: die Spielzeit steht als eigenes Element am Rand -> nicht noch einmal in der Mitte */
-function fillMid(clockAtEdge = false) {
+/**
+ * clockAtEdge: die Spielzeit steht als eigenes Element am Rand -> nicht noch einmal in der Mitte;
+ * free: sonst nichts in der kleinen Notch (Profispiel zeigt dann das Gold beider Teams statt nur des Vorsprungs)
+ */
+function fillMid(clockAtEdge = false, free = false) {
   const k = midKind();
   mid.dataset.kind = k;
   // morph: neue Minute oder neuer Stand aendern nur ihre Zahl, die Wappen bleiben stehen (kein Aufblinken)
-  morph(mid, k === "arm" ? [armEl()] : k === "voice" ? [vminiEl()] : k === "sport" ? [midEl(sportMid()!, glowNews(), !clockAtEdge)] : []);
+  morph(mid, k === "arm" ? [armEl()] : k === "voice" ? [vminiEl()] : k === "esports" ? [esMid(esFocus()!.esports!, free && dock === "top")] : k === "sport" ? [midEl(sportMid()!, glowNews(), !clockAtEdge)] : []);
 }
 
 // ---------- iPhone-Austausch (share.rs) ----------
@@ -823,7 +856,7 @@ function renderCompact() {
   const animate = compactKey !== "" && key !== compactKey;
   compactKey = key;
   build(lead, trail, p, s, { coverSrc, musicPlaying: !!media?.playing, iconEl: (a) => iconEl(a as Activity), eq }, animate);
-  fillMid(p.slots.some((x) => x.src === "clock"));
+  fillMid(p.slots.some((x) => x.src === "clock"), p.slots.length === 0);
   const side = dock !== "top";
   midOnly = !!midKind() && !lead.childElementCount && !trail.childElementCount;
   const base = midOnly ? (side ? 90 : 120) : side ? SIDE.compact.h : SIZE.compact.w;
@@ -1086,7 +1119,7 @@ function newRow(id: string) {
 function renderActs() {
   // nur eine Puls-Zeile: die wichtigste (Garmin über Haze hat Vorrang vor Helio, siehe priority)
   const firstPulse = acts.find((a) => sourceOf(a) === "pulse");
-  const list = acts.filter((a) => sourceOf(a) !== "pulse" || a === firstPulse).slice(0, 4);
+  const list = acts.filter((a) => !a.esports && (sourceOf(a) !== "pulse" || a === firstPulse)).slice(0, 4);
   const sig = JSON.stringify(list) + dock;
   if (sig === actsSig) return;
   actsSig = sig;
@@ -1528,6 +1561,7 @@ function setView(v: View) {
 function render(full = true) {
   // kleine Notch immer pruefen (baut nur bei Aenderung neu): die Mitte wechselt auch ohne neue Daten
   renderCompact();
+  renderEsports();
   renderSport();
   if (full) {
     renderPlayer();

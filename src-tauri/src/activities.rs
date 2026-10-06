@@ -96,6 +96,9 @@ pub struct Activity {
     /// Verlauf (z. B. Blutzucker 24 h); die Notch schneidet die Zeitbereiche selbst
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chart: Option<Chart>,
+    /// LoL-Profispiel (Vantage, esnotch.rs): fertige Daten fuer die eigene Ansicht der Notch (src/esports.ts)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub esports: Option<serde_json::Value>,
     /// Prozess der App — fuer AllowSetForegroundWindow beim Doppelklick
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
