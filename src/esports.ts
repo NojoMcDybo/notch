@@ -17,6 +17,7 @@ import "@fontsource/saira-semi-condensed/500.css";
 import "@fontsource/saira-semi-condensed/600.css";
 import "@fontsource/saira-semi-condensed/700.css";
 import "@fontsource-variable/source-sans-3";
+import { LOL, LOL_MASK, type LolIcon } from "./lolicons";
 
 export type EsTeam = {
   code: string; name: string; logo: string; wins?: number;
@@ -58,31 +59,20 @@ function img(src: string, cls: string, alt = "") {
   return i;
 }
 
-// ---------- Symbole (aus Vantage, icons.ts) ----------
+// ---------- Symbole (Original aus dem Spiel, lolicons.ts) ----------
 
-const g = (a: string, b: string) => `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs>`;
-const HEAD = "M12 21.4c-3-1.6-5.3-4.2-5.5-7.6L2.6 9l4.5 1.1-1.6-6.6 4.4 4.1c.8-.6 1.4-.8 2.1-.8s1.3.2 2.1.8l4.4-4.1-1.6 6.6 4.5-1.1-3.9 4.8c-.2 3.4-2.5 6-5.5 7.6z";
-const SVG: Record<string, string> = {
-  gold: '<ellipse cx="9" cy="15.6" rx="6" ry="2.6" fill="#b8913f"/><ellipse cx="9" cy="14.2" rx="6" ry="2.6" fill="#e3bd6d"/><ellipse cx="15" cy="10.4" rx="6" ry="2.6" fill="#b8913f"/><ellipse cx="15" cy="9" rx="6" ry="2.6" fill="#ffd86b"/><ellipse cx="15" cy="9" rx="3" ry="1.1" fill="none" stroke="#b8913f" stroke-width="0.8"/>',
-  kills: '<path d="M4.2 3.2l9.4 9.4-1.6 1.6-9.4-9.4zM19.8 3.2l-9.4 9.4 1.6 1.6 9.4-9.4z" fill="currentColor"/><path d="M7.4 15.4l1.6 1.6-3.4 3.4-1.6-1.6zM16.6 15.4l-1.6 1.6 3.4 3.4 1.6-1.6z" fill="currentColor" opacity="0.75"/><path d="M6 13.2l4.8 4.8M18 13.2l-4.8 4.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
-  tower: '<path d="M5 21.6h14l-1.4-2.4H6.4z" fill="currentColor"/><path d="M7.8 19.2 9.4 10.8h5.2l1.6 8.4z" fill="currentColor"/><path d="M6.8 10.8h10.4l-1-2H7.8z" fill="currentColor"/><path d="M7.8 8.8 4.6 5.6l4.6 1.6zM16.2 8.8l3.2-3.2-4.6 1.6z" fill="currentColor" opacity="0.8"/><path d="M9.2 8.8 10.2 5 12 1.6 13.8 5l1 3.8z" fill="currentColor"/><path d="M12 4.2l1.3 2.2L12 8.2l-1.3-1.8z" fill="#fff" opacity="0.9"/>',
-  inhib: '<path d="M4.4 21.6h15.2l-2-3.2H6.4z" fill="currentColor" opacity="0.8"/><circle cx="12" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3.6l3.6 6.4-3.6 6.4-3.6-6.4z" fill="currentColor"/><path d="M12 3.6l3.6 6.4H8.4z" fill="#fff" opacity="0.5"/>',
-  baron: `${g("#c99bff", "#6a2fc4")}<path d="M12 22.2c-4-1.5-7-5-7-9.5 0-3.4 1.9-5.6 4-6.4L7.9 1.8l2.7 2.9L12 1.2l1.4 3.5 2.7-2.9-1.1 4.5c2.1.8 4 3 4 6.4 0 4.5-3 8-7 9.5z" fill="url(#g)"/><path d="M5.2 12.4 1.6 10l1.2 4.6zM18.8 12.4l3.6-2.4-1.2 4.6z" fill="#7d3fd6"/><path d="M7.4 10.8l3.6 1.6-.4 1-3.4-1.3zM16.6 10.8 13 12.4l.4 1 3.4-1.3z" fill="#ffe36b"/><path d="M8.6 16.2 10 19l.9-2.4 1.1 3 1.1-3 .9 2.4 1.4-2.8c-2.2.9-4.6.9-6.8 0z" fill="#0b0d12"/>`,
-  infernal: `${g("#ffb347", "#e8401c")}<path d="M12 1.8c1.3 3.4 6.2 5.9 6.2 12a6.2 6.2 0 0 1-12.4 0c0-3.1 1.6-5.1 3.3-6.4 0 2.2.9 3.5 2 3.9-.6-3.5.1-6.6.9-9.5z" fill="url(#g)"/><path d="M12.3 11.6c1.1 1.6 2.7 2.7 2.7 4.7a3 3 0 0 1-6 0c0-1 .4-1.8 1.1-2.4.1.9.6 1.5 1.1 1.6-.3-1.5.2-2.7 1.1-3.9z" fill="#ffe2a3"/>`,
-  ocean: `${g("#7fe0ff", "#1f7fd6")}<path d="M12 1.8c3 4.2 6.4 7.6 6.4 12.4a6.4 6.4 0 0 1-12.8 0c0-4.8 3.4-8.2 6.4-12.4z" fill="url(#g)"/><path d="M7.7 15.2c1.4-1.9 3.5-2 4.6-.3.9 1.4 2.6 1.4 3.7-.1" fill="none" stroke="#e8fbff" stroke-width="1.5" stroke-linecap="round"/>`,
-  mountain: `${g("#d9b48a", "#8a5a34")}<path d="M1.8 20.2 8.9 6.6l3.5 5.6 2.6-3.4 7.2 11.4z" fill="url(#g)"/><path d="M8.9 6.6l2.1 3.4-1.3-.6-1.1 1.1-1.1-1.1-1.1.5z" fill="#fbeedd"/>`,
-  cloud: '<g fill="none" stroke="#dbe9f5" stroke-width="2" stroke-linecap="round"><path d="M2.8 9.6h10.6a3 3 0 1 0-3-3"/><path d="M2.8 13.8h14.8a3 3 0 1 1-3 3"/><path d="M5.6 18h5.4" stroke-opacity="0.7"/></g>',
-  hextech: '<path d="M12 2.4l8.3 4.8v9.6L12 21.6l-8.3-4.8V7.2z" fill="none" stroke="#3fe0e8" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 7.6l3.8 2.2v4.4L12 16.4l-3.8-2.2V9.8z" fill="#3fe0e8"/>',
-  chemtech: `${g("#d6ff7a", "#4f9e1f")}<path d="M9.2 2.4h5.6v1.8h-.9v4.6l4.6 7.9a2.7 2.7 0 0 1-2.3 4.1H7.8a2.7 2.7 0 0 1-2.3-4.1l4.6-7.9V4.2h-.9z" fill="#2c3a1c" stroke="#b8f060" stroke-width="1.1" stroke-linejoin="round"/><path d="M7.6 14.4h8.8l1.7 2.9a1.4 1.4 0 0 1-1.2 2.1H7.1a1.4 1.4 0 0 1-1.2-2.1z" fill="url(#g)"/>`,
-  elder: `${g("#f3e1ff", "#9b6bd8")}<path d="${HEAD}" fill="url(#g)"/>`,
-  dragon: `${g("#d4dbe3", "#7d8894")}<path d="${HEAD}" fill="url(#g)"/>`,
-};
+/** Teamfarben der Symbole wie in der Übertragung */
+export const ES_BLUE = "#6f9bff", ES_GOLD = "#d9b46a";
 let uid = 0;
-function ic(key: string, color = "") {
+/** Drachen farbig; Türme, Inhibitoren, Baron, Gold und Kills als Maske in `color` */
+export function ic(key: string, color = "") {
   const s = mk("span", "es-ic");
-  if (color) s.style.color = color;
-  const id = `esg${++uid}`;
-  s.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${(SVG[key] ?? SVG.dragon).split('id="g"').join(`id="${id}"`).split("url(#g)").join(`url(#${id})`)}</svg>`;
+  const k = (key === "gold" ? "goldm" : key === "kills" ? "killsm" : key in LOL ? key : "dragon") as LolIcon;
+  if (LOL_MASK.has(k)) {
+    s.classList.add("m");
+    s.style.setProperty("--m", `url("${LOL[k]}")`);
+    s.style.color = color || ES_GOLD;
+  } else s.style.backgroundImage = `url("${LOL[k]}")`;
   return s;
 }
 
@@ -109,7 +99,7 @@ export function esMid(d: Esports, full: boolean) {
     if (d.mode === "draft") return w;
     if (full) {
       const v = mk("span", "es-m-gold");
-      v.append(ic("gold"), mk("span", "", k(t.gold)));
+      v.append(ic("gold", s === "b" ? ES_BLUE : ES_GOLD), mk("span", "", k(t.gold)));
       w.append(v);
     } else {
       const l = lead(d);
@@ -134,9 +124,9 @@ function bar(d: Esports) {
     w.append(img(t.logo, "es-logo", t.code), mk("span", "es-code", t.code), mk("span", "es-gap"));
     if (d.mode !== "draft") {
       const tw = mk("span", "es-stat tw");
-      tw.append(ic("tower", s === "b" ? "#cfe0ff" : "#fff1cc"), mk("span", "", String(t.towers ?? 0)));
+      tw.append(ic("tower", s === "b" ? ES_BLUE : ES_GOLD), mk("span", "", String(t.towers ?? 0)));
       const gd = mk("span", "es-stat gd");
-      gd.append(ic("gold"), mk("span", "", k(t.gold)));
+      gd.append(ic("gold", s === "b" ? ES_BLUE : ES_GOLD), mk("span", "", k(t.gold)));
       w.append(tw, gd);
     }
     return w;
@@ -148,7 +138,7 @@ function bar(d: Esports) {
     if (showScore(d)) mid.append(mk("b", "", `${d.blue.wins} – ${d.red.wins}`));
     mid.append(mk("span", "", `Bo${d.bo}`));
   } else {
-    mid.append(mk("b", "", String(d.blue.kills ?? 0)), ic("kills", "#8fbcff"), ic("kills", "#e3bd6d"), mk("b", "", String(d.red.kills ?? 0)));
+    mid.append(mk("b", "", String(d.blue.kills ?? 0)), ic("kills", ES_BLUE), ic("kills", ES_GOLD), mk("b", "", String(d.red.kills ?? 0)));
   }
   b.append(side(d.blue, "b"), mid, side(d.red, "r"));
   return b;
@@ -160,7 +150,7 @@ function sub(d: Esports) {
     const w = mk("div", `es-side ${s}`);
     const st = (key: string, n = 0) => {
       const x = mk("span", "es-stat");
-      x.append(ic(key, s === "b" ? "#cfe0ff" : "#fff1cc"), mk("span", "", String(n)));
+      x.append(ic(key, s === "b" ? ES_BLUE : ES_GOLD), mk("span", "", String(n)));
       return x;
     };
     const dr = mk("span", "es-drakes");

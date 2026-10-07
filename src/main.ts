@@ -17,6 +17,8 @@ document.querySelectorAll<SVGElement>("svg[data-icon]").forEach((s) => {
 });
 import { esCard, esMid, esSig, esVoice, type Esports } from "./esports";
 import "./esports.css";
+import { lgAnimate, lgCard, lgMid, lgSig, lgVoice, type LolGame } from "./lolgame";
+import "./lolgame.css";
 import { bannerEl, cardEl, cardSig, clockOf, Court, kickoff, midEl, noLive, midSig as sportSig, Pitch, type SportMatch, type SportNews, type SportPlay, type SportState } from "./sport";
 
 // ---------- Typen ----------
@@ -40,6 +42,8 @@ type Activity = {
   open?: string; actions: Action[]; updated: number;
   /** LoL-Profispiel von Vantage: eigene Ansicht (esports.ts) statt einer Zeile */
   esports?: Esports;
+  /** eigenes LoL-Spiel von Vantage: Wellen, Objectives, CS-Ziel (lolgame.ts) */
+  lol?: LolGame;
   /** Countdown-Ende (ms seit 1970) -> Balken laeuft fluessig */
   ends_at?: number;
   /** Eingabefeld in der Zeile, z. B. Folios Suche */
@@ -244,7 +248,7 @@ const voice = new Voice({
     status: async () => ({
       uhrzeit: new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }),
       musik: media ? { titel: media.title, kuenstler: media.artist, quelle: appName(media.source), spielt: media.playing } : null,
-      eintraege: acts.filter((a) => !a.esports).map((a) => ({ app: a.app, titel: a.title, wert: [a.value, a.unit].filter(Boolean).join(" "), info: a.subtitle ?? "" })),
+      eintraege: acts.filter((a) => !a.esports && !a.lol).map((a) => ({ app: a.app, titel: a.title, wert: [a.value, a.unit].filter(Boolean).join(" "), info: a.subtitle ?? "" })),
       ablage: shelf.map((i) => i.name),
     }),
     datei_oeffnen: async (a) => {
@@ -252,6 +256,10 @@ const voice = new Voice({
       if (!it) return { fehler: "nicht in der Ablage", ablage: shelf.map((i) => i.name) };
       await invoke("open", { target: it.path });
       return { geoeffnet: it.name };
+    },
+    mein_spiel: async () => {
+      const a = lolFocus();
+      return a ? lgVoice(a.lol!) : { hinweis: "Gerade kein eigenes LoL-Spiel (Vantage meldet es, sobald du im Spiel bist)." };
     },
     esports: async () => {
       const list = acts.filter((a) => a.esports);
@@ -534,7 +542,7 @@ function clockAct(): CAct[] {
 
 function currentPlan(): Plan {
   return plan({
-    acts: [...acts.filter((a) => !a.esports), ...clockAct()],
+    acts: [...acts.filter((a) => !a.esports && !a.lol), ...clockAct()],
     music: musicVisible(),
     s: settings,
     gate: pulseGate,
@@ -561,14 +569,32 @@ function wanted(): State {
 // ---------- Mitte der kleinen Notch: Ladering, Antwort-Animation, Spielstand ----------
 
 const mid = q(".c-mid");
-type MidKind = "" | "arm" | "voice" | "esports" | "sport";
+type MidKind = "" | "arm" | "voice" | "lol" | "esports" | "sport";
 
 function midKind(): MidKind {
   if (arming()) return "arm";
   if (voiceMode() === "mini") return "voice";
+  if (lolFocus()) return "lol";
   if (esFocus()) return "esports";
   if (sportMid()) return "sport";
   return "";
+}
+
+// ---------- Eigenes LoL-Spiel (Vantage, lolgame.ts) ----------
+
+const lolFocus = () => acts.find((a) => a.lol);
+const lolSlot = q(".lol-slot");
+let lolCardSig = "";
+
+function renderLol() {
+  const a = lolFocus();
+  const sig = a ? a.id + lgSig(a.lol!, dock) : "";
+  if (sig !== lolCardSig) {
+    lolCardSig = sig;
+    morph(lolSlot, a ? [lgCard(a.lol!, a.icon, () => void invoke("activity_action", { id: a.id, action: "clip" }).catch(() => {}))] : []);
+  }
+  lolSlot.hidden = !a;
+  if (a) lgAnimate(document, a.lol!);
 }
 
 // ---------- LoL-Profispiele (Vantage, esports.ts) ----------
@@ -623,7 +649,7 @@ function vminiLevel(l: number) {
 
 function midSig() {
   const k = midKind();
-  return k === "sport" ? "sport:" + sportMidSig() : k === "esports" ? "es:" + esSig(esFocus()!.esports!, false) : k === "arm" ? `arm:${armUntil}` : k;
+  return k === "sport" ? "sport:" + sportMidSig() : k === "lol" ? "lol:" + lgSig(lolFocus()!.lol!) : k === "esports" ? "es:" + esSig(esFocus()!.esports!, false) : k === "arm" ? `arm:${armUntil}` : k;
 }
 
 /**
@@ -634,7 +660,7 @@ function fillMid(clockAtEdge = false, free = false) {
   const k = midKind();
   mid.dataset.kind = k;
   // morph: neue Minute oder neuer Stand aendern nur ihre Zahl, die Wappen bleiben stehen (kein Aufblinken)
-  morph(mid, k === "arm" ? [armEl()] : k === "voice" ? [vminiEl()] : k === "esports" ? [esMid(esFocus()!.esports!, free && dock === "top")] : k === "sport" ? [midEl(sportMid()!, glowNews(), !clockAtEdge)] : []);
+  morph(mid, k === "arm" ? [armEl()] : k === "voice" ? [vminiEl()] : k === "lol" ? [lgMid(lolFocus()!.lol!, free && dock === "top")] : k === "esports" ? [esMid(esFocus()!.esports!, free && dock === "top")] : k === "sport" ? [midEl(sportMid()!, glowNews(), !clockAtEdge)] : []);
 }
 
 // ---------- iPhone-Austausch (share.rs) ----------
@@ -1119,7 +1145,7 @@ function newRow(id: string) {
 function renderActs() {
   // nur eine Puls-Zeile: die wichtigste (Garmin über Haze hat Vorrang vor Helio, siehe priority)
   const firstPulse = acts.find((a) => sourceOf(a) === "pulse");
-  const list = acts.filter((a) => !a.esports && (sourceOf(a) !== "pulse" || a === firstPulse)).slice(0, 4);
+  const list = acts.filter((a) => !a.esports && !a.lol && (sourceOf(a) !== "pulse" || a === firstPulse)).slice(0, 4);
   const sig = JSON.stringify(list) + dock;
   if (sig === actsSig) return;
   actsSig = sig;
@@ -1561,6 +1587,7 @@ function setView(v: View) {
 function render(full = true) {
   // kleine Notch immer pruefen (baut nur bei Aenderung neu): die Mitte wechselt auch ohne neue Daten
   renderCompact();
+  renderLol();
   renderEsports();
   renderSport();
   if (full) {
@@ -1901,6 +1928,8 @@ async function main() {
     // Konferenz: mehrere laufende Spiele wechseln sich in der Mitte alle 8 s ab
     if (bgTick % 16 === 0 && centerCandidates().length > 1) { rotate++; render(false); }
     if (state === "expanded") { tickProgress(); tickClock(); tickAges(); }
+    // eigenes Spiel: Countdowns zählen auch zwischen zwei Meldungen von Vantage weiter
+    if (lolFocus()) render(false);
     // Verlaufs-Eintraege altern auch ohne neue Meldung: "vor X Min", grau ab 12 Min (alle 10 s pruefen)
     if (++bgTick % 20 === 0 && acts.some(isBg)) {
       for (const [, row] of rows) { const a = rowAct.get(row); if (a && isBg(a)) fillRow(row, a); }

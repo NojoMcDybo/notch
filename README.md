@@ -173,6 +173,27 @@ Vantage (`esnotch.rs`) schickt laufende Serien gefolgter Teams und die in Vantag
 - **Sprachassistent:** Werkzeug `esports` liefert Stand, Objectives und Lanes.
 - Bilder nur von Data Dragon und lolesports. Der Live-Feed liegt etwa vier Minuten hinter dem Spiel; Bans und Picks
   während des Drafts liefert er nicht.
+- **Symbole** (Türme, Gold, Kills, Baron, Inhibitoren, Drachen): die Originale aus dem Zuschauer-Scoreboard des Spiels
+  (`src/lolicons.ts`, erzeugt mit `python tools/lolicons.py` aus CommunityDragon), Türme/Gold/Kills/Baron/Inhibitoren
+  in der Teamfarbe eingefärbt wie in der Übertragung.
+
+### Eigenes LoL-Spiel (Vantage)
+
+Vantage (`ingame.rs`) schickt während eines eigenen Spiels jede Sekunde `vantage:game` mit dem Feld `lol`
+(Ansicht in `src/lolgame.ts`). Statt der Spielzeit zeigt die Notch, was gleich wichtig wird:
+
+- **Klein (Mitte):** links das Wichtigste jetzt — Vasallenwelle 10 s vor dem Spawn (normal, Kanone,
+  Super-Vasallen mit Lane, gegnerische Super-Vasallen; Porträt pulsiert), Objective in der letzten Minute vor dem
+  Spawn, „ist da“, gerade geholt/verloren, sonst der nächste Countdown; tot: Respawn. Rechts das **CS-Ziel**: CS,
+  Ring bis zum nächsten Meilenstein, Vorsprung/Rückstand zum Plan.
+- **Auf:** Champion, K/D/A, CS, Knopf „Clip“ (= Alt+F10 in Vantage); CS-Ziel als Leiste mit Meilensteinen alle
+  5 Minuten (Soll-Marke wandert live mit, jeder CS füllt nach und steigt als „+1“ auf, erreichte Meilensteine
+  leuchten gold, verpasste rot), Hinweis „bis 15:00 noch 21 CS in 2:41 · 7,8/min nötig“; die nächsten Wellen;
+  Objectives (Drache mit Element, sobald bekannt, Elder nach der Seele, Larven, Herold, Baron); Drachen beider Teams,
+  fehlende Inhibitoren mit Super-Vasallen und Respawn.
+- Zwischen zwei Meldungen zählt die Notch selbst weiter (Spielzeit `t` zur Wanduhr `at`); Pause hält an.
+- **Sprachassistent:** Werkzeug `mein_spiel`.
+- Zeiten nach Patch 26.1 (siehe `ingame.rs`); das Ziel stellt man in Vantage ein (Einstellungen › App, 0 = aus).
 
 Eingabefeld: Tippen landet (entprellt) als Ereignis `input`, Enter als `submit`, Umschalt+Enter als `submit-prev`,
 jeweils mit `value` in `GET /events`. Bei Enter holt die Notch außerdem `open` nach vorn. Solange das Feld den Fokus

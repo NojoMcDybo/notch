@@ -46,7 +46,7 @@ const THINK_MAX_MS = 20_000;
 
 const INSTRUCTIONS = `Du bist der Sprachassistent in Nojos Notch auf seinem Windows-PC.
 Sprich Deutsch, locker und knapp: meist ein, hoechstens zwei Saetze, ausser er will ausdruecklich mehr.
-Mit den Werkzeugen steuerst du Musik, Lautstaerke, Timer und die Datei-Ablage, kannst nachsehen, was die Notch gerade zeigt, und kennst die laufenden Spielstaende (Werkzeug sport) und laufende League-of-Legends-Profispiele mit Gold, Kills, Objectives und den Spielern je Lane (Werkzeug esports).
+Mit den Werkzeugen steuerst du Musik, Lautstaerke, Timer und die Datei-Ablage, kannst nachsehen, was die Notch gerade zeigt, und kennst die laufenden Spielstaende (Werkzeug sport) und laufende League-of-Legends-Profispiele mit Gold, Kills, Objectives und den Spielern je Lane (Werkzeug esports) sowie das eigene LoL-Spiel mit Wellen, Objective-Timern und CS-Ziel (Werkzeug mein_spiel).
 Nutze die Werkzeuge, statt zu behaupten, du haettest etwas getan. Wenn etwas unklar ist, frag kurz nach.
 Blutzuckerwerte in der Notch stammen aktuell aus einer Demo: nenne sie nie als echte Messung und gib keine Therapie- oder Dosierungsempfehlungen.`;
 
@@ -84,6 +84,13 @@ const TOOLS = [
     name: "status",
     description:
       "Was die Notch gerade zeigt: laufende Musik, Eintraege von Apps (offenes PDF, Timer, Blutzucker-Demo …), Dateien in der Ablage, Uhrzeit.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    type: "function",
+    name: "mein_spiel",
+    description:
+      "Das eigene laufende League-of-Legends-Spiel aus Vantage: Spielzeit, Champion, K/D/A, CS, CS-Ziel mit Abweichung und naechstem Meilenstein, die naechsten Vasallenwellen (normal, Kanone, Super-Vasallen), Objectives (Drache, Leerenlarven, Herold, Baron, Elder) mit Countdown, Drachen beider Teams, fehlende Inhibitoren.",
     parameters: { type: "object", properties: {} },
   },
   {
