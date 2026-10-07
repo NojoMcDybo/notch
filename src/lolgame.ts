@@ -2,12 +2,12 @@
  * Eigenes LoL-Spiel in der Notch — Daten kommen von Vantage (Activity `vantage:game` mit Feld `lol`, ingame.rs).
  * Statt nur der Spielzeit, was gleich wichtig wird:
  *
- * - Klein (Mitte): links das Wichtigste jetzt — Welle 10 s vorher (normal, Kanone, Super-Vasallen), Objective in der
- *   letzten Minute vor dem Spawn, „ist da“, gerade erledigt, sonst der nächste Countdown; tot: Respawn. Rechts das
- *   CS-Ziel: CS, Ring bis zum nächsten Meilenstein, Vorsprung/Rückstand zum Plan.
- * - Aufgeklappt: Kopf mit Champion, K/D/A, CS und Clip-Knopf; CS-Ziel als Leiste mit Meilensteinen alle 5 Minuten
- *   (Soll-Marke wandert live mit, jeder CS füllt nach); die nächsten Wellen; Objectives; Drachen beider Teams und
- *   fehlende Inhibitoren (Super-Vasallen).
+ * - Klein (Mitte) — die Hauptansicht im Spiel: links eine frisch gespawnte Welle als kurze Meldung (normal, Kanone,
+ *   Super-Vasallen je Lane; 5 s), sonst das nächste Objective (Countdown, letzte Minute hervorgehoben, „is up“, gerade
+ *   geholt/verloren); tot: Respawn. Rechts das CS-Ziel: CS, Ziel am nächsten Meilenstein, Ring, Vorsprung/Rückstand.
+ * - Aufgeklappt: Kopf mit Champion, K/D/A, CS und Clip-Knopf; CS-Ziel als Leiste mit Meilensteinen alle 5 Minuten;
+ *   die nächsten Wellen; Objectives; Drachen beider Teams und fehlende Inhibitoren (Super-Vasallen).
+ * - Texte im Spiel auf Englisch (wie die Begriffe in LoL).
  *
  * Alle Zeiten sind Spielzeit; zwischen zwei Meldungen zählt die Notch selbst weiter (`t` zur Wanduhr `at`).
  * Symbole: Originale aus dem Spiel (lolicons.ts).
@@ -63,22 +63,24 @@ const mmss = (s: number) => {
 };
 const LANE: Record<Lane, string> = { top: "Top", mid: "Mid", bot: "Bot" };
 const lanes = (l: Lane[]) => l.map((x) => LANE[x]).join(" · ");
-const ELEMENT: Record<string, string> = { infernal: "Inferno", ocean: "Ozean", mountain: "Berg", cloud: "Wolken", hextech: "Hextech", chemtech: "Chemtech" };
-const OBJ_NAME: Record<string, string> = { dragon: "Drache", elder: "Elder", grubs: "Larven", herald: "Herold", baron: "Baron" };
-const objName = (o: { key: string; type?: string }) => (o.key === "dragon" && o.type && ELEMENT[o.type] ? `${ELEMENT[o.type]}-Drache` : OBJ_NAME[o.key] ?? o.key);
+const ELEMENT: Record<string, string> = { infernal: "Infernal", ocean: "Ocean", mountain: "Mountain", cloud: "Cloud", hextech: "Hextech", chemtech: "Chemtech" };
+const OBJ_NAME: Record<string, string> = { dragon: "Dragon", elder: "Elder", grubs: "Grubs", herald: "Herald", baron: "Baron" };
+const objName = (o: { key: string; type?: string }) => (o.key === "dragon" && o.type && ELEMENT[o.type] ? `${ELEMENT[o.type]} Drake` : OBJ_NAME[o.key] ?? o.key);
 const objIcon = (o: { key: string; type?: string }, color = "") =>
   o.key === "dragon" || o.key === "elder" ? ic(o.type || (o.key === "elder" ? "elder" : "dragon")) : ic(o.key, color || (o.key === "baron" ? "#b48cff" : "#c9a2ff"));
 const ALLY = "#7fb0ff", ENEMY = "#ff6f72";
+/** so lange steht eine frisch gespawnte Welle in der kleinen Notch (s) */
+const WAVE_MSG = 5;
 
 // ---------- Wellen ----------
 
 type WaveKind = "melee" | "cannon" | "super" | "esuper";
-const waveKind = (w: LolWave): WaveKind => (w.sup.length ? "super" : w.cannon ? "cannon" : w.esup.length ? "esuper" : "melee");
+const waveKind = (w: LolWave): WaveKind => (w.sup.length ? "super" : w.esup.length ? "esuper" : w.cannon ? "cannon" : "melee");
 const WAVE_ICON: Record<WaveKind, LolIcon> = { melee: "melee", cannon: "cannon", super: "super", esuper: "superRed" };
 function waveLabel(w: LolWave) {
   const k = waveKind(w);
-  if (k !== "esuper" && w.esup.length) return `${k === "super" ? `Super ${lanes(w.sup)}` : k === "cannon" ? "Kanone" : "Welle"} · Gegner-Super ${lanes(w.esup)}`;
-  return k === "super" ? `Super-Vasallen ${lanes(w.sup)}` : k === "cannon" ? "Kanonen-Welle" : k === "esuper" ? `Gegner-Super ${lanes(w.esup)}` : "Welle";
+  if (k === "super" && w.esup.length) return `Supers ${lanes(w.sup)} · enemy ${lanes(w.esup)}`;
+  return k === "super" ? `Super minions ${lanes(w.sup)}` : k === "cannon" ? "Cannon wave" : k === "esuper" ? `Enemy supers ${lanes(w.esup)}` : "Minion wave";
 }
 function portrait(k: WaveKind, cls = "lg-wv") {
   const i = mk("span", `${cls} ${k}`);
@@ -97,21 +99,22 @@ export function lgPick(d: LolGame, now = lgNow(d)): Pick {
     const left = d.t + me.respawn - now;
     if (left > 0) return { tone: "dead", icon: mk("span", "lg-skull", "✕"), label: "Respawn", time: mmss(left) };
   }
-  const w = (d.waves ?? []).find((x) => x.at - now > -1.5 && x.at - now <= 10);
+  // Welle: kurze Meldung, wenn sie spawnt (nicht vorher)
+  const w = (d.waves ?? []).find((x) => now - x.at >= -0.5 && now - x.at < WAVE_MSG);
   if (w) {
     const k = waveKind(w);
-    return { tone: k === "melee" ? "wave" : k, icon: portrait(k), label: waveLabel(w), time: w.at - now <= 0.5 ? "jetzt" : mmss(w.at - now) };
+    return { tone: k === "melee" ? "wave" : k, icon: portrait(k), label: waveLabel(w) };
   }
   const r = (d.recent ?? []).filter((x) => now - x.t < 10).slice(-1)[0];
-  if (r) return { tone: r.ally === false ? "lost" : "done", icon: objIcon(r), label: r.ally === false ? `Gegner: ${objName(r)}` : `${objName(r)} geholt`, time: r.ally === false ? undefined : "✓" };
+  if (r) return { tone: r.ally === false ? "lost" : "done", icon: objIcon(r), label: r.ally === false ? `Enemy took ${objName(r)}` : `${objName(r)} taken`, time: r.ally === false ? undefined : "✓" };
   const objs = (d.objs ?? []).filter((o) => !o.until || now < o.until);
   const soon = objs.filter((o) => o.at > now && o.at - now <= 60).sort((a, b) => a.at - b.at)[0];
   if (soon) return { tone: "soon", icon: objIcon(soon), label: objName(soon), time: mmss(soon.at - now) };
   const up = objs.find((o) => o.at <= now);
-  if (up) return { tone: "up", icon: objIcon(up), label: `${objName(up)} ${up.key === "grubs" ? "sind" : "ist"} da`, time: up.left && up.left < 3 ? `${up.left} übrig` : undefined };
+  if (up) return { tone: "up", icon: objIcon(up), label: `${objName(up)} ${up.key === "grubs" ? "are" : "is"} up`, time: up.left && up.left < 3 ? `${up.left} left` : undefined };
   const next = objs.filter((o) => o.at > now).sort((a, b) => a.at - b.at)[0];
   if (next) return { tone: "next", icon: objIcon(next), label: objName(next), time: mmss(next.at - now) };
-  return { tone: "clock", icon: mk("span", "lg-dot"), label: "Spielzeit", time: mmss(now) };
+  return { tone: "clock", icon: mk("span", "lg-dot"), label: "Game time", time: mmss(now) };
 }
 
 // ---------- CS-Ziel ----------
@@ -134,7 +137,7 @@ export function lgGoal(d: LolGame, now = lgNow(d)) {
     want,
   };
 }
-const num = (x: number, digits = 1) => x.toFixed(digits).replace(".", ",");
+const num = (x: number, digits = 1) => x.toFixed(digits);
 const signed = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `−${-n}` : "±0");
 
 function ring(frac: number) {
@@ -167,9 +170,10 @@ export function lgMid(d: LolGame, full: boolean) {
     const g = lgGoal(d, now);
     const w = mk("span", `lg-m-goal ${g.delta >= 0 ? "ahead" : "behind"}`);
     w.dataset.key = "goal";
-    w.title = `Ziel ${num(g.goal)} CS/min`;
+    w.title = `Goal ${num(g.goal)} CS/min · ${g.nextCs} CS by ${mmss(g.nextAt)}`;
     w.append(ring(g.cs / Math.max(1, g.nextCs)), mk("b", "lg-m-cs", String(g.cs)));
-    if (full) w.append(mk("span", "lg-m-d", signed(g.delta)));
+    if (full) w.append(mk("span", "lg-m-of", `/${g.nextCs}`));
+    w.append(mk("span", "lg-m-d", signed(g.delta)));
     box.append(w);
   } else if (d.me && full) {
     box.append(mk("span", "lg-m-kda", `${d.me.k}/${d.me.d}/${d.me.a}`));
@@ -185,12 +189,12 @@ function head(d: LolGame, icon: string | undefined, onClip: () => void) {
   const av = mk("span", `lg-av${me?.dead ? " dead" : ""}`);
   if (icon && /^data:image\//.test(icon)) av.style.backgroundImage = `url("${icon}")`;
   const who = mk("span", "lg-who");
-  who.append(mk("b", "", me?.champ ?? "Im Spiel"), mk("span", "", me ? `Level ${me.level}${me.dead ? " · tot" : ""}` : ""));
+  who.append(mk("b", "", me?.champ ?? "In game"), mk("span", "", me ? `Level ${me.level}${me.dead ? " · dead" : ""}` : ""));
   const kda = mk("span", "lg-kda");
   if (me) kda.append(mk("b", "", `${me.k}/${me.d}/${me.a}`), mk("span", "", `${me.cs} CS`));
   const clock = mk("span", `lg-clock${d.paused ? " paused" : ""}`, d.paused ? "Pause" : mmss(lgNow(d)));
   const clip = mk("button", "lg-clip", "Clip");
-  clip.title = "Die letzten Sekunden als Clip speichern (Alt+F10)";
+  clip.title = "Save the last seconds as a clip (Alt+F10)";
   clip.onclick = (e) => { e.stopPropagation(); onClip(); };
   h.append(av, who, kda, mk("span", "lg-gap"), clock, clip);
   return h;
@@ -202,7 +206,7 @@ function goalBlock(d: LolGame, now: number) {
   box.dataset.key = "goal";
   const top = mk("div", "lg-g-top");
   const t = mk("span", "lg-g-title");
-  t.append(mk("b", "", "CS-Ziel"), mk("span", "", `${num(g.goal)} pro Minute`));
+  t.append(mk("b", "", "CS goal"), mk("span", "", `${num(g.goal)} per minute`));
   const now2 = mk("span", "lg-g-now");
   now2.append(mk("b", "lg-g-rate", num(g.rate)), mk("span", "", "/min"), mk("span", "lg-g-delta", `${signed(g.delta)} CS`));
   top.append(t, now2);
@@ -233,22 +237,22 @@ function goalBlock(d: LolGame, now: number) {
   }
   const hint = mk("div", "lg-g-hint");
   hint.textContent = g.need === 0
-    ? `Meilenstein ${mmss(g.nextAt)} (${g.nextCs} CS) schon geschafft – weiter so`
-    : `Bis ${mmss(g.nextAt)}: noch ${g.need} CS in ${mmss(g.left)}${g.pace ? ` · ${num(g.pace)}/min nötig` : ""}`;
+    ? `Milestone ${mmss(g.nextAt)} (${g.nextCs} CS) already reached – keep going`
+    : `By ${mmss(g.nextAt)}: ${g.need} more CS in ${mmss(g.left)}${g.pace ? ` · ${num(g.pace)}/min needed` : ""}`;
   box.append(top, bar, ticks, hint);
   return box;
 }
 
 function wavesRow(d: LolGame, now: number) {
   const box = mk("div", "lg-sec lg-waves");
-  box.append(mk("span", "lg-h", "Wellen"));
+  box.append(mk("span", "lg-h", "Waves"));
   const list = mk("div", "lg-wlist");
   for (const w of (d.waves ?? []).filter((x) => x.at > now - 1.5).slice(0, 4)) {
     const k = waveKind(w);
     const it = mk("span", `lg-w ${k}${w.at - now <= 10 ? " soon" : ""}`);
     it.dataset.key = `w${w.at}`;
     it.title = waveLabel(w);
-    it.append(portrait(k), mk("b", "", w.at - now <= 0.5 ? "jetzt" : mmss(w.at - now)), mk("span", "", k === "super" ? `Super ${lanes(w.sup)}` : k === "cannon" ? "Kanone" : k === "esuper" ? "Gegner-Super" : "normal"));
+    it.append(portrait(k), mk("b", "", w.at - now <= 0.5 ? "now" : mmss(w.at - now)), mk("span", "", k === "super" ? `Super ${lanes(w.sup)}` : k === "cannon" ? "Cannon" : k === "esuper" ? "Enemy super" : "Normal"));
     if (k !== "esuper" && w.esup.length) it.append(portrait("esuper", "lg-wv mini"));
     list.append(it);
   }
@@ -269,7 +273,7 @@ function objRow(d: LolGame, now: number) {
     it.dataset.key = o.key;
     const txt = mk("span", "lg-o-t");
     const state = up
-      ? o.until ? `${o.key === "grubs" ? "sind" : "ist"} da · bis ${mmss(o.until)}${o.left && o.left < 3 ? ` · ${o.left} übrig` : ""}` : "ist da"
+      ? o.until ? `up · until ${mmss(o.until)}${o.left && o.left < 3 ? ` · ${o.left} left` : ""}` : "up"
       : `in ${mmss(o.at - now)}`;
     txt.append(mk("b", "", objName(o)), mk("span", "", state));
     it.append(objIcon(o), txt);
@@ -280,7 +284,7 @@ function objRow(d: LolGame, now: number) {
     const it = mk("span", `lg-o ${r.ally === false ? "lost" : "done"}`);
     it.dataset.key = `r${r.key}${r.t}`;
     const txt = mk("span", "lg-o-t");
-    txt.append(mk("b", "", objName(r)), mk("span", "", r.ally === false ? "Gegner hat ihn" : r.ally ? "geholt ✓" : "erledigt"));
+    txt.append(mk("b", "", objName(r)), mk("span", "", r.ally === false ? "taken by enemy" : r.ally ? "taken ✓" : "killed"));
     it.append(objIcon(r), txt);
     grid.append(it);
   }
@@ -292,16 +296,16 @@ function teamsRow(d: LolGame, now: number) {
   const box = mk("div", "lg-teams");
   const side = (list: string[], ally: boolean) => {
     const w = mk("span", `lg-dr ${ally ? "a" : "e"}`);
-    w.append(mk("span", "lg-dr-n", ally ? "Wir" : "Gegner"));
+    w.append(mk("span", "lg-dr-n", ally ? "Us" : "Enemy"));
     for (const t of list) w.append(ic(t));
-    if (list.length >= 4) w.append(mk("b", "lg-soul", "Seele"));
-    if (!list.length) w.append(mk("span", "lg-dr-0", "keine Drachen"));
+    if (list.length >= 4) w.append(mk("b", "lg-soul", "Soul"));
+    if (!list.length) w.append(mk("span", "lg-dr-0", "no drakes"));
     return w;
   };
   box.append(side(d.drakes?.ally ?? [], true), side(d.drakes?.enemy ?? [], false));
   for (const i of d.inhibs ?? []) {
     const w = mk("span", `lg-inh ${i.ours ? "ours" : "theirs"}`);
-    w.append(ic("inhib", i.ours ? ENEMY : ALLY), mk("span", "", `${i.ours ? "Gegner-Super" : "Super"} ${LANE[i.lane]} · noch ${mmss(i.back - now)}`));
+    w.append(ic("inhib", i.ours ? ENEMY : ALLY), mk("span", "", `${i.ours ? "Enemy supers" : "Supers"} ${LANE[i.lane]} · ${mmss(i.back - now)} left`));
     box.append(w);
   }
   return box;

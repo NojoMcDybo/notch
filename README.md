@@ -182,10 +182,11 @@ Vantage (`esnotch.rs`) schickt laufende Serien gefolgter Teams und die in Vantag
 Vantage (`ingame.rs`) schickt während eines eigenen Spiels jede Sekunde `vantage:game` mit dem Feld `lol`
 (Ansicht in `src/lolgame.ts`). Statt der Spielzeit zeigt die Notch, was gleich wichtig wird:
 
-- **Klein (Mitte):** links das Wichtigste jetzt — Vasallenwelle 10 s vor dem Spawn (normal, Kanone,
-  Super-Vasallen mit Lane, gegnerische Super-Vasallen; Porträt pulsiert), Objective in der letzten Minute vor dem
-  Spawn, „ist da“, gerade geholt/verloren, sonst der nächste Countdown; tot: Respawn. Rechts das **CS-Ziel**: CS,
-  Ring bis zum nächsten Meilenstein, Vorsprung/Rückstand zum Plan.
+- **Klein (Mitte) — die Hauptansicht im Spiel:** links eine Vasallenwelle als kurze Meldung, wenn sie spawnt
+  (5 s; „Minion wave“, „Cannon wave“, „Super minions Bot“, „Enemy supers Mid“; Porträt pulsiert), sonst das nächste
+  Objective (Countdown, letzte Minute hervorgehoben, „is up“, „taken ✓“, „Enemy took Baron“); tot: Respawn. Rechts
+  das **CS-Ziel**: CS, frei auch das Ziel am nächsten Meilenstein (`63/70`), Ring bis dahin, Vorsprung/Rückstand
+  zum Plan. Texte im Spiel auf Englisch.
 - **Auf:** Champion, K/D/A, CS, Knopf „Clip“ (= Alt+F10 in Vantage); CS-Ziel als Leiste mit Meilensteinen alle
   5 Minuten (Soll-Marke wandert live mit, jeder CS füllt nach und steigt als „+1“ auf, erreichte Meilensteine
   leuchten gold, verpasste rot), Hinweis „bis 15:00 noch 21 CS in 2:41 · 7,8/min nötig“; die nächsten Wellen;

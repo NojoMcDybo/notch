@@ -25,7 +25,7 @@
 .lg-chip.soon { background: rgba(240, 211, 143, 0.14); }
 .lg-chip.soon .lg-c-t { color: var(--lg-gold); }
 .lg-chip.up { background: rgba(110, 231, 168, 0.14); color: var(--lg-up); }
-.lg-chip.wave .lg-c-t { color: #dfe6f3; }
+.lg-chip:is(.wave, .cannon, .super, .esuper) .lg-c-t { font-weight: 500; font-size: 11px; color: var(--lg-dim); }
 .lg-chip.cannon { background: linear-gradient(90deg, rgba(240, 211, 143, 0.26), rgba(240, 211, 143, 0.08)); }
 .lg-chip.cannon .lg-c-t { color: var(--lg-gold); }
 .lg-chip.super { background: linear-gradient(90deg, rgba(127, 176, 255, 0.3), rgba(127, 176, 255, 0.08)); }
@@ -33,7 +33,7 @@
 .lg-chip.esuper .lg-c-t, .lg-chip.dead .lg-c-t { color: var(--lg-enemy); }
 .lg-chip.done { background: rgba(127, 176, 255, 0.2); }
 .lg-chip.done .lg-c-t { color: var(--lg-ally); }
-/* Welle kurz vor dem Spawn: Porträt pulsiert */
+/* frisch gespawnte Welle: Porträt pulsiert */
 .lg-chip.wave .lg-wv, .lg-chip.cannon .lg-wv, .lg-chip.super .lg-wv, .lg-chip.esuper .lg-wv { animation: lg-pulse 1s ease-in-out infinite; }
 @keyframes lg-pulse { 50% { transform: scale(1.12); filter: brightness(1.25); } }
 .lg-m-goal { display: inline-flex; align-items: center; gap: 4px; }
@@ -43,6 +43,7 @@
 .lg-ring .p { stroke: var(--lg-gold); stroke-linecap: round; transition: stroke-dashoffset 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .lg-m-cs { display: inline-block; font-weight: 700; font-size: 13px; }
 .lg-m-d { font-weight: 600; font-size: 11.5px; }
+.lg-m-of { margin-left: -3px; font-weight: 500; font-size: 11.5px; color: var(--lg-dim); }
 .lg-m-goal.ahead .lg-m-d { color: var(--lg-up); }
 .lg-m-goal.behind .lg-m-d { color: var(--lg-enemy); }
 .lg-m-kda { font-weight: 600; font-size: 12.5px; color: #b9c1d2; }
