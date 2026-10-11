@@ -99,6 +99,9 @@ pub struct Activity {
     /// LoL-Profispiel (Vantage, esnotch.rs): fertige Daten fuer die eigene Ansicht der Notch (src/esports.ts)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub esports: Option<serde_json::Value>,
+    /// eigenes LoL-Spiel (Vantage, ingame.rs): Wellen, Objectives, CS-Ziel fuer die eigene Ansicht (src/lolgame.ts)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lol: Option<serde_json::Value>,
     /// Prozess der App — fuer AllowSetForegroundWindow beim Doppelklick
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -482,6 +485,20 @@ mod tests {
                   "https://localhost", "https://example.com", "tauri://evil", "http://127.0.0.1:abc", ""] {
             assert!(!origin_ok(o), "{o} sollte abgewiesen werden");
         }
+    }
+
+    /// Felder fuer die eigenen Ansichten (Vantage) muessen durch die Notch bis ins Fenster kommen
+    #[test]
+    fn lol_und_esports_bleiben_erhalten() {
+        let a: super::Activity = serde_json::from_value(serde_json::json!({
+            "id": "vantage:game", "title": "Ahri", "app": "Vantage",
+            "lol": { "t": 512.0, "goal": 7.0, "waves": [{ "at": 510.0, "cannon": false }] },
+            "esports": { "mode": "game" },
+        })).expect("Activity lesbar");
+        let v = serde_json::to_value(&a).unwrap();
+        assert_eq!(v["lol"]["goal"], 7.0);
+        assert_eq!(v["lol"]["waves"][0]["at"], 510.0);
+        assert_eq!(v["esports"]["mode"], "game");
     }
 
     #[test]
