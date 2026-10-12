@@ -56,7 +56,27 @@ function ic(key: string, color = "", cls = "lg-ic") {
 // ---------- Zeit ----------
 
 /** Spielzeit jetzt (zählt zwischen zwei Meldungen weiter, höchstens 8 s ohne neue) */
-export const lgNow = (d: LolGame) => (d.paused ? d.t : d.t + Math.min(8, Math.max(0, (Date.now() - d.at) / 1000)));
+/**
+ * Spielzeit jetzt: zählt zwischen zwei Meldungen im gemessenen Tempo weiter (1× im Spiel, schneller beim Vorspulen im
+ * Übungstool) und springt nicht zurück, wenn eine Meldung etwas früher gemessen wurde (höchstens 8 s ohne neue)
+ */
+const clk = { t: 0, at: 0, rate: 1, shown: 0 };
+export function lgNow(d: LolGame) {
+  if (d.at !== clk.at) {
+    const dw = (d.at - clk.at) / 1000;
+    const r = clk.at && dw > 0.3 ? (d.t - clk.t) / dw : 1;
+    // neues Spiel, Zurückspulen oder Pause: wieder 1×
+    clk.rate = r > 1.3 && r < 80 ? r : 1;
+    if (d.t < clk.t - 3) clk.shown = 0;
+    clk.t = d.t;
+    clk.at = d.at;
+  }
+  if (d.paused) return d.t;
+  const now = d.t + Math.min(8, Math.max(0, (Date.now() - d.at) / 1000)) * clk.rate;
+  if (now < clk.shown && clk.shown - now < 3 * clk.rate) return clk.shown;
+  clk.shown = now;
+  return now;
+}
 const mmss = (s: number) => {
   const x = Math.max(0, Math.ceil(s));
   return `${Math.floor(x / 60)}:${String(x % 60).padStart(2, "0")}`;
@@ -120,17 +140,20 @@ export function lgPick(d: LolGame, now = lgNow(d)): Pick {
 // ---------- CS-Ziel ----------
 
 const MS = 300;
+/** Vorlauf des Plans: 0:30 bis zur ersten Welle plus etwa 30 s, bis sie in der Lane ankommt */
+const LEAD = 60;
 export function lgGoal(d: LolGame, now = lgNow(d)) {
   const g = d.goal ?? 0;
   const cs = d.me?.cs ?? 0;
-  const want = (t: number) => Math.ceil((g * t) / 60);
-  const plan = (g * now) / 60;
+  const want = (t: number) => Math.ceil((g * Math.max(0, t - LEAD)) / 60);
+  const plan = (g * Math.max(0, now - LEAD)) / 60;
   const nextAt = (Math.floor(now / MS) + 1) * MS;
   const need = Math.max(0, want(nextAt) - cs);
   const left = nextAt - now;
   return {
     goal: g, cs, plan, delta: Math.round(cs - plan),
-    rate: now > 60 ? cs / (now / 60) : 0,
+    // CS pro Minute ab dem Eintreffen der ersten Welle (wie der Plan)
+    rate: now > LEAD + 30 ? cs / ((now - LEAD) / 60) : 0,
     nextAt, nextCs: want(nextAt), need, left,
     /** nötiges Tempo bis zum nächsten Meilenstein */
     pace: left > 5 ? need / (left / 60) : 0,

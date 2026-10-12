@@ -19,7 +19,13 @@
 .lg-mid { display: inline-flex; align-items: center; gap: 12px; font-family: var(--lg-num); font-variant-numeric: tabular-nums; color: #eef1f6; white-space: nowrap; }
 .lg-chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px 0 3px; border-radius: 12px; background: rgba(255, 255, 255, 0.06); font-size: 12.5px; transition: background 0.3s; }
 .lg-chip .lg-ic { width: 17px; height: 17px; margin-left: 2px; }
-.lg-c-l { font-weight: 600; max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.lg-c-l { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+/* feste Breiten: die kleine Notch ändert ihre Größe nicht bei jeder neuen Zeile (kein Springen, kein Flackern) */
+.lg-mid.full .lg-chip { width: 214px; }
+.lg-mid.shared .lg-chip { width: 168px; }
+.lg-c-t { flex: none; min-width: 34px; text-align: right; }
+.lg-mid.full .lg-m-goal { width: 104px; }
+.lg-mid.shared .lg-m-goal { width: 72px; }
 .lg-c-t { font-weight: 700; font-size: 13px; }
 .lg-chip.next .lg-c-l, .lg-chip.clock .lg-c-l { color: #b9c1d2; font-weight: 500; }
 .lg-chip.soon { background: rgba(240, 211, 143, 0.14); }
@@ -50,6 +56,7 @@
 /* seitlich angedockt: untereinander */
 [data-dock="left"] .lg-mid, [data-dock="right"] .lg-mid { flex-direction: column; gap: 6px; }
 [data-dock="left"] .lg-c-l, [data-dock="right"] .lg-c-l { display: none; }
+[data-dock="left"] .lg-mid .lg-chip, [data-dock="right"] .lg-mid .lg-chip, [data-dock="left"] .lg-mid .lg-m-goal, [data-dock="right"] .lg-mid .lg-m-goal { width: auto; }
 
 /* ---------- aufgeklappt ---------- */
 .lg { container-type: inline-size; position: relative; overflow: hidden; border-radius: 16px; background: radial-gradient(120% 80% at 0% 0%, rgba(36, 89, 201, 0.22), transparent 60%), #05070b; color: #eef1f6; font-family: var(--lg-num); font-variant-numeric: tabular-nums; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }

@@ -192,7 +192,8 @@ Vantage (`ingame.rs`) schickt während eines eigenen Spiels jede Sekunde `vantag
   leuchten gold, verpasste rot), Hinweis „bis 15:00 noch 21 CS in 2:41 · 7,8/min nötig“; die nächsten Wellen;
   Objectives (Drache mit Element, sobald bekannt, Elder nach der Seele, Larven, Herold, Baron); Drachen beider Teams,
   fehlende Inhibitoren mit Super-Vasallen und Respawn.
-- Zwischen zwei Meldungen zählt die Notch selbst weiter (Spielzeit `t` zur Wanduhr `at`); Pause hält an.
+- Zwischen zwei Meldungen zählt die Notch selbst weiter (Spielzeit `t` zur Wanduhr `at`) — im gemessenen Tempo (Vorspulen im Übungstool) und ohne Rücksprünge; Pause hält an. Feste Breiten in der kleinen Notch, damit sie im Spiel nicht springt.
+- CS-Plan mit 60 s Vorlauf (erste Welle 0:30 plus Weg in die Lane): Soll und Meilensteine zählen ab 1:00.
 - **Sprachassistent:** Werkzeug `mein_spiel`.
 - Zeiten nach Patch 26.1 (siehe `ingame.rs`); das Ziel stellt man in Vantage ein (Einstellungen › App, 0 = aus).
 
