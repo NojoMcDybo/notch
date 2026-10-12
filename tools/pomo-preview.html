@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Pomodoro-Vorschau</title>
+    <link rel="stylesheet" href="/src/nojo/nojo-ui.css" />
+    <link rel="stylesheet" href="/src/compact.css" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <style>
+      html, body { background: #3a3550; overflow: auto; }
+      .stage { display: flex; flex-wrap: wrap; gap: 24px; padding: 24px; }
+      .shell { position: relative; width: 520px; background: #000; border-radius: 0 0 30px 30px; padding: 10px 20px 18px; }
+      .shell h6 { color: #888; font: 11px system-ui; margin: 0 0 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="stage" id="stage"></div>
+    <script type="module">
+      import { fillPomo, pomoPicker } from "/src/pomodoro.ts";
+      import { iconNode, NOJO_ICONS } from "/src/nojo/nojo-ui.ts";
+      const icon = (n) => (n in NOJO_ICONS ? iconNode(n) : null);
+      const stage = document.getElementById("stage");
+      const now = Date.now();
+      const shell = (label) => {
+        const s = document.createElement("div");
+        s.className = "shell";
+        s.innerHTML = `<h6>${label}</h6>`;
+        stage.append(s);
+        return s;
+      };
+      const card = (label, a) => {
+        const s = shell(label);
+        const row = document.createElement("div");
+        row.className = "act pomo card";
+        s.append(row);
+        fillPomo(row, a, icon);
+      };
+      const base = { work: 1500, brk: 300, round: 2, total: 1500 };
+      const act = (title, subtitle, pomo, actions) => ({ id: "notch:timer", title, subtitle, icon: "", actions, pomo });
+      card("Fokus läuft", act("Fokus", "Runde 2", { ...base, phase: "work", over_since: null, left: 1013, running: true, ends_at: now + 1013000 },
+        [{ id: "pause", label: "Anhalten", icon: "pause" }, { id: "next", label: "Überspringen", icon: "next" }, { id: "stop", label: "Beenden", icon: "stop" }]));
+      card("Fokus geschafft (Extrazeit)", act("Fokus geschafft", "Extrazeit", { ...base, phase: "work", over_since: now - 84000, left: 0, running: false, ends_at: null },
+        [{ id: "next", label: "Pause starten", icon: "play" }, { id: "stop", label: "Beenden", icon: "stop" }]));
+      card("Pause läuft", act("Pause", "durchatmen", { ...base, total: 300, phase: "break", over_since: null, left: 192, running: true, ends_at: now + 192000 },
+        [{ id: "pause", label: "Anhalten", icon: "pause" }, { id: "next", label: "Überspringen", icon: "next" }, { id: "stop", label: "Beenden", icon: "stop" }]));
+      card("Pausiert", act("Fokus", "pausiert", { ...base, phase: "work", over_since: null, left: 700, running: false, ends_at: null },
+        [{ id: "resume", label: "Weiter", icon: "play" }, { id: "next", label: "Überspringen", icon: "next" }, { id: "stop", label: "Beenden", icon: "stop" }]));
+      const p = shell("Einstellen (Timer-Reiter)");
+      const tp = document.createElement("div");
+      tp.className = "timer-pick";
+      tp.dataset.mode = "pomo";
+      const body = document.createElement("div");
+      body.className = "tp-body tp-pomo";
+      body.append(pomoPicker(() => {}));
+      const head = document.createElement("div");
+      head.className = "tp-head";
+      head.innerHTML = '<button class="tp-mode">Pomodoro</button>';
+      tp.append(head, body);
+      p.append(tp);
+    </script>
+  </body>
+</html>

@@ -20,6 +20,8 @@ Beenden über das Tray-Symbol → „Notch beenden".
 | compact   | Musik läuft (Nachlauf nach Pause einstellbar, Standard 30 s) oder eine sichtbare Quelle hat etwas |
 | expanded  | Maus drauf, Datei wird draufgezogen, oder Activity mit `alert: true` (3,5 s) |
 
+Aufgeklappt hat die Notch keine feste Höhe mehr: Sie wird so hoch wie ihr Inhalt (das Fenster ist so hoch wie der Monitor, außerhalb der Form klickt man durch). Erst am Bildschirmrand scrollt sie.
+
 ## Kleine Notch: Rangliste (Einstellungsfenster)
 
 Was die zugeklappte Notch zeigt, entscheidet eine Rangliste (`src/compact.ts`, Schema in `src/settings-model.ts`, gespeichert unter `compact` in `config.json`). Einstellungen öffnen: Zahnrad in der aufgeklappten Notch oder Tray → „Einstellungen …“ — eigenes Fenster, nicht in der Notch.
@@ -62,13 +64,22 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
 - Modell `gpt-realtime-2.1`, Stimme `marin`, Sprache rein/raus über WebRTC direkt zu OpenAI
 - Der API-Schlüssel bleibt in Rust (`src-tauri/src/voice.rs`); das Frontend bekommt nur einen kurzlebigen Sitzungsschlüssel
 - Schlüssel: in **Einstellungen › App** eintragen. Die Notch prüft ihn bei OpenAI und speichert ihn mit Windows (DPAPI, nur dieses Benutzerkonto) verschlüsselt in `%APPDATA%\de.nojo.notch\openai-key.bin`; angezeigt wird danach nur `sk-…` plus die letzten vier Zeichen. Ohne Schlüssel zeigt die Notch „Schlüssel eintragen“ und öffnet genau diese Einstellung. Die Umgebungsvariable `OPENAI_API_KEY` hat Vorrang; eine alte Klartextdatei `openai-key.txt` wird beim ersten Start übernommen und gelöscht.
-- Werkzeuge des Assistenten: Musik steuern, Lautstärke, Timer starten/stoppen, Status der Notch lesen, Datei aus der Ablage öffnen oder konvertieren
+- Plan für den nächsten Schritt (PC-Steuerung, Handeln schon während man spricht): [`docs/jarvis.md`](docs/jarvis.md)
+- Werkzeuge des Assistenten: Musik steuern, Lautstärke, Timer/Pomodoro starten/stoppen, Status der Notch lesen, Datei aus der Ablage öffnen oder konvertieren
 - Mikrofonfreigabe wird für das Notch-Fenster automatisch erteilt (nur Mikrofon)
 - Kosten: API-Abrechnung pro Audiominute, getrennt von einem ChatGPT-Abo
 
 ## Was man anklicken kann
 
 **Jetzt** (Kreis-Symbol)
+- **Karten** (Musik, Zeilen der Apps, Blutzucker, Pomodoro, eigenes LoL-Spiel, Profispiel, Live-Sport): mit der Maus greifen und
+  ziehen = eigene Reihenfolge (die Karte hebt sich an, die anderen gleiten zur Seite, beim Loslassen federt sie ein). Gemerkt
+  in `config.json` → `cards` (`src/cards.ts`). Neue Karten stehen an ihrer natürlichen Stelle.
+- **×** auf einer Karte einer App (Haze, Folio, Helio, Vantage …) oder auf Live-Sport blendet sie aus — **dauerhaft**, auch wenn
+  die App sie jede Minute neu schickt. Unten erscheint dann ein kleines **+**: Liste der ausgeblendeten Karten, Klick holt sie
+  zurück. Nur die aufgeklappte Ansicht; was die kleine Notch zeigt, regelt weiter die Rangliste. Eigene Einträge (Timer,
+  Umwandeln, iPhone-Anfrage, Update) beendet × wie bisher. Nach 30 Tagen, in denen eine ausgeblendete Karte nicht mehr
+  auftaucht, vergisst die Notch sie.
 - Cover / Titel → holt den Player nach vorn
 - Fortschrittsleiste → klicken oder ziehen = spulen
 - Zurück / Play-Pause / Weiter
@@ -82,6 +93,9 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
 - Klick = auswählen (Strg/Umschalt = mehrere), Doppelklick = öffnen, Ziehen = Datei wieder rausziehen
 - Rechtsklick-Menü: Öffnen, Im Ordner zeigen, Umwandeln in …, Aus der Ablage nehmen
 - Unten erscheint nur noch während einer Umwandlung eine Statusleiste (läuft → grün fertig / rot Fehler)
+- **Vorschaubilder** statt Dateityp (Ablage und Zwischenablage): dieselben wie im Explorer über die Windows-Shell
+  (`src-tauri/src/thumb.rs`) — Fotos auch als HEIC (braucht die HEIF-Erweiterung aus dem Store), Videobilder,
+  PDF/Office, sofern ein Vorschau-Anbieter installiert ist, sonst das Programmsymbol. Einfache Bildformate lädt die Notch direkt.
 - **Zwischenablage**: die letzten 5 kopierten Dinge — Text, Dateien (aus dem Explorer kopiert) und Bilder (z. B. Screenshots). Klick = wieder in die Zwischenablage, Bilder/Dateien rausziehen, „+“ = in die Ablage (Bilder werden dafür unter Bilder\Notch gespeichert), × = aus dem Verlauf. Nur im Speicher; Inhalte, die Passwortmanager als „nicht für den Verlauf“ markieren, werden übersprungen (wie beim Windows-Verlauf Win+V). Code: `src-tauri/src/clipboard.rs`
 - Neu kopiert → die Notch fährt kurz auf (~2,3 s): das kopierte Ding fällt von der Bildschirmkante in die Ablage-Schale, die Schale federt, grüner Punkt, Vorschau daneben. Ist die Notch schon offen, rutscht der Eintrag oben in die Liste und der Ablage-Reiter zuckt. Erneutes Kopieren aus dem Verlauf löst nichts aus.
 - Konvertieren: Bilder nativ (PNG, JPG, WEBP, GIF, BMP, TIFF, ICO, ≤ 1600 px). Audio (MP3, M4A, WAV, FLAC, OGG) und Video (MP4, GIF, MP3) über ffmpeg (`winget install Gyan.FFmpeg`, wird auch im winget-Paketordner gefunden). Ergebnis landet neben dem Original, nie überschrieben.
@@ -89,6 +103,12 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
 **Timer** (Stoppuhr-Symbol)
 - Drehräder wie in der iPhone-Uhr (Std./Min./Sek., endlos): ziehen mit Schwung, Mausrad = ein Schritt, Klick auf eine Zahl springt hin; schlichter Start-Knopf, gedämpfte Optik. Letzte Einstellung bleibt gemerkt.
 - Läuft als Activity mit Pause, +1 min, Stopp; Balken gleitet flüssig (`ends_at`); Ton und Aufklappen am Ende
+- **Pomodoro:** Chip „Timer ⇄“ oben im Reiter (wie die Medienquelle im Player) schaltet um. Fokus- und Pausenlänge als zwei
+  große Zahlen (Mausrad oder Pfeile beim Drüberfahren; Fokus bis 10 min in Einern, darüber in Fünfern). Karte: dünner Ring,
+  Zeit groß, Pfirsich = Fokus, Mint = Pause. Ist eine Phase um, hält nichts an: weicher Dreiklang, die Notch klappt kurz auf,
+  der Ring ist leer, ein Punkt in der Farbe der nächsten Phase kreist, die **Extrazeit** zählt hoch („+1:24“), bis man
+  „Pause starten“ bzw. „Weiter fokussieren“ drückt; dann gleitet die Farbe um und der Ring füllt sich in einem Zug.
+  Sprachassistent: Werkzeug `pomodoro_starten`. Gestalten ohne App: `npm run dev`, dann `/tools/pomo-preview.html`.
 
 ## Live Activities — so hängt sich jede App an
 
@@ -300,7 +320,9 @@ Neue Version veröffentlichen: Version in `package.json`, `src-tauri/Cargo.toml`
 - `src-tauri/src/spectrum.rs`, `music_style.rs` — Musik-Reaktion: Loopback-Abgriff, Analyse, Stil
 - `src-tauri/src/activities.rs` — HTTP-Schnittstelle, Klicks, Events
 - `src-tauri/src/open.rs` — öffnen / nach vorn holen / localhost-Rückmeldung
-- `src-tauri/src/timer.rs` — Timer als Activity
+- `src-tauri/src/timer.rs` — Timer und Pomodoro als Activity (`src/pomodoro.ts`: Karte, Einstellen, Klang)
+- `src/cards.ts` — Karten der aufgeklappten Notch: Reihenfolge per Ziehen, ausblenden, zurückholen
+- `src-tauri/src/thumb.rs` — Vorschaubilder über die Windows-Shell
 - `src-tauri/src/update.rs` — Update-Prüfung und -Installation als Activity
 - `src-tauri/src/sport.rs`, `src/sport.ts` — Live-Sport: Quellen, Ticker, Ballverlauf, Wurfbild, Anzeige
 - `src/morph.ts` — Inhalte abgleichen statt neu bauen (kein Aufblinken); identisch in Arena

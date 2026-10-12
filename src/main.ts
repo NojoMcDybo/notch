@@ -5,11 +5,13 @@ import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { Voice, type VoiceState } from "./voice";
 import { Wheel } from "./wheel";
 import { fillCard, isBg, type ChartData } from "./glucose";
-import { build, CLOCK_ID, needed, plan, planKey, planSig, PulseGate, sourceOf, type CAct, type Plan } from "./compact";
+import { build, CLOCK_ID, needed, TIMER_ID, plan, planKey, planSig, PulseGate, sourceOf, type CAct, type Plan } from "./compact";
 import { morph } from "./morph";
 import { DEFAULTS, normalize, type CompactSettings } from "./settings-model";
 import { MusicReactor, type Spectrum } from "./music-react";
 import { iconNode, iconUrl, liquid, NOJO_ICONS, type IconName } from "./nojo/nojo-ui";
+import { Deck, LAYOUT_CLS, normalizeCards, type CardsState } from "./cards";
+import { fillPomo, pomoChime, pomoPicker, pomoWhen, type PomoInfo } from "./pomodoro";
 
 // Symbole aus der Bibliothek einsetzen (index.html hat nur Platzhalter <svg data-icon="…">), bevor jemand sie sucht
 document.querySelectorAll<SVGElement>("svg[data-icon]").forEach((s) => {
@@ -56,6 +58,8 @@ type Activity = {
   chart?: ChartData;
   pid?: number;
   expired?: boolean;
+  /** eingebauter Timer als Pomodoro (timer.rs) */
+  pomo?: PomoInfo;
 };
 type Item = { path: string; name: string; ext: string; size: number; kind: string; added: number };
 type Clip = {
@@ -72,7 +76,8 @@ type Dock = "top" | "left" | "right";
 
 const EAR = 10;
 const EAR_X = 14;
-const MAX_H = 680; // Fenster ist 700 hoch (lib.rs WIN_H)
+/** Fenster ist so hoch wie der Monitor (lib.rs): aufgeklappt waechst die Notch mit dem Inhalt, erst am Bildschirmrand scrollt sie */
+const maxH = () => innerHeight - 24;
 /** oben: waagerecht wie die Mac-Notch */
 const SIZE = {
   idle: { w: 190, h: 30, r: 10 },
@@ -105,7 +110,8 @@ const expanded = q(".expanded");
 const player = q(".player");
 const cover = q<HTMLImageElement>(".cover");
 const idleInfo = q(".idle-info");
-const actsEl = q(".acts");
+const cardsEl = q(".cards");
+const cardsAdd = q<HTMLButtonElement>(".cards-add");
 const seekEl = q(".seek");
 const volEl = q(".vol");
 const volSlider = q(".volume");
@@ -244,6 +250,10 @@ const voice = new Voice({
       return { prozent: Math.round(volume.level * 100) };
     },
     timer_starten: async (a) => { await invoke("timer_start", { seconds: Math.max(1, Number(a.minuten) || 1) * 60 }); return { ok: true }; },
+    pomodoro_starten: async (a) => {
+      await invoke("pomo_start", { work: Number(a.fokus_minuten) || 25, brk: Number(a.pause_minuten) || 5 });
+      return { ok: true };
+    },
     timer_stoppen: async () => { await invoke("activity_action", { id: "notch:timer", action: "stop" }); return { ok: true }; },
     status: async () => ({
       uhrzeit: new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }),
@@ -594,6 +604,7 @@ function renderLol() {
     morph(lolSlot, a ? [lgCard(a.lol!, a.icon, () => void invoke("activity_action", { id: a.id, action: "clip" }).catch(() => {}))] : []);
   }
   lolSlot.hidden = !a;
+  slotCard(lolSlot, a?.id ?? "");
   if (a) lgAnimate(document, a.lol!);
 }
 
@@ -614,6 +625,7 @@ function renderEsports() {
     morph(esSlot, a ? [esCard(a.esports!, () => void esOpen(a.id))] : []);
   }
   esSlot.hidden = !a;
+  slotCard(esSlot, a?.id ?? "");
 }
 
 /** Ladering: fuellt sich in der Restzeit bis zum Zuhoeren */
@@ -804,6 +816,7 @@ function renderSport() {
     })] : []);
   }
   sportSlot.hidden = !f;
+  slotCard(sportSlot, f ? "notch:sport" : "");
   // Meldung oben (unter der Leiste), solange sie frisch ist
   const show = news && Date.now() < newsUntil ? news : null;
   const bsig = show ? show.ev.id + show.score : "";
@@ -860,6 +873,9 @@ function tickWatch() {
   pitch.run(!!key && pitch.el.isConnected);
 }
 
+/** Pomodoro: Beginn der letzten Extrazeit (fuer den Klang genau einmal) */
+let pomoOver = 0;
+
 let compactSig = "";
 let compactKey = "";
 let actsSig = "";
@@ -912,7 +928,6 @@ function fitCover() {
 function renderPlayer() {
   const show = !!media;
   player.hidden = !show;
-  idleInfo.hidden = show || acts.length > 0 || !sportSlot.hidden;
   if (!media) return;
   q(".title", player).textContent = media.title;
   const app = appName(media.source);
@@ -983,6 +998,113 @@ function tickCountdowns() {
 
 const rows = new Map<string, HTMLElement>();
 const rowAct = new WeakMap<HTMLElement, Activity>();
+/** angezeigte Zeilen in der Reihenfolge der Activities (natuerliche Reihenfolge der Karten) */
+let rowOrder: string[] = [];
+
+// ---------- Karten: Reihenfolge, wegklicken, zurueckholen (cards.ts) ----------
+
+let cardsState: CardsState = { order: [], hidden: [] };
+const saveCards = () => invoke("cards_set", { cards: cardsState }).catch(() => {});
+const cardHidden = (id: string) => cardsState.hidden.some((h) => h.id === id);
+const deck = new Deck(cardsEl, {
+  onOrder: (keys) => {
+    // sichtbare in der neuen Reihenfolge, dahinter gemerkte, die gerade nicht da sind
+    cardsState.order = [...keys, ...cardsState.order.filter((k) => !keys.includes(k))].slice(0, 80);
+    saveCards();
+  },
+  hold: (on) => {
+    holding = Math.max(0, holding + (on ? 1 : -1));
+    if (!on && !hoverRaw) setHover(false); else render(false);
+  },
+});
+
+/** Karten anderer Apps, Live-Sport und LoL bleiben weggeklickt; eigene Eintraege (Timer, Umwandeln, iPhone-Anfrage, Update) beendet x wie bisher */
+const keepsHidden = (id: string) => !id.startsWith("notch:") || id === "notch:sport";
+const cardPresent = (id: string) => (id === "notch:sport" ? !!cardFocus() : acts.some((a) => a.id === id));
+
+function cardLabel(id: string) {
+  if (id === "notch:sport") return "Live-Sport";
+  const a = acts.find((x) => x.id === id);
+  if (!a) return id;
+  if (a.lol) return `${a.app || "Vantage"} · eigenes Spiel`;
+  return a.app && a.app !== a.title ? `${a.app} · ${a.title}` : a.title;
+}
+
+/** x auf einer Karte oder Rechtsklick auf eine Zeile */
+function dismissCard(id: string, card?: HTMLElement | null) {
+  if (!keepsHidden(id)) { invoke("dismiss_activity", { id }); return; }
+  const hide = () => {
+    if (!cardHidden(id)) cardsState.hidden.push({ id, label: cardLabel(id), seen: Date.now() });
+    saveCards();
+    actsSig = "";
+    render();
+  };
+  if (card) Deck.fadeOut(card, hide); else hide();
+}
+
+function restoreCard(ids: string[]) {
+  cardsState.hidden = cardsState.hidden.filter((h) => !ids.includes(h.id));
+  saveCards();
+  actsSig = "";
+  render();
+}
+
+/** LoL, Profispiel und Sport stecken in einer Huelle mit x — die Huelle ist die Karte */
+function slotCard(slot: HTMLElement, id: string) {
+  const card = slot.parentElement!;
+  if (id) card.dataset.card = id;
+  card.hidden = !id || cardHidden(id);
+}
+
+function layoutCards() {
+  const rowEls = rowOrder.map((id) => rows.get(id)).filter((r): r is HTMLElement => !!r);
+  const slots = [...cardsEl.querySelectorAll<HTMLElement>(":scope > .slot-card")];
+  const natural = [player, ...rowEls, ...slots].filter((e) => !e.hidden);
+  deck.layout(natural, cardsState.order);
+  idleInfo.hidden = natural.length > 0;
+  cardsAdd.hidden = cardsState.hidden.length === 0;
+  // weggeklickte, die noch auftauchen, frisch halten (sonst vergisst die Notch sie nach 30 Tagen)
+  const now = Date.now();
+  let stale = false;
+  for (const h of cardsState.hidden) if (now - h.seen > 86_400_000 && cardPresent(h.id)) { h.seen = now; stale = true; }
+  if (stale) saveCards();
+}
+
+/** „+“ unter den Karten: Liste der weggeklickten zum Zurueckholen */
+function openCardsMenu() {
+  if (!cardsState.hidden.length) return;
+  menu.replaceChildren(el("div", "ctx-label", "Ausgeblendete Karten"));
+  for (const h of cardsState.hidden) {
+    const here = cardPresent(h.id);
+    const b = el("button", "ctx-item card-item" + (here ? "" : " dim"));
+    b.append(el("span", "", h.label), el("small", "", here ? "da" : "gerade nicht aktiv"));
+    b.title = here ? "Zurückholen" : "Zurückholen – erscheint, sobald die App wieder etwas schickt";
+    b.addEventListener("click", () => { closeMenu(); restoreCard([h.id]); });
+    menu.append(b);
+  }
+  if (cardsState.hidden.length > 1) {
+    menu.append(el("div", "ctx-sep"));
+    const all = el("button", "ctx-item", "Alle zurückholen");
+    all.addEventListener("click", () => { closeMenu(); restoreCard(cardsState.hidden.map((h) => h.id)); });
+    menu.append(all);
+  }
+  const host = q(".shape").getBoundingClientRect();
+  const r = cardsAdd.getBoundingClientRect();
+  menu.hidden = false;
+  menuOpen = true;
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  menu.style.left = `${Math.min(Math.max(8, r.left + r.width / 2 - mw / 2 - host.left), host.width - mw - 8)}px`;
+  let top = r.bottom - host.top + 6;
+  if (top + mh > maxH() - 8) top = Math.max(8, r.top - host.top - mh - 6);
+  menu.style.top = `${top}px`;
+  render(false);
+}
+
+/** Klassen einer Zeile setzen, ohne die Layout-Klassen der Karte (Reihenfolge, Ziehen) zu verlieren */
+function setCls(row: HTMLElement, cls: string) {
+  const keep = LAYOUT_CLS.filter((c) => row.classList.contains(c));
+  row.className = [cls, ...keep].join(" ");
+}
 
 /** Tastatur in der Notch an/aus: solange ein Feld den Fokus hat, gibt Rust das Fenster nicht ab. */
 let typing = false;
@@ -1053,9 +1175,18 @@ const bgWidth = () => (dock === "top" ? 480 : 360);
 
 function fillRow(row: HTMLElement, a: Activity) {
   rowAct.set(row, a);
+  if (a.pomo && a.id === TIMER_ID) {
+    // Pomodoro: eigene Karte mit Ring, baut sich nur einmal auf (pomodoro.ts)
+    setCls(row, "act pomo");
+    row.style.setProperty("--accent", a.color ?? "#ff8f70");
+    row.title = "";
+    fillPomo(row, a, svgIcon);
+    return;
+  }
+  delete row.dataset.phase;
   if (isBg(a)) {
     // Verlaufs-Karte (Haze): eigener Aufbau, wird nur neu gezeichnet, wenn sich etwas Sichtbares aendert
-    row.className = "act bg";
+    setCls(row, "act bg");
     row.style.removeProperty("--accent");
     row.title = "";
     const rebuilt = fillCard(row, a, {
@@ -1069,13 +1200,13 @@ function fillRow(row: HTMLElement, a: Activity) {
       const x = el("button", "act-x");
       x.title = "Entfernen";
       x.append(svgIcon("close")!);
-      x.addEventListener("click", (e) => { e.stopPropagation(); invoke("dismiss_activity", { id: a.id }); });
+      x.addEventListener("click", (e) => { e.stopPropagation(); dismissCard(a.id, row); });
       row.append(x);
     }
     return;
   }
   delete row.dataset.bgsig;
-  row.className = "act" + (a.open ? " link" : "") + (a.input ? " has-input" : "");
+  setCls(row, "act" + (a.open ? " link" : "") + (a.input ? " has-input" : ""));
   if (a.color) row.style.setProperty("--accent", a.color);
   else row.style.removeProperty("--accent");
   row.title = a.open ? "Öffnen" : "";
@@ -1094,7 +1225,7 @@ function fillRow(row: HTMLElement, a: Activity) {
   const x = el("button", "act-x");
   x.title = "Entfernen";
   x.append(svgIcon("close")!);
-  x.addEventListener("click", (e) => { e.stopPropagation(); invoke("dismiss_activity", { id: a.id }); });
+  x.addEventListener("click", (e) => { e.stopPropagation(); dismissCard(a.id, row); });
 
   const parts: Element[] = [iconEl(a), text, val, x];
   if (a.progress != null) {
@@ -1135,44 +1266,81 @@ function fillRow(row: HTMLElement, a: Activity) {
 function newRow(id: string) {
   const row = el("div", "act");
   row.dataset.id = id;
+  row.dataset.card = id;
   row.addEventListener("click", () => {
     if (rowAct.get(row)?.open) invoke("activity_open", { id });
   });
-  row.addEventListener("contextmenu", (e) => { e.preventDefault(); invoke("dismiss_activity", { id }); });
+  row.addEventListener("contextmenu", (e) => { e.preventDefault(); if (!rowAct.get(row)?.pomo) dismissCard(id, row); });
   return row;
 }
 
 function renderActs() {
   // nur eine Puls-Zeile: die wichtigste (Garmin über Haze hat Vorrang vor Helio, siehe priority)
   const firstPulse = acts.find((a) => sourceOf(a) === "pulse");
-  const list = acts.filter((a) => !a.esports && !a.lol && (sourceOf(a) !== "pulse" || a === firstPulse)).slice(0, 4);
+  // weggeklickte Karten bleiben weg, auch wenn die App sie neu schickt
+  const list = acts.filter((a) => !a.esports && !a.lol && (sourceOf(a) !== "pulse" || a === firstPulse) && !cardHidden(a.id));
   const sig = JSON.stringify(list) + dock;
   if (sig === actsSig) return;
   actsSig = sig;
   const keep = new Set(list.map((a) => a.id));
   for (const [id, r] of rows) if (!keep.has(id)) { r.remove(); rows.delete(id); }
-  list.forEach((a, i) => {
+  for (const a of list) {
     let row = rows.get(a.id);
-    if (!row) { row = newRow(a.id); rows.set(a.id, row); }
+    // die Reihenfolge macht cards.ts per CSS order — Zeilen werden nie verschoben (das naehme den Fokus)
+    if (!row) { row = newRow(a.id); rows.set(a.id, row); cardsEl.append(row); }
     fillRow(row, a);
-    // nur verschieben, wenn die Reihenfolge wirklich anders ist (Verschieben nimmt den Fokus)
-    if (actsEl.children[i] !== row) actsEl.insertBefore(row, actsEl.children[i] ?? null);
-  });
+  }
+  rowOrder = list.map((a) => a.id);
+}
+
+// ---------- Vorschaubilder (thumb.rs): wie im Explorer, auch HEIC, PDF, Video, Office ----------
+
+const thumbs = new Map<string, Promise<string | null>>();
+/** Vorschau der Windows-Shell als data:-URL (ohne Vorschau das Programmsymbol) */
+function shellThumb(path: string, size: number) {
+  const k = `${size}|${path}`;
+  let t = thumbs.get(k);
+  if (!t) {
+    if (thumbs.size > 300) thumbs.clear();
+    t = invoke<string | null>("thumb", { path, size }).catch(() => null);
+    thumbs.set(k, t);
+  }
+  return t;
+}
+/** Bilder, die WebView2 selbst lesen kann; alles andere (HEIC, AVIF, TIFF, Dokumente) kommt von der Shell */
+const WEB_IMG = ["png", "jpg", "jpeg", "webp", "gif", "bmp", "ico", "svg"];
+const extOf = (p: string) => (/\.([^.\\/]+)$/.exec(p)?.[1] ?? "").toLowerCase();
+
+/** Vorschau in ein Kaestchen legen; Fotos und Videos fuellen es, Symbole stehen frei */
+function putThumb(box: HTMLElement, path: string, kind: string, size: number) {
+  const fill = kind === "image" || kind === "video";
+  const show = (src: string, onFail?: () => void) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.className = fill ? "fill" : "fit";
+    img.onload = () => box.classList.add("has-img");
+    img.onerror = () => { img.remove(); onFail?.(); };
+    img.src = src;
+    box.append(img);
+  };
+  const shell = () => shellThumb(path, size).then((u) => { if (u) show(u); else box.classList.add("no-img"); });
+  if (kind === "image" && WEB_IMG.includes(extOf(path))) show(convertFileSrc(path), () => void shell());
+  else void shell();
 }
 
 function fileThumb(it: Item) {
   const t = el("div", `fthumb k-${it.kind}`);
-  if (it.kind === "image" && !["heic", "avif", "tif", "tiff"].includes(it.ext)) {
-    const img = new Image();
-    img.loading = "lazy";
-    img.decoding = "async";
-    img.src = convertFileSrc(it.path);
-    img.onerror = () => { img.remove(); t.textContent = it.ext.toUpperCase().slice(0, 4); };
-    t.append(img);
-  } else {
-    t.textContent = it.kind === "folder" ? "DIR" : (it.ext || "?").toUpperCase().slice(0, 4);
-  }
+  putThumb(t, it.path, it.kind, 128);
   return t;
+}
+
+/** Art einer Datei fuer die Vorschau (Zwischenablage kennt nur Pfade) */
+function kindOfPath(p: string) {
+  const e = extOf(p);
+  if (!e) return "folder";
+  if (["png", "jpg", "jpeg", "webp", "gif", "bmp", "ico", "tif", "tiff", "avif", "heic", "heif", "svg"].includes(e)) return "image";
+  if (["mp4", "mov", "mkv", "webm", "avi", "wmv", "m4v"].includes(e)) return "video";
+  return "other";
 }
 
 // ---------- Ablage: Auswahl (Strg/Umschalt), Doppelklick, Rechtsklick-Menue ----------
@@ -1288,9 +1456,8 @@ function onClips(list: Clip[]) {
         img.src = convertFileSrc(top.path);
         item.append(img);
       } else if (top.kind === "files") {
-        const n = top.files.length;
-        const ext = (top.files[0]?.split(".").pop() ?? "").toUpperCase();
-        item.textContent = n > 1 ? String(n) : ext.length <= 4 ? ext : "DIR";
+        const first = top.files[0] ?? "";
+        if (first) putThumb(item, first, kindOfPath(first), 64);
       } else {
         item.textContent = "T";
       }
@@ -1326,8 +1493,9 @@ function clipRow(c: Clip) {
     row.title = "Klick: wieder kopieren · Ziehen: als Datei ablegen";
   } else if (c.kind === "files") {
     const first = c.files[0] ?? "";
-    const ext = (first.split(".").pop() ?? "").toUpperCase();
-    lead.textContent = c.files.length > 1 ? String(c.files.length) : ext.length <= 4 && first.includes(".") ? ext : "DIR";
+    // Vorschau statt Dateityp — der steht schon im Namen; mehrere Dateien: Zahl in der Ecke
+    if (first) putThumb(lead, first, kindOfPath(first), 64);
+    if (c.files.length > 1) lead.append(el("b", "clip-n", String(c.files.length)));
     label.textContent = baseName(first) + (c.files.length > 1 ? ` + ${c.files.length - 1} weitere` : "");
     row.title = c.files.join("\n") + "\n\nKlick: wieder kopieren · Ziehen: Dateien ablegen";
   } else {
@@ -1520,7 +1688,7 @@ async function openMenu(x: number, y: number) {
   const left = Math.min(Math.max(8, x - host.left), host.width - mw - 8);
   // Nach unten darf das Menue ueberstehen: die Notch waechst dann mit (siehe render)
   let top = y - host.top;
-  if (top + mh > MAX_H - 8) top = Math.max(8, MAX_H - 8 - mh);
+  if (top + mh > maxH() - 8) top = Math.max(8, maxH() - 8 - mh);
   menu.style.left = `${left}px`;
   menu.style.top = `${top}px`;
   render(false);
@@ -1536,9 +1704,12 @@ function closeMenu() {
 /** Timer einstellen wie auf dem iPhone: drei Drehraeder (Std./Min./Sek.) und ein runder Start-Knopf.
  *  Die letzte Einstellung bleibt gemerkt. */
 let pickWheels: Wheel[] = [];
+type TimerMode = "timer" | "pomo";
 function renderPresets() {
   const box = q(".timer-pick");
   if (box.childElementCount) return;
+  let mode: TimerMode = "timer";
+  try { if (localStorage.getItem("timer-mode") === "pomo") mode = "pomo"; } catch { /* egal */ }
   let last = [0, 5, 0];
   try {
     const s = JSON.parse(localStorage.getItem("timer-pick") ?? "null");
@@ -1557,7 +1728,27 @@ function renderPresets() {
     invoke("timer_start", { seconds: secs });
     setView("home");
   });
-  box.append(picker, start);
+  const tBody = el("div", "tp-body tp-timer");
+  tBody.append(picker, start);
+  const pBody = el("div", "tp-body tp-pomo");
+  pBody.append(pomoPicker((work, brk) => { invoke("pomo_start", { work, brk }); setView("home"); }));
+  // Umschalter wie die Medienquelle im Player („Spotify ⇄“)
+  const chip = el("button", "tp-mode");
+  const setMode = (m: TimerMode) => {
+    mode = m;
+    box.dataset.mode = m;
+    chip.textContent = m === "pomo" ? "Pomodoro" : "Timer";
+    chip.title = m === "pomo" ? "Zum normalen Timer wechseln" : "Zum Pomodoro wechseln";
+    try { localStorage.setItem("timer-mode", m); } catch { /* egal */ }
+    render(false);
+  };
+  chip.addEventListener("click", () => setMode(mode === "pomo" ? "timer" : "pomo"));
+  const head = el("div", "tp-head");
+  head.append(chip);
+  box.append(head, tBody, pBody);
+  box.dataset.mode = mode;
+  chip.textContent = mode === "pomo" ? "Pomodoro" : "Timer";
+  chip.title = mode === "pomo" ? "Zum normalen Timer wechseln" : "Zum Pomodoro wechseln";
 }
 
 function tickProgress() {
@@ -1598,6 +1789,7 @@ function render(full = true) {
     renderVolume();
     tickClock();
   }
+  layoutCards();
 
   state = wanted();
   notch.dataset.state = state;
@@ -1617,7 +1809,9 @@ function render(full = true) {
   }
   if (state === "expanded") {
     expanded.style.setProperty("--xw", `${s.w}px`);
-    const max = side ? Math.floor(innerHeight * 0.92) : MAX_H;
+    const max = side ? Math.floor(innerHeight * 0.92) : maxH();
+    // keine feste Hoehe mehr: so hoch wie der Inhalt, erst am Bildschirmrand scrollt die Notch
+    expanded.style.maxHeight = `${max}px`;
     s.h = Math.min(max, Math.ceil(expanded.scrollHeight));
     // offenes Rechtsklick-Menue: Notch waechst mit, statt es abzuschneiden
     if (menuOpen) s.h = Math.min(max, Math.max(s.h, menu.offsetTop + menu.offsetHeight + 12));
@@ -1693,6 +1887,9 @@ async function main() {
   await listen<{ key: string; src: string }>("media-cover", (e) => { setCover(e.payload.src); render(); });
   await listen<Activity[]>("activities", (e) => {
     acts = e.payload;
+    const pm = acts.find((a) => a.id === TIMER_ID)?.pomo;
+    if (pm?.over_since && pm.over_since !== pomoOver && Date.now() - pm.over_since < 4000) pomoChime(pm.phase);
+    pomoOver = pm?.over_since ?? 0;
     watchFolio(acts);
     // Stand der Umwandlung in der Ablage-Leiste zeigen (man bleibt in der Ablage)
     if (conv) renderFileBar();
@@ -1804,8 +2001,17 @@ async function main() {
   clips.forEach((c) => seenClips.add(c.id));
   clipsReadyAt = Date.now() + 1500;
   dragIcon = await invoke<string>("drag_icon").catch(() => "");
+  cardsState = normalizeCards(await invoke<unknown>("cards_get").catch(() => null));
+  pomoOver = acts.find((a) => a.id === TIMER_ID)?.pomo?.over_since ?? 0;
   renderPresets(); // seitlich sind alle Bereiche gleichzeitig sichtbar
   render();
+
+  // Karten: x auf LoL/Profispiel/Sport, „+“ holt weggeklickte zurueck
+  cardsEl.querySelectorAll<HTMLElement>(":scope > .slot-card").forEach((c) =>
+    q(".card-x", c).addEventListener("click", (e) => { e.stopPropagation(); if (c.dataset.card) dismissCard(c.dataset.card, c); }),
+  );
+  cardsAdd.addEventListener("click", (e) => { e.stopPropagation(); if (menuOpen) closeMenu(); else openCardsMenu(); });
+  pomoWhen(() => state === "expanded");
 
   // Tabs
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((t) =>
@@ -1907,7 +2113,7 @@ async function main() {
   filesEl.addEventListener("click", (e) => { if (e.target === filesEl) { sel.clear(); applySel(); } });
 
   // Die Form selbst (nicht Knoepfe/Regler/Dateien) mit gedrueckter Maus ziehen -> an eine andere Kante andocken
-  const INTERACTIVE = "button, .slider, .file, .files, .file-bar, .ctx, .act, .wheel, .timer-pick, .clips, .drop, .share-qr, .sport, .sp-news";
+  const INTERACTIVE = "button, .slider, .file, .files, .file-bar, .ctx, .act, .cards, .wheel, .timer-pick, .clips, .drop, .share-qr, .sport, .sp-news";
   q(".shape").addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || (e.target as Element).closest(INTERACTIVE)) return;
     const x0 = e.clientX, y0 = e.clientY;

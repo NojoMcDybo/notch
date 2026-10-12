@@ -11,6 +11,7 @@ mod shelf;
 mod spectrum;
 mod sport;
 mod shortcuts;
+mod thumb;
 mod timer;
 mod update;
 mod voice;
@@ -27,8 +28,8 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 
 /// Fenster ist eine unsichtbare Leinwand; die Notch wird darin gezeichnet.
+/// Hoch wie der ganze Monitor: aufgeklappt waechst die Notch mit ihrem Inhalt (ausserhalb der Form klickt man durch).
 const WIN_W: f64 = 640.0;
-const WIN_H: f64 = 700.0; // Platz fuer Player + Blutzucker-Graph + Sport + weitere Zeilen
 
 /// Bereich der Notch im Fenster (CSS-Pixel), meldet das Frontend.
 /// Nur dort faengt das Fenster die Maus ab, ueberall sonst klickt man durch.
@@ -164,6 +165,8 @@ fn config_file(app: &AppHandle) -> Option<PathBuf> {
 /// Einstellungen der kompakten Anzeige (Rangliste, Extras). Das Schema gehoert dem Frontend
 /// (src/settings-model.ts) — Rust speichert es nur und verteilt Aenderungen an alle Fenster.
 static SETTINGS: Mutex<serde_json::Value> = Mutex::new(serde_json::Value::Null);
+/// Karten in der aufgeklappten Notch: Reihenfolge und weggeklickte (Schema in main.ts, `cards` in config.json)
+static CARDS: Mutex<serde_json::Value> = Mutex::new(serde_json::Value::Null);
 
 fn load_config(app: &AppHandle) {
     let Some(f) = config_file(app) else { return };
@@ -177,6 +180,9 @@ fn load_config(app: &AppHandle) {
     if let Some(c) = v.get("compact").filter(|c| c.is_object()) {
         *SETTINGS.lock().unwrap() = c.clone();
     }
+    if let Some(c) = v.get("cards").filter(|c| c.is_object()) {
+        *CARDS.lock().unwrap() = c.clone();
+    }
 }
 
 fn save_config(app: &AppHandle) {
@@ -185,7 +191,23 @@ fn save_config(app: &AppHandle) {
         let _ = std::fs::create_dir_all(dir);
     }
     let compact = SETTINGS.lock().unwrap().clone();
-    let _ = std::fs::write(f, serde_json::json!({ "dock": dock(), "compact": compact }).to_string());
+    let cards = CARDS.lock().unwrap().clone();
+    let _ = std::fs::write(f, serde_json::json!({ "dock": dock(), "compact": compact, "cards": cards }).to_string());
+}
+
+#[tauri::command]
+fn cards_get() -> serde_json::Value {
+    CARDS.lock().unwrap().clone()
+}
+
+/// Reihenfolge / weggeklickte Karten merken (bleibt ueber Neustarts und neue Meldungen der Apps)
+#[tauri::command]
+fn cards_set(app: AppHandle, cards: serde_json::Value) {
+    if !cards.is_object() || cards.to_string().len() > 64 * 1024 {
+        return;
+    }
+    *CARDS.lock().unwrap() = cards;
+    save_config(&app);
 }
 
 #[tauri::command]
@@ -322,11 +344,8 @@ fn place(w: &WebviewWindow, prev: Option<Geo>) -> Option<Geo> {
     let (mw, mh) = (m.size().width as i32, m.size().height as i32);
     *MON.lock().unwrap() = (mx, my, mw, mh);
     let d = dock();
-    let (ww, wh) = if d == "top" {
-        ((WIN_W * s).round() as i32, (WIN_H * s).round() as i32)
-    } else {
-        ((SIDE_W * s).round() as i32, mh)
-    };
+    let ww = ((if d == "top" { WIN_W } else { SIDE_W }) * s).round() as i32;
+    let wh = mh;
     let wx = match d.as_str() {
         "left" => mx,
         "right" => mx + mw - ww,
@@ -471,6 +490,8 @@ pub fn run() {
             dock_drag_start,
             settings_get,
             settings_set,
+            cards_get,
+            cards_set,
             open_settings,
             voice::voice_ready,
             voice::voice_setup,
@@ -498,6 +519,8 @@ pub fn run() {
             clipboard::clip_to_shelf,
             open::open,
             timer::timer_start,
+            timer::pomo_start,
+            thumb::thumb,
             shelf::shelf_list,
             shelf::shelf_add,
             shelf::shelf_remove,
@@ -573,6 +596,7 @@ pub fn run() {
             spectrum::spawn(app.handle().clone());
             gamepad::spawn(app.handle().clone());
             sport::spawn(app.handle().clone());
+            thumb::spawn();
             share::spawn(app.handle().clone());
             Ok(())
         })

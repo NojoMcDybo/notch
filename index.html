@@ -84,59 +84,74 @@
 
           <!-- Jetzt: Musik + Activities -->
           <div class="view v-home">
-            <section class="player" hidden>
-              <button class="cover-btn" title="Player öffnen"><img class="cover" alt="" /></button>
-              <div class="meta">
-                <button class="title-btn" title="Player öffnen">
-                  <div class="title"></div>
-                  <div class="artist"></div>
-                </button>
-                <div class="slider seek" title="Spulen">
-                  <div class="track"><div class="fill"></div></div>
-                  <div class="thumb"></div>
-                </div>
-                <div class="times"><span class="t-pos">0:00</span><button class="src"></button><span class="t-dur"></span></div>
-              </div>
-              <div class="side">
-                <div class="controls">
-                  <button data-act="prev" title="Zurück">
-                    <svg data-icon="track-prev"></svg>
-                  </button>
-                  <button data-act="toggle" class="play" title="Play/Pause">
-                    <svg data-icon="play" class="i-play"></svg>
-                    <svg data-icon="pause" class="i-pause"></svg>
-                  </button>
-                  <button data-act="next" title="Weiter">
-                    <svg data-icon="track-next"></svg>
-                  </button>
-                </div>
-                <div class="vol">
-                  <button class="vol-btn" title="Ton aus/an">
-                    <svg data-icon="volume"></svg>
-                  </button>
-                  <div class="slider volume" title="Lautstärke">
-                    <div class="track"><div class="fill"></div></div>
-                    <div class="thumb"></div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
             <section class="idle-info" hidden>
               <div class="big-clock"></div>
               <div class="date"></div>
             </section>
 
-            <section class="acts"></section>
+            <!-- Karten: eigene Reihenfolge per Ziehen, x blendet aus (cards.ts) -->
+            <div class="cards">
+              <section class="player" data-card="notch:music" hidden>
+                <button class="cover-btn" title="Player öffnen"><img class="cover" alt="" /></button>
+                <div class="meta">
+                  <button class="title-btn" title="Player öffnen">
+                    <div class="title"></div>
+                    <div class="artist"></div>
+                  </button>
+                  <div class="slider seek" title="Spulen">
+                    <div class="track"><div class="fill"></div></div>
+                    <div class="thumb"></div>
+                  </div>
+                  <div class="times"><span class="t-pos">0:00</span><button class="src"></button><span class="t-dur"></span></div>
+                </div>
+                <div class="side">
+                  <div class="controls">
+                    <button data-act="prev" title="Zurück">
+                      <svg data-icon="track-prev"></svg>
+                    </button>
+                    <button data-act="toggle" class="play" title="Play/Pause">
+                      <svg data-icon="play" class="i-play"></svg>
+                      <svg data-icon="pause" class="i-pause"></svg>
+                    </button>
+                    <button data-act="next" title="Weiter">
+                      <svg data-icon="track-next"></svg>
+                    </button>
+                  </div>
+                  <div class="vol">
+                    <button class="vol-btn" title="Ton aus/an">
+                      <svg data-icon="volume"></svg>
+                    </button>
+                    <div class="slider volume" title="Lautstärke">
+                      <div class="track"><div class="fill"></div></div>
+                      <div class="thumb"></div>
+                    </div>
+                  </div>
+                </div>
+              </section>
 
-            <!-- eigenes LoL-Spiel aus Vantage: Wellen, Objectives, CS-Ziel (lolgame.ts) -->
-            <div class="lol-slot" hidden></div>
+              <!-- Zeilen der Activities haengt main.ts hier ein (je eine Karte) -->
 
-            <!-- LoL-Profispiel aus Vantage: Scoreboard wie in der Uebertragung (esports.ts) -->
-            <div class="esports-slot" hidden></div>
+              <!-- eigenes LoL-Spiel aus Vantage: Wellen, Objectives, CS-Ziel (lolgame.ts) -->
+              <div class="slot-card" hidden>
+                <div class="lol-slot" hidden></div>
+                <button class="card-x" title="Karte ausblenden"><svg data-icon="close"></svg></button>
+              </div>
 
-            <!-- Live-Sport: Spielstand, Spielfeld mit Ballverlauf, Ticker -->
-            <div class="sport-slot" hidden></div>
+              <!-- LoL-Profispiel aus Vantage: Scoreboard wie in der Uebertragung (esports.ts) -->
+              <div class="slot-card" hidden>
+                <div class="esports-slot" hidden></div>
+                <button class="card-x" title="Karte ausblenden"><svg data-icon="close"></svg></button>
+              </div>
+
+              <!-- Live-Sport: Spielstand, Spielfeld mit Ballverlauf, Ticker -->
+              <div class="slot-card" data-card="notch:sport" hidden>
+                <div class="sport-slot" hidden></div>
+                <button class="card-x" title="Karte ausblenden"><svg data-icon="close"></svg></button>
+              </div>
+            </div>
+
+            <!-- weggeklickte Karten zurueckholen (cards.ts) -->
+            <button class="cards-add" title="Ausgeblendete Karten zurückholen" hidden><svg data-icon="plus"></svg></button>
           </div>
 
           <!-- Ablage -->
@@ -171,7 +186,8 @@
 
           <!-- Timer -->
           <div class="view v-timer">
-            <div class="timer-pick"></div>
+            <!-- Timer oder Pomodoro: umschalten wie die Medienquelle im Player -->
+            <div class="timer-pick" data-mode="timer"></div>
           </div>
         </div>
       </div>

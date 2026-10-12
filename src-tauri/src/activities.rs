@@ -102,6 +102,9 @@ pub struct Activity {
     /// eigenes LoL-Spiel (Vantage, ingame.rs): Wellen, Objectives, CS-Ziel fuer die eigene Ansicht (src/lolgame.ts)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lol: Option<serde_json::Value>,
+    /// Pomodoro des eingebauten Timers (timer.rs): Phase, Zeiten, Extrazeit — nur von der Notch selbst
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub pomo: Option<serde_json::Value>,
     /// Prozess der App — fuer AllowSetForegroundWindow beim Doppelklick
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,

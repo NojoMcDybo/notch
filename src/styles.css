@@ -104,6 +104,9 @@ svg { display: block; }
   transform-origin: top center;
   transition: opacity 0.12s, transform 0.3s var(--settle);
   pointer-events: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
 }
 #notch[data-state="expanded"] .expanded {
   opacity: 1;
@@ -196,10 +199,39 @@ svg { display: block; }
 .big-clock { font-size: 34px; font-weight: 600; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
 .date { color: var(--fg2); font-size: 13px; }
 
+/* ---------- Karten (cards.ts): eigene Reihenfolge per Ziehen, x blendet aus ---------- */
+.cards { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.card { position: relative; }
+.card[hidden], .slot-card[hidden] { display: none; }
+/* Trennlinie vor grossen Karten (Musik, Blutzucker, Pomodoro, Sport, LoL); kleine Zeilen untereinander nur Abstand */
+.card.sep { margin-top: 9px; }
+.card.sep::before { content: ""; position: absolute; left: 0; right: 0; top: -7px; height: 1px; background: rgba(255, 255, 255, 0.08); pointer-events: none; transition: opacity 0.2s; }
+.act.card.sep::before { left: 8px; right: 8px; }
+/* gezogene Karte: hebt sich an, folgt der Maus; die anderen gleiten (FLIP in cards.ts) */
+.card.lifting { z-index: 4; scale: 1.02; border-radius: 16px; background: #121214; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 16px 36px -6px rgba(0, 0, 0, 0.85); transition: background 0.2s, box-shadow 0.2s; }
+.card.lifting::before, .cards.dragging .card.sep::before { opacity: 0; }
+.cards.dragging .card:not(.lifting) { transition: opacity 0.2s; opacity: 0.78; }
+.cards.dragging, .cards.dragging * { cursor: grabbing; }
+.card.enter { animation: card-in 0.55s var(--spring) both; }
+@keyframes card-in { from { opacity: 0; scale: 0.96; translate: 0 -6px; } to { opacity: 1; scale: 1; translate: 0 0; } }
+/* LoL, Profispiel, Sport: Huelle mit eigenem x oben rechts */
+.slot-card .card-x { position: absolute; top: -4px; right: -6px; z-index: 3; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: #2c2c2e; color: var(--fg2); opacity: 0; transform: scale(0.7); transition: opacity 0.15s, transform 0.15s; }
+.slot-card .card-x svg { width: 10px; height: 10px; fill: currentColor; }
+.slot-card:hover > .card-x { opacity: 1; transform: none; }
+.slot-card .card-x:hover { background: #48484a; color: #fff; }
+.cards.dragging .card-x, .cards.dragging .act-x { display: none; }
+/* „+“: weggeklickte Karten zurueckholen */
+.cards-add { align-self: center; display: grid; place-items: center; width: 26px; height: 26px; margin-top: 2px; border-radius: 50%; color: var(--fg3); background: rgba(255, 255, 255, 0.04); transition: color 0.15s, background 0.15s, transform 0.12s; }
+.cards-add[hidden] { display: none; }
+.cards-add:hover { color: var(--fg); background: rgba(255, 255, 255, 0.12); }
+.cards-add:active { transform: scale(0.9); }
+.cards-add svg { width: 13px; height: 13px; fill: currentColor; }
+.ctx-item.card-item { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+.ctx-item.card-item small { font-size: 10.5px; color: var(--fg2); flex: none; }
+.ctx-item.card-item.dim span { color: var(--fg2); }
+@media (prefers-reduced-motion: reduce) { .card.enter { animation: none; } }
+
 /* Live Activities */
-.acts { display: flex; flex-direction: column; gap: 4px; }
-.acts:empty { display: none; }
-.player:not([hidden]) ~ .acts, .idle-info:not([hidden]) ~ .acts { border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 8px; }
 .act { --accent: #fff; position: relative; display: grid; grid-template-columns: minmax(30px, max-content) 1fr auto; align-items: center; column-gap: 10px; row-gap: 6px; padding: 6px 8px; margin: 0 -8px; border-radius: 12px; transition: background 0.15s; }
 .act.link:hover { background: var(--hover); }
 .act.link:active { background: rgba(255, 255, 255, 0.14); }
@@ -230,13 +262,18 @@ svg { display: block; }
 .drop svg { width: 22px; height: 22px; }
 .v-tray.has-files .drop { display: none; }
 #notch.dragging .v-tray .drop { display: flex; position: absolute; inset: 0; height: auto; z-index: 3; background: rgba(0, 0, 0, 0.82); border-color: var(--fg); color: var(--fg); }
-.files { display: grid; grid-template-columns: repeat(auto-fill, 76px); gap: 6px 8px; max-height: 196px; overflow-y: auto; scrollbar-width: none; }
+.files { display: grid; grid-template-columns: repeat(auto-fill, 76px); gap: 6px 8px; }
 .files:empty { display: none; }
 .file { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 6px 2px 4px; border-radius: 12px; transition: background 0.15s; }
 .file:hover { background: var(--hover); }
 .file.sel { background: rgba(255, 255, 255, 0.16); }
 .fthumb { width: 50px; height: 50px; border-radius: 10px; display: grid; place-items: center; overflow: hidden; background: #1c1c1e; font: 700 11px system-ui; letter-spacing: 0.3px; color: #fff; pointer-events: none; }
 .fthumb img { width: 100%; height: 100%; object-fit: cover; }
+/* Vorschau statt Dateityp (thumb.rs); Symbole ohne Vorschau stehen frei auf dunklem Grund */
+.fthumb.has-img { background: #1c1c1e; }
+.fthumb img.fit { width: 78%; height: 78%; object-fit: contain; }
+.fthumb img { opacity: 0; transition: opacity 0.2s; }
+.fthumb.has-img img { opacity: 1; }
 .fthumb.k-image { background: #2a3d5a; } .fthumb.k-audio { background: #5a2a4d; } .fthumb.k-video { background: #5a3b2a; }
 .fthumb.k-doc { background: #2a4a3d; } .fthumb.k-folder { background: #4a4520; }
 .fname { width: 100%; font-size: 11px; line-height: 1.25; text-align: center; color: var(--fg); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-all; pointer-events: none; }
@@ -386,7 +423,11 @@ svg { display: block; }
 .clip-lead { flex: none; width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; overflow: hidden; background: rgba(255, 255, 255, 0.08); color: var(--fg2); font: 700 9.5px system-ui; letter-spacing: 0.2px; }
 .clip.k-text .clip-lead { font: 600 13px Georgia, serif; }
 .clip.k-files .clip-lead { background: #4a4520; color: #fff; }
+.clip-lead { position: relative; }
 .clip-lead img { width: 100%; height: 100%; object-fit: cover; }
+.clip-lead img.fit { width: 80%; height: 80%; object-fit: contain; }
+.clip.k-files .clip-lead.has-img { background: rgba(255, 255, 255, 0.06); }
+.clip-n { position: absolute; right: -1px; bottom: -1px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px; background: #fff; color: #000; font: 700 8.5px/13px system-ui; text-align: center; box-shadow: 0 0 0 1.5px #000; }
 .clip-text { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .clip-age { flex: none; font-size: 10.5px; color: var(--fg2); font-variant-numeric: tabular-nums; }
 .clip-btn { flex: none; display: none; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--fg2); }
@@ -409,6 +450,8 @@ svg { display: block; }
 .cp-item { position: absolute; z-index: 1; left: 50%; top: 50%; width: 22px; height: 22px; margin: -15px 0 0 -11px; border-radius: 5px; overflow: hidden; display: grid; place-items: center; background: #3a3a3c; color: #fff; font: 600 11px Georgia, serif; opacity: 0; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6); }
 .cp-item.k-files { background: #4a4520; font: 700 8.5px system-ui; }
 .cp-item img { width: 100%; height: 100%; object-fit: cover; }
+.cp-item img.fit { width: 82%; height: 82%; object-fit: contain; }
+.cp-item.k-files.has-img { background: #2c2c2e; }
 .cp-dot { position: absolute; z-index: 3; top: -1px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: #30d158; box-shadow: 0 0 0 2px #000; transform: scale(0); }
 .cp-body { min-width: 0; flex: 1; }
 .cp-label { font-size: 10px; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.06em; line-height: 1.2; }
@@ -517,7 +560,7 @@ canvas.react { position: fixed; inset: 0; width: 100%; height: 100%; pointer-eve
 @keyframes spn-pop { 0% { transform: scale(0.4) rotate(-30deg); } 100% { transform: none; } }
 
 /* Karte */
-.sport-slot { border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 10px; }
+.sport-slot { padding-top: 2px; }
 .sport { display: flex; flex-direction: column; gap: 9px; }
 .sp-card { display: flex; flex-direction: column; gap: 8px; }
 .sp-head { display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.06em; min-height: 24px; }
@@ -666,3 +709,82 @@ canvas.react { position: fixed; inset: 0; width: 100%; height: 100%; pointer-eve
 .act[data-id="notch:share:ask"] { background: rgba(100, 210, 255, 0.07); }
 .act[data-id="notch:share:ask"] .act-actions .pill:first-child { background: #0a84ff; color: #fff; }
 .act[data-id="notch:share:ask"] .act-actions .pill:first-child:hover { background: #3b9bff; }
+
+/* ---------- Timer-Reiter: Timer oder Pomodoro ---------- */
+.timer-pick { flex-direction: column; align-items: stretch; gap: 6px; }
+.tp-head { display: flex; }
+/* Umschalter wie die Medienquelle im Player („Spotify ⇄“) */
+.tp-mode { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11px; color: var(--fg2); background: rgba(255, 255, 255, 0.07); transition: background 0.15s, color 0.15s; }
+.tp-mode::after { content: "⇄"; font-size: 10.5px; }
+.tp-mode:hover { background: rgba(255, 255, 255, 0.16); color: var(--fg); }
+.tp-body { display: none; align-items: center; gap: 12px; animation: tp-in 0.45s var(--settle) both; }
+.timer-pick[data-mode="timer"] .tp-timer, .timer-pick[data-mode="pomo"] .tp-pomo { display: flex; }
+.tp-timer { padding: 0 6px; }
+@keyframes tp-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* Pomodoro einstellen: zwei grosse, leichte Zahlen wie die Drehraeder; Farbe nur im kleinen Etikett */
+.pm-pick { flex: 1; display: flex; align-items: center; gap: 10px; padding: 0 6px; }
+.pm-set { --c: #ffb09b; flex: 1; position: relative; display: flex; flex-direction: column; align-items: center; gap: 0; padding: 2px 0; border-radius: 14px; transition: background 0.2s; }
+.pm-set.k-brk { --c: #8fdcbc; }
+.pm-set:hover { background: rgba(255, 255, 255, 0.035); }
+.pm-set-l { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--fg2); letter-spacing: 0.02em; }
+.pm-set-l::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+.pm-set-v { display: flex; align-items: baseline; gap: 4px; height: 40px; overflow: hidden; }
+.pm-set-v b { display: block; font-size: 32px; line-height: 40px; font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; color: var(--fg); }
+.pm-set-v b.tick-up { animation: pm-tick-up 0.32s var(--settle); }
+.pm-set-v b.tick-down { animation: pm-tick-down 0.32s var(--settle); }
+.pm-set-v small { font-size: 11px; color: var(--fg2); }
+/* Pfeile erscheinen erst beim Drueberfahren, wie bei einem Drehrad */
+.pm-step { position: absolute; left: 50%; width: 44px; height: 14px; margin-left: -22px; border-radius: 7px; display: grid; place-items: center; opacity: 0; transition: opacity 0.15s, background 0.15s; }
+.pm-step::before { content: ""; width: 7px; height: 7px; border: solid var(--fg2); border-width: 1.5px 0 0 1.5px; transform: translateY(2px) rotate(45deg); }
+.pm-step.down::before { transform: translateY(-2px) rotate(225deg); }
+.pm-step.up { top: -12px; }
+.pm-step.down { bottom: -12px; }
+.pm-set:hover .pm-step { opacity: 1; }
+.pm-step:hover { background: rgba(255, 255, 255, 0.08); }
+.pm-step:hover::before { border-color: var(--fg); }
+.pm-start { align-self: center; }
+@keyframes pm-tick-up { from { transform: translateY(14px); opacity: 0.2; } }
+@keyframes pm-tick-down { from { transform: translateY(-14px); opacity: 0.2; } }
+
+/* ---------- Pomodoro-Karte (pomodoro.ts) ----------
+ * Duenner Ring, die Zeit gross und hell, Farbe (Pfirsich fuer Fokus, Mint fuer Pause) nur im Ring und im Etikett.
+ * Phase um: Ring leer, ein Punkt in der Farbe der naechsten Phase kreist langsam, die Extrazeit zaehlt leise hoch
+ * und „Pause starten“ ist der einzige helle Knopf. Danach gleitet die Farbe um und der Ring fuellt sich. */
+.act.pomo { --pc: #ffb09b; --nc: #8fdcbc; grid-template-columns: 50px 1fr auto; column-gap: 14px; padding: 8px; cursor: default; }
+.act.pomo[data-phase="break"] { --pc: #8fdcbc; --nc: #ffb09b; }
+.act.pomo:hover { background: none; }
+.pm-ring { position: relative; width: 50px; height: 50px; }
+.pm-ring svg { width: 100%; height: 100%; overflow: visible; }
+.pm-track { fill: none; stroke: rgba(255, 255, 255, 0.08); stroke-width: 3.5; transition: stroke 0.9s ease; }
+.pm-arc { fill: none; stroke: var(--pc); stroke-width: 3.5; stroke-linecap: round; transition: stroke 0.9s ease, opacity 0.3s; }
+.pm-orbit { transform-origin: 30px 30px; opacity: 0; transition: opacity 0.6s; }
+.pm-dot { fill: var(--nc); }
+/* kleiner Kern in der Mitte: atmet in der Extrazeit */
+.pm-core { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--pc); opacity: 0.85; transition: background 0.9s ease, transform 0.5s var(--spring); }
+.pm-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pm-line { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+.pm-title { color: var(--pc); font-weight: 600; transition: color 0.9s ease; }
+.pm-sub { color: var(--fg2); }
+.pm-sub:empty { display: none; }
+.pm-time { font-size: 28px; line-height: 1.1; font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; color: var(--fg); transition: color 0.6s; }
+.pm-btns { display: flex; align-items: center; gap: 4px; }
+.pm-btn { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: var(--fg2); transition: background 0.15s, color 0.15s, transform 0.12s; }
+.pm-btn:hover { background: var(--hover); color: var(--fg); }
+.pm-btn:active { transform: scale(0.9); }
+.pm-btn svg { width: 15px; height: 15px; fill: currentColor; }
+.pm-go-next { height: 30px; padding: 0 14px; border-radius: 15px; font-size: 12.5px; font-weight: 500; color: var(--nc); background: color-mix(in srgb, var(--nc) 16%, transparent); transition: background 0.2s, transform 0.12s; animation: pm-soft 2.6s ease-in-out infinite; }
+.pm-go-next:hover { background: color-mix(in srgb, var(--nc) 26%, transparent); }
+.pm-go-next:active { transform: scale(0.95); }
+.act.pomo[data-paused] .pm-arc { opacity: 0.4; }
+.act.pomo[data-paused] .pm-time { color: var(--fg2); }
+.act.pomo[data-over] .pm-track { stroke: color-mix(in srgb, var(--nc) 14%, transparent); }
+.act.pomo[data-over] .pm-orbit { opacity: 1; animation: pm-orbit 4s linear infinite; }
+.act.pomo[data-over] .pm-core { background: var(--nc); animation: pm-breathe 2.6s ease-in-out infinite; }
+.act.pomo[data-over] .pm-time { color: var(--fg2); }
+@keyframes pm-orbit { to { transform: rotate(360deg); } }
+@keyframes pm-breathe { 50% { transform: scale(1.5); } }
+@keyframes pm-soft { 50% { background: color-mix(in srgb, var(--nc) 24%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .act.pomo[data-over] .pm-orbit, .act.pomo[data-over] .pm-core, .pm-go-next, .tp-body, .pm-set-v b { animation: none; }
+}

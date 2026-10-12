@@ -75,6 +75,12 @@ const TOOLS = [
   },
   {
     type: "function",
+    name: "pomodoro_starten",
+    description: "Einen Pomodoro starten: Fokus und Pause im Wechsel. Ohne Angaben 25 Minuten Fokus, 5 Minuten Pause.",
+    parameters: { type: "object", properties: { fokus_minuten: { type: "number" }, pause_minuten: { type: "number" } } },
+  },
+  {
+    type: "function",
     name: "timer_stoppen",
     description: "Den laufenden Timer beenden.",
     parameters: { type: "object", properties: {} },
