@@ -6,6 +6,7 @@ import { Voice, type VoiceHooks, type VoiceState } from "./voice";
 import { ClaudeVoice } from "./voice-claude";
 import { Jarvis } from "./jarvis-live";
 import { Wake } from "./wake/wake";
+import { Bubble, type BubbleState } from "./bubble";
 import { Wheel } from "./wheel";
 import { fillCard, isBg, type ChartData } from "./glucose";
 import { build, CLOCK_ID, needed, TIMER_ID, plan, planKey, planSig, PulseGate, sourceOf, type CAct, type Plan } from "./compact";
@@ -179,6 +180,7 @@ let voiceKey = "";
 // ---------- Sprachassistent ----------
 
 const voiceEl = q(".voice");
+const bubble = new Bubble(q("#notch"), () => voice.stop());
 const orb = q(".orb");
 const micBtn = q(".mic-btn");
 const V_LABEL: Record<string, string> = {
@@ -192,18 +194,18 @@ const V_LABEL: Record<string, string> = {
 
 /**
  * Wie zeigt sich der Assistent gerade?
- * - panel: aufgeklappt mit Orb und Text (normales Gespraech; beim Controller nur, solange gehalten wird)
- * - mini:  Controller losgelassen, Antwort laeuft -> kleine Notch mit Animation in der Mitte
- * - off:   nichts (auch "ready": Verbindung steht noch, Notch darf wieder weg)
+ * - bubble: Kreis neben der Notch (bubble.ts) — zuhoeren, nachdenken, arbeiten, sprechen
+ * - panel:  aufgeklappt mit Text, nur noch fuer Fehler und fehlenden Schluessel
+ * - off:    nichts (auch "ready": Verbindung steht noch, Controller-Taste nicht gedrueckt)
  */
-function voiceMode(): "off" | "panel" | "mini" {
+function voiceMode(): "off" | "panel" | "bubble" {
   const s = voiceUi;
   if (s === "off" || s === "ready") return "off";
   if (s === "error" || s === "nokey") return padVoiceErr && Date.now() >= padErrUntil ? "off" : "panel";
-  if (!voice.isPtt) return "panel";
-  if (voice.isHeld) return "panel";
-  return s === "thinking" || s === "speaking" || s === "connecting" ? "mini" : "off";
+  return "bubble";
 }
+/** laufende Werkzeuge des Assistenten (Kreis zeigt dann „arbeitet“) */
+let acting = 0;
 /** Fehler kam vom Controller-Sprechen (verschwindet von selbst) */
 let padVoiceErr = false;
 const PAD_ERR_MS = 6000;
@@ -247,8 +249,8 @@ const voiceHooks: VoiceHooks = {
     if (s === "off" || s === "error") padVoice = false;
   },
   onTranscript: (t) => { q(".v-text", voiceEl).textContent = t; render(false); },
-  onLevel: (l) => orb.style.setProperty("--lvl", l.toFixed(3)),
-  onOutLevel: (l) => vminiLevel(l),
+  onLevel: (l) => { orb.style.setProperty("--lvl", l.toFixed(3)); bubble.level(l); },
+  onOutLevel: (l) => bubble.out(l),
   // Werkzeuge, mit denen der Assistent die Notch bedient — alles ueber die vorhandenen Befehle
   tools: {
     musik: async (a) => { await invoke("media_control", { action: String(a.aktion) }); return { ok: true }; },
@@ -322,6 +324,14 @@ const voiceHooks: VoiceHooks = {
     },
   },
 };
+
+voiceHooks.tools = Object.fromEntries(
+  Object.entries(voiceHooks.tools).map(([name, fn]) => [name, async (a: Record<string, unknown>) => {
+    acting++;
+    render(false);
+    try { return await fn(a); } finally { acting--; render(false); }
+  }]),
+);
 
 // Zwei Wege mit derselben Schnittstelle: OpenAI Realtime (Standard) oder Claude (Einstellungen › App).
 // Gewaehlt wird beim Start einer Sitzung; eine laufende Sitzung bleibt bei ihrem Weg.
@@ -625,11 +635,10 @@ function wanted(): State {
 // ---------- Mitte der kleinen Notch: Ladering, Antwort-Animation, Spielstand ----------
 
 const mid = q(".c-mid");
-type MidKind = "" | "arm" | "voice" | "lol" | "esports" | "sport";
+type MidKind = "" | "arm" | "lol" | "esports" | "sport";
 
 function midKind(): MidKind {
   if (arming()) return "arm";
-  if (voiceMode() === "mini") return "voice";
   if (lolFocus()) return "lol";
   if (esFocus()) return "esports";
   if (sportMid()) return "sport";
@@ -684,27 +693,6 @@ function armEl() {
   return box;
 }
 
-/** Antwort des Assistenten: fuenf Balken, die mit seiner Stimme gehen (beim Nachdenken eine ruhige Welle) */
-function vminiEl() {
-  const box = el("div", "vmini");
-  box.dataset.s = voiceUi;
-  for (let i = 0; i < 5; i++) box.append(el("i"));
-  return box;
-}
-const VBAR = [0.55, 0.85, 1, 0.8, 0.5];
-let vbarPhase = 0;
-function vminiLevel(l: number) {
-  const box = mid.querySelector<HTMLElement>(".vmini");
-  if (!box) return;
-  box.dataset.s = voiceUi;
-  if (voiceUi !== "speaking") return;
-  vbarPhase += 0.35;
-  box.querySelectorAll<HTMLElement>("i").forEach((b, i) => {
-    const wob = 0.75 + 0.25 * Math.sin(vbarPhase + i * 1.3);
-    b.style.setProperty("--s", Math.max(0.16, Math.min(1, l * 1.6 * VBAR[i] * wob)).toFixed(3));
-  });
-}
-
 function midSig() {
   const k = midKind();
   return k === "sport" ? "sport:" + sportMidSig() : k === "lol" ? "lol:" + lgSig(lolFocus()!.lol!) : k === "esports" ? "es:" + esSig(esFocus()!.esports!, false) : k === "arm" ? `arm:${armUntil}` : k;
@@ -718,7 +706,7 @@ function fillMid(clockAtEdge = false, free = false) {
   const k = midKind();
   mid.dataset.kind = k;
   // morph: neue Minute oder neuer Stand aendern nur ihre Zahl, die Wappen bleiben stehen (kein Aufblinken)
-  morph(mid, k === "arm" ? [armEl()] : k === "voice" ? [vminiEl()] : k === "lol" ? [lgMid(lolFocus()!.lol!, free && dock === "top")] : k === "esports" ? [esMid(esFocus()!.esports!, free && dock === "top")] : k === "sport" ? [midEl(sportMid()!, glowNews(), !clockAtEdge)] : []);
+  morph(mid, k === "arm" ? [armEl()] : k === "lol" ? [lgMid(lolFocus()!.lol!, free && dock === "top")] : k === "esports" ? [esMid(esFocus()!.esports!, free && dock === "top")] : k === "sport" ? [midEl(sportMid()!, glowNews(), !clockAtEdge)] : []);
 }
 
 // ---------- iPhone-Austausch (share.rs) ----------
@@ -1881,6 +1869,13 @@ function render(full = true) {
   // unter dem Zeiger weg.
   if (state === "expanded" && hoverRaw && lastRect) rect = union(rect, lastRect);
   lastRect = state === "expanded" && hoverRaw ? rect : null;
+  // Sprachassistent: Kreis neben der Notch, so hoch (seitlich: so breit) wie die eingeklappte Notch
+  const box = dock === "top"
+    ? { x: (innerWidth - s.w) / 2, y: 0, w: s.w, h: s.h, r: s.r }
+    : { x: dock === "left" ? 0 : innerWidth - s.w, y: (innerHeight - s.h) / 2, w: s.w, h: s.h, r: s.r };
+  const fold = (side ? SIDE : SIZE)[state === "idle" ? "idle" : "compact"];
+  const bub = bubble.place(voiceMode() === "bubble", (acting > 0 && voiceUi === "thinking" ? "acting" : voiceUi) as BubbleState, box, dock, e, side ? fold.w : fold.h);
+  if (bub) rect = union(rect, bub);
   invoke("set_hit_rect", { rect: passiveInFullscreen() ? { x: 0, y: 0, w: 0, h: 0 } : rect });
   if (state === "expanded" && countdowns.size) tickCountdowns();
 }

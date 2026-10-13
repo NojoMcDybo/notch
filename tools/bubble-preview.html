@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- Entwurfsseite fuer den Assistenten-Kreis (src/bubble.ts): echte Notch-Styles, Zustaende per Knopf.
+     npm run dev, dann /tools/bubble-preview.html -->
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>Assistent-Kreis</title>
+  <link rel="stylesheet" href="/src/styles.css">
+  <style>
+    html, body { background: #5b6b84 linear-gradient(160deg, #6d84a8, #3b4458); height: 100%; margin: 0; }
+    .ctl { position: fixed; left: 16px; bottom: 16px; display: flex; flex-wrap: wrap; gap: 6px; font: 13px system-ui; }
+    .ctl button { background: #222c; color: #fff; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div id="notch" data-state="compact" data-view="home" data-dock="top" style="--w: 320px; --h: 34px; --r: 13px; --e: 10px">
+    <i class="ear l"></i><i class="ear r"></i>
+    <div class="shape"></div>
+  </div>
+  <div class="ctl">
+    <button data-on="1">hinaus</button><button data-on="0">zurück</button>
+    <button data-s="connecting">verbindet</button><button data-s="listening">hört zu</button>
+    <button data-s="thinking">denkt</button><button data-s="acting">arbeitet</button><button data-s="speaking">spricht</button>
+  </div>
+  <script type="module">
+    import { Bubble } from "/src/bubble.ts";
+    // ?z=2.5: vergroessert (zum Ansehen einzelner Bilder des Uebergangs)
+    const z = Number(new URLSearchParams(location.search).get("z") || 1);
+    if (z !== 1) document.documentElement.style.zoom = String(z);
+    const notch = document.querySelector("#notch");
+    const b = new Bubble(notch, () => place(false));
+    let on = false, st = "listening";
+    const place = (o = on) => {
+      on = o;
+      const w = 320, h = 34;
+      b.place(on, st, { x: (innerWidth / z - w) / 2, y: 0, w, h, r: 13 }, "top", 10, 34);
+    };
+    window.bubble = { place: (o, s) => { if (s) st = s; place(o); }, b };
+    document.querySelectorAll("[data-on]").forEach((x) => x.onclick = () => place(x.dataset.on === "1"));
+    document.querySelectorAll("[data-s]").forEach((x) => x.onclick = () => { st = x.dataset.s; place(); });
+    place(false);
+    // Pegel simulieren
+    let t = 0;
+    setInterval(() => { t += 0.08; const l = Math.max(0, Math.sin(t * 3) * 0.4 + Math.sin(t * 7.3) * 0.3); b.level(l); b.out(l); }, 50);
+  </script>
+</body>
+</html>

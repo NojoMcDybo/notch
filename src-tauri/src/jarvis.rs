@@ -351,12 +351,16 @@ pub fn open_app(handle: &AppHandle, name: &str) -> Result<Done, String> {
         "nach vorn"
     } else {
         win::allow_foreground_any();
-        // Spiele (Epic/Steam) ueber die Adresse ihres Launchers, alles andere ueber shell:AppsFolder
-        let target = if a.id.contains("://") { a.id.clone() } else { format!("shell:AppsFolder\\{}", a.id) };
-        std::process::Command::new("explorer.exe")
-            .arg(target)
-            .spawn()
-            .map_err(|e| format!("Start fehlgeschlagen: {e}"))?;
+        if a.id.contains("://") {
+            // Spiele (Epic/Steam): Adresse ihres Launchers direkt an Windows (ShellExecute) — explorer.exe meldet
+            // nichts zurueck, wenn es eine solche Adresse nicht weitergibt
+            handle.opener().open_url(&a.id, None::<&str>).map_err(|e| format!("Start fehlgeschlagen: {e}"))?;
+        } else {
+            std::process::Command::new("explorer.exe")
+                .arg(format!("shell:AppsFolder\\{}", a.id))
+                .spawn()
+                .map_err(|e| format!("Start fehlgeschlagen: {e}"))?;
+        }
         *LAST.lock().unwrap() = Some(Launch { id: a.id.clone(), name: a.name.clone(), exe, at: Instant::now() });
         "gestartet"
     };
