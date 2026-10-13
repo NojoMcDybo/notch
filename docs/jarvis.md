@@ -21,8 +21,7 @@ schon **während** man spricht. Bei „Öffne Chrome, damit ich …“ startet C
   `D:\Dev\_downloads\laya-build\model-ml-ft` (ONNX) bzw. `model-ml-ft-int4`, noch nicht veröffentlicht.
 - **M2c gebaut (13.10.2026), wartet auf den ersten echten Test:** Mitschrift beim Sprechen, Katalog-Regel, Laya im
   Worker auf der GPU, Vorab-Start, Rückgängig, Schalter in den Einstellungen. Ergebnisse und Abweichungen in 2d.
-  Das Modellpaket liegt lokal fertig (`D:\Dev\_downloads\laya-build\pkg-jarvis`), ist aber **noch nicht** als
-  Release `laya-jarvis-1` hochgeladen — bis dahin meldet der Schalter einen Download-Fehler.
+  Modellpaket als Release `laya-jarvis-1` veröffentlicht (Download von GitHub samt Prüfsummen getestet), in 0.2.18.
 - **Sprachassistent:** Standard jetzt `gpt-realtime-2.1-mini`; Claude (Haiku/Sonnet/Opus 5.5) als Alternative über
   eine Kette Sprache→Text→Claude→Sprache (`src/voice-claude.ts`). Beide nutzen dieselben PC-Werkzeuge aus M1.
 
@@ -258,7 +257,7 @@ Der Katalog liefert die Kandidaten für Layas `app`-Frage und geht als kurze Lis
    Fenster, Seiten, Verneinungen; Vorlagen + Umformulierungen vom großen Modell, einige Tausend Sätze), auf Kaggle
    trainieren (Notebook im Laya-Repo, kostenloses Konto nötig), Schwellen kalibrieren, mit `tools/jarvis/eval.mjs`
    gegenprüfen. Ziel: Fehlstarts < 1 %. Parallel: WebGPU-Rückfälle in ONNX Runtime finden (Ziel < 60 ms).
-4. **M2c – Handeln beim Sprechen** (gebaut, siehe 2d; offen: Paket hochladen, echter Test, Zeit Name → Fenster messen): zweite Sitzung mit `gpt-live-transcribe` (2b), Katalog + Regeln + Laya auf
+4. **M2c – Handeln beim Sprechen** (gebaut, siehe 2d; offen: echter Test, Zeit Name → Fenster messen): zweite Sitzung mit `gpt-live-transcribe` (2b), Katalog + Regeln + Laya auf
    jedem Teiltext mit App-Treffer, Modellpaket wie in Arena laden (`arena/src-tauri/src/laya.rs`, Worker aus
    `arena/src/laya/`), Widerruf, Chips in der Notch. Ziel: App-Name gesprochen → Fenster < 600 ms.
 5. **M3 – Aufgaben fortsetzen:** Planer bekommt die ausgeführten Aktionen; Suche/URL im gestarteten Browser,
