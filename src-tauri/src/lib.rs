@@ -532,6 +532,7 @@ pub fn run() {
             jarvis::jarvis_app,
             jarvis::jarvis_window,
             jarvis::jarvis_page,
+            jarvis::jarvis_video,
             jarvis::jarvis_hint,
             jarvis::jarvis_keywords,
             jarvis::jarvis_undo,

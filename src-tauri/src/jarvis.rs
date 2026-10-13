@@ -29,9 +29,12 @@ pub const ID: &str = "notch:jarvis";
 pub struct App {
     /// wie im Startmenue, z. B. "Google Chrome"
     pub name: String,
-    /// Parsing-Name in shell:AppsFolder: AUMID ("Spotify…!Spotify", "Chrome") oder Pfad mit Known-Folder-GUID
+    /// Parsing-Name in shell:AppsFolder: AUMID ("Spotify…!Spotify", "Chrome") oder Pfad mit Known-Folder-GUID;
+    /// bei Spielen aus Epic/Steam die Start-Adresse ("steam://rungameid/…", "com.epicgames.launcher://apps/…")
     pub id: String,
     key: String,
+    /// Programmdatei, wenn bekannt (Epic): Symbol und "laeuft schon?"
+    exe: Option<String>,
 }
 
 /// Katalog, eine Stunde gueltig
@@ -49,7 +52,66 @@ fn norm(s: &str) -> String {
 }
 
 fn app(name: &str, id: &str) -> App {
-    App { name: name.into(), id: id.into(), key: norm(name) }
+    let name: String = name.chars().filter(|c| !matches!(c, '®' | '™' | '©')).collect();
+    App { key: norm(&name), name: name.trim().into(), id: id.into(), exe: None }
+}
+
+/// nur Buchstaben, Ziffern, - und _ (Teile einer Start-Adresse aus fremden Dateien)
+fn safe_part(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Spiele aus Epic und Steam: beide legen oft keinen Startmenue-Eintrag an (z. B. Rocket League). Gestartet wird ueber
+/// die Adresse des Launchers; die Teile kommen aus deren Dateien und werden deshalb streng geprueft.
+fn load_games() -> Vec<App> {
+    let mut out = Vec::new();
+    // Epic: ein JSON je installiertem Spiel
+    let data = std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into());
+    for e in std::fs::read_dir(format!(r"{data}\Epic\EpicGamesLauncher\Data\Manifests")).into_iter().flatten().flatten() {
+        let Some(v) = std::fs::read_to_string(e.path()).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { continue };
+        let f = |k: &str| v[k].as_str().unwrap_or("").to_string();
+        let (ns, item, id) = (f("CatalogNamespace"), f("CatalogItemId"), f("AppName"));
+        if v["bIsApplication"].as_bool() == Some(false) || f("DisplayName").is_empty() || ![&ns, &item, &id].iter().all(|p| safe_part(p)) {
+            continue;
+        }
+        let mut a = app(&f("DisplayName"), &format!("com.epicgames.launcher://apps/{ns}%3A{item}%3A{id}?action=launch&silent=true"));
+        let exe = std::path::Path::new(&f("InstallLocation")).join(f("LaunchExecutable"));
+        a.exe = exe.is_file().then(|| exe.to_string_lossy().into_owned());
+        out.push(a);
+    }
+    // Steam: appmanifest_<id>.acf in jeder Bibliothek (libraryfolders.vdf).
+    // shortcut: nur der Standard-Installationsort von Steam; liegt Steam woanders, die Registry (SteamPath) lesen.
+    let steam = std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into()) + r"\Steam";
+    let libs = std::fs::read_to_string(format!(r"{steam}\steamapps\libraryfolders.vdf")).unwrap_or_default();
+    let mut dirs: Vec<String> = vdf_values(&libs, "path").into_iter().map(|p| p.replace(r"\\", r"\")).collect();
+    if dirs.is_empty() {
+        dirs.push(steam);
+    }
+    for d in dirs {
+        for e in std::fs::read_dir(format!(r"{d}\steamapps")).into_iter().flatten().flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if !(n.starts_with("appmanifest_") && n.ends_with(".acf")) {
+                continue;
+            }
+            let t = std::fs::read_to_string(e.path()).unwrap_or_default();
+            let (Some(id), Some(name)) = (vdf_values(&t, "appid").into_iter().next(), vdf_values(&t, "name").into_iter().next()) else { continue };
+            if id.chars().all(|c| c.is_ascii_digit()) && !id.is_empty() && !name.contains("Redistributable") {
+                out.push(app(&name, &format!("steam://rungameid/{id}")));
+            }
+        }
+    }
+    out
+}
+
+/// Werte zu einem Schluessel im Valve-Textformat: Zeilen wie `"name"		"Cyberpunk 2077"`
+fn vdf_values(text: &str, key: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|l| {
+            let parts: Vec<&str> = l.split('"').collect();
+            // ["\t\t", key, "\t\t", value, ""]
+            (parts.len() >= 5 && parts[1].eq_ignore_ascii_case(key)).then(|| parts[3].to_string())
+        })
+        .collect()
 }
 
 /// Alle Eintraege von shell:AppsFolder (eigener Faden mit STA, wie der Explorer)
@@ -89,7 +151,14 @@ unsafe fn text(it: &IShellItem, sigdn: SIGDN) -> Option<String> {
 pub fn catalog() -> Vec<App> {
     let mut g = CATALOG.lock().unwrap();
     if g.0.is_none_or(|t| t.elapsed() > Duration::from_secs(3600)) || g.1.is_empty() {
-        *g = (Some(Instant::now()), load_catalog());
+        let mut apps = load_catalog();
+        // Spiele ergaenzen, die nicht schon im Startmenue stehen
+        for game in load_games() {
+            if !apps.iter().any(|a| a.key == game.key) {
+                apps.push(game);
+            }
+        }
+        *g = (Some(Instant::now()), apps);
     }
     g.1.clone()
 }
@@ -126,7 +195,7 @@ fn spoken(a: &App) -> Vec<String> {
 }
 
 /// Programm, das im Satz sicher genannt ist: ganzer Name oder Alias als ganze Woerter. Bei mehreren das zuletzt
-/// genannte ("Öffne Chrome, nein Firefox"), bei Gleichstand der laengere Name. Woerter wie „Einstellungen“
+/// genannte ("Öffne Chrome, nein Firefox"), bei gleichem Ende der laengere Name ("Rocket League", nicht "League"). Woerter wie „Einstellungen“
 /// zaehlen nicht — da wartet die Notch auf das Satzende.
 pub fn mention<'a>(text: &str, apps: &'a [App]) -> Option<&'a App> {
     let t = format!(" {} ", norm(text));
@@ -136,9 +205,10 @@ pub fn mention<'a>(text: &str, apps: &'a [App]) -> Option<&'a App> {
             if n.len() < 3 || NOT_NAMES.contains(&n.as_str()) {
                 continue;
             }
-            if let Some(pos) = t.rfind(&format!(" {n} ")) {
-                if best.is_none_or(|(bp, bl, _)| pos > bp || (pos == bp && n.len() > bl)) {
-                    best = Some((pos, n.len(), a));
+            // Ende des Namens im Satz: "Rocket League" und "League" enden gleich, dann gewinnt der laengere
+            if let Some(end) = t.rfind(&format!(" {n} ")).map(|p| p + n.len()) {
+                if best.is_none_or(|(be, bl, _)| end > be || (end == be && n.len() > bl)) {
+                    best = Some((end, n.len(), a));
                 }
             }
         }
@@ -235,8 +305,12 @@ pub struct Done {
     pub aktion: String,
 }
 
-fn show(app: &AppHandle, title: &str, what: &str, icon_of: Option<&str>, undo: bool) {
-    let icon = icon_of.and_then(|id| crate::thumb::render_now(&format!("shell:AppsFolder\\{id}"), 64));
+fn show(app: &AppHandle, title: &str, what: &str, icon_of: Option<&App>, undo: bool) {
+    let icon = icon_of.and_then(|a| match (&a.exe, a.id.contains("://")) {
+        (Some(exe), _) => crate::thumb::render_now(exe, 64),
+        (None, false) => crate::thumb::render_now(&format!("shell:AppsFolder\\{}", a.id), 64),
+        (None, true) => None,
+    });
     let actions = if undo {
         vec![activities::Action { id: "undo".into(), label: "Rückgängig".into(), icon: Some("close".into()), ..Default::default() }]
     } else {
@@ -271,19 +345,22 @@ pub fn open_app(handle: &AppHandle, name: &str) -> Result<Done, String> {
         return Ok(Done { app: a.name.clone(), aktion: "gestartet".into() });
     }
     // laeuft schon? ueber den Programmnamen, sonst ueber den Fenstertitel ("… - Google Chrome")
-    let running = exe_of(&a.id).is_some_and(|e| win::focus_exe(&e)) || (a.name.len() >= 4 && win::focus_title(&a.name));
+    let exe = a.exe.as_deref().and_then(|p| exe_of(p)).or_else(|| exe_of(&a.id));
+    let running = exe.as_deref().is_some_and(win::focus_exe) || (a.name.len() >= 4 && win::focus_title(&a.name));
     let aktion = if running {
         "nach vorn"
     } else {
         win::allow_foreground_any();
+        // Spiele (Epic/Steam) ueber die Adresse ihres Launchers, alles andere ueber shell:AppsFolder
+        let target = if a.id.contains("://") { a.id.clone() } else { format!("shell:AppsFolder\\{}", a.id) };
         std::process::Command::new("explorer.exe")
-            .arg(format!("shell:AppsFolder\\{}", a.id))
+            .arg(target)
             .spawn()
             .map_err(|e| format!("Start fehlgeschlagen: {e}"))?;
-        *LAST.lock().unwrap() = Some(Launch { id: a.id.clone(), name: a.name.clone(), exe: exe_of(&a.id), at: Instant::now() });
+        *LAST.lock().unwrap() = Some(Launch { id: a.id.clone(), name: a.name.clone(), exe, at: Instant::now() });
         "gestartet"
     };
-    show(handle, &a.name, if running { "nach vorn geholt" } else { "geöffnet" }, Some(&a.id), !running);
+    show(handle, &a.name, if running { "nach vorn geholt" } else { "geöffnet" }, Some(a), !running);
     Ok(Done { app: a.name.clone(), aktion: aktion.into() })
 }
 
@@ -297,18 +374,66 @@ pub fn page_url(adresse: Option<&str>, suche: Option<&str>) -> Result<String, St
         return if ok { Ok(url) } else { Err(format!("„{a}“ ist keine Webadresse.")) };
     }
     let q = suche.map(str::trim).filter(|q| !q.is_empty()).ok_or("Adresse oder Suche fehlt.")?;
-    let enc: String = q
-        .bytes()
+    Ok(format!("https://www.google.com/search?q={}", enc(q)))
+}
+
+/// Text fuer eine Such-Adresse kodieren (Leerzeichen als +)
+fn enc(q: &str) -> String {
+    q.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
             b' ' => "+".into(),
             _ => format!("%{b:02X}"),
         })
-        .collect();
-    Ok(format!("https://www.google.com/search?q={enc}"))
+        .collect()
+}
+
+/// Erste Video-ID auf einer YouTube-Ergebnisseite ("videoId":"<11 Zeichen>")
+fn first_video(html: &str) -> Option<String> {
+    html.match_indices("\"videoId\":\"").find_map(|(i, m)| {
+        let id = html.get(i + m.len()..i + m.len() + 11)?;
+        (id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') && html[i + m.len() + 11..].starts_with('"')).then(|| id.to_string())
+    })
+}
+
+/// Video zu einer Suche: erstes Ergebnis von YouTube (Ergebnisseite lesen, ohne API und Schluessel; SOCS=CAI lehnt
+/// den Cookie-Dialog ab). Klappt das nicht, die Ergebnisseite selbst.
+pub fn video_url(q: &str) -> String {
+    let results = format!("https://www.youtube.com/results?search_query={}", enc(q));
+    let id = ureq::get(&results)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36")
+        .header("Accept-Language", "de-DE,de;q=0.9")
+        .header("Cookie", "SOCS=CAI")
+        .config()
+        .timeout_global(Some(Duration::from_secs(5)))
+        .build()
+        .call()
+        .ok()
+        .and_then(|mut r| r.body_mut().read_to_string().ok())
+        .and_then(|t| first_video(&t));
+    id.map(|i| format!("https://www.youtube.com/watch?v={i}")).unwrap_or(results)
 }
 
 // ---------- Befehle fuer den Sprachassistenten (voice.ts) ----------
+
+/// Video auf YouTube suchen und das erste Ergebnis abspielen
+#[tauri::command]
+pub async fn jarvis_video(app: AppHandle, suche: String) -> Result<String, String> {
+    let q = suche.trim().to_string();
+    if q.is_empty() {
+        return Err("Suche fehlt.".into());
+    }
+    let url = tauri::async_runtime::spawn_blocking({
+        let q = q.clone();
+        move || video_url(&q)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    win::allow_foreground_any();
+    app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())?;
+    show(&app, &q, if url.contains("watch?v=") { "läuft auf YouTube" } else { "auf YouTube gesucht" }, None, false);
+    Ok(url)
+}
 
 #[derive(Serialize)]
 pub struct Miss {
@@ -433,7 +558,7 @@ mod tests {
 
     fn cat() -> Vec<App> {
         ["Google Chrome", "Google Chrome Canary", "Spotify", "Visual Studio Code", "Visual Studio Installer", "League of Legends",
-         "Editor", "Discord", "Microsoft Edge", "Rechner", "Explorer", "Steam", "Steam Support Center"]
+         "Editor", "Discord", "Microsoft Edge", "Rechner", "Explorer", "Steam", "Steam Support Center", "Rocket League®"]
             .iter()
             .map(|n| app(n, n))
             .collect()
@@ -480,10 +605,26 @@ mod tests {
         assert_eq!(m("öffne edge"), Some("Microsoft Edge".into()));
         assert_eq!(m("öffne den Editor"), None, "Allerweltswort: aufs Satzende warten");
         assert_eq!(m("starte League"), Some("League of Legends".into()));
+        assert_eq!(m("starte Rocket League"), Some("Rocket League".into()));
+        assert_eq!(m("Rocket League, nein, League of Legends"), Some("League of Legends".into()));
         assert_eq!(m("öffne youtube"), None);
         let k = keywords(&c, 60);
         assert!(k.contains(&"Chrome".to_string()) && k.contains(&"Spotify".to_string()), "{k:?}");
         assert!(!k.contains(&"Google Chrome".to_string()));
+    }
+
+    #[test]
+    fn spiele_und_videos() {
+        assert_eq!(app("Rocket League®", "x").name, "Rocket League");
+        assert_eq!(app("Battlefield™ V", "x").key, "battlefield v");
+        assert!(safe_part("530145df28a24424923f5828cc9031a1") && safe_part("Sugar"));
+        assert!(!safe_part("a?b") && !safe_part("") && !safe_part("../x"));
+        let acf = "\"AppState\"\n{\n\t\"appid\"\t\t\"1091500\"\n\t\"name\"\t\t\"Cyberpunk 2077\"\n}";
+        assert_eq!(vdf_values(acf, "appid"), ["1091500"]);
+        assert_eq!(vdf_values(acf, "name"), ["Cyberpunk 2077"]);
+        let html = r#"..."videoId":"kurz","videoId":"kXYiU_JCYtU","videoId":"aaaaaaaaaaa""#;
+        assert_eq!(first_video(html).as_deref(), Some("kXYiU_JCYtU"));
+        assert_eq!(first_video("nichts"), None);
     }
 
     #[test]
@@ -503,7 +644,7 @@ mod tests {
     fn jarvis_katalog() {
         let c = catalog();
         println!("{} Programme", c.len());
-        for q in ["Chrome", "Spotify", "Discord", "VS Code", "League", "Explorer", "Editor", "Steam", "Haze", "Notch"] {
+        for q in ["Chrome", "Spotify", "Discord", "VS Code", "League", "Explorer", "Editor", "Steam", "Haze", "Notch", "Rocket League", "Fall Guys", "Cyberpunk", "Sekiro", "Battlefield 1"] {
             let h = find(q, &c);
             println!("{q:>10} -> {:?}", h.iter().map(|(s, a)| format!("{} ({s}) [{}]", a.name, a.id)).collect::<Vec<_>>());
         }
@@ -513,6 +654,8 @@ mod tests {
             println!("{:>22} | {t}", mention(t, &c).map(|a| a.name.as_str()).unwrap_or("-"));
         }
         println!("Stichwoerter: {:?}", keywords(&c, 100));
+        println!("Video: {}", video_url("linkin park numb"));
+        println!("Rocket im Satz: {:?}", mention("Starte Rocket League", &c).map(|a| (&a.name, &a.id, &a.exe)));
         assert!(c.len() > 20);
     }
 }

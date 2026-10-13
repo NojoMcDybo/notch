@@ -263,6 +263,8 @@ const voiceHooks: VoiceHooks = {
     seite_oeffnen: (a) =>
       invoke<string>("jarvis_page", { adresse: a.adresse ? String(a.adresse) : null, suche: a.suche ? String(a.suche) : null })
         .then((url) => ({ geoeffnet: url }), (e) => ({ fehler: String(e) })),
+    video_abspielen: (a) =>
+      invoke<string>("jarvis_video", { suche: String(a.suche ?? "") }).then((url) => ({ geoeffnet: url }), (e) => ({ fehler: String(e) })),
     pomodoro_starten: async (a) => {
       await invoke("pomo_start", { work: Number(a.fokus_minuten) || 25, brk: Number(a.pause_minuten) || 5 });
       return { ok: true };
