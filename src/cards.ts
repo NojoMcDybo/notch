@@ -30,6 +30,18 @@ export function normalizeCards(raw: unknown): CardsState {
   return { order, hidden };
 }
 
+/**
+ * Reihenfolge der Zeilen ohne Springen: Rust sortiert nach Prioritaet und letzter Aktualisierung, dann rutschte jede
+ * Karte bei jeder Meldung nach oben (Folio beim Durchklicken der Treffer, Haze jede Minute). Vorhandene behalten
+ * ihren Platz; neue kommen an die Stelle, die sie in der Liste haben.
+ */
+export function stableOrder(prev: string[], ids: string[]) {
+  const live = new Set(ids);
+  const out = prev.filter((id) => live.has(id));
+  ids.forEach((id, i) => { if (!out.includes(id)) out.splice(Math.min(i, out.length), 0, id); });
+  return out;
+}
+
 const key = (e: HTMLElement) => e.dataset.card ?? "";
 /** grosse Karten bekommen eine Trennlinie; kleine Zeilen untereinander nur Abstand */
 const big = (e: HTMLElement) => !e.classList.contains("act") || e.classList.contains("bg") || e.classList.contains("pomo");
@@ -198,7 +210,8 @@ export class Deck {
     const stop = (e: Event) => { e.stopPropagation(); e.preventDefault(); };
     window.addEventListener("click", stop, { capture: true, once: true });
     setTimeout(() => window.removeEventListener("click", stop, { capture: true }), 60);
-    this.o.hold(false);
+    // erst merken, dann freigeben: hold(false) zeichnet neu und wuerde sonst die alte Reihenfolge anwenden
     if (d.moved) this.o.onOrder(this.seq.map(key));
+    this.o.hold(false);
   }
 }

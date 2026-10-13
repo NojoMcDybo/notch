@@ -10,7 +10,7 @@ import { morph } from "./morph";
 import { DEFAULTS, normalize, type CompactSettings } from "./settings-model";
 import { MusicReactor, type Spectrum } from "./music-react";
 import { iconNode, iconUrl, liquid, NOJO_ICONS, type IconName } from "./nojo/nojo-ui";
-import { Deck, LAYOUT_CLS, normalizeCards, type CardsState } from "./cards";
+import { Deck, LAYOUT_CLS, normalizeCards, stableOrder, type CardsState } from "./cards";
 import { fillPomo, pomoChime, pomoPicker, pomoWhen, type PomoInfo } from "./pomodoro";
 
 // Symbole aus der Bibliothek einsetzen (index.html hat nur Platzhalter <svg data-icon="…">), bevor jemand sie sucht
@@ -1296,8 +1296,9 @@ function renderActs() {
     if (!row) { row = newRow(a.id); rows.set(a.id, row); cardsEl.append(row); }
     fillRow(row, a);
   }
-  rowOrder = list.map((a) => a.id);
+  rowOrder = stableOrder(rowOrder, list.map((a) => a.id));
 }
+
 
 // ---------- Vorschaubilder (thumb.rs): wie im Explorer, auch HEIC, PDF, Video, Office ----------
 
