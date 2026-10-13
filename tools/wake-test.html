@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- „Hey Jarvis“-Worker der Notch (src/wake/worker.ts) im Browser pruefen: npm run dev, WAV-Ordner (16 kHz mono)
+     mit node tools/jarvis/serve-pkg.mjs <ordner> 8768 ausliefern, dann /tools/wake-test.html?f=a.wav,b.wav oeffnen.
+     Ergebnis in #out und window.result ({ datei: Treffer }). -->
+<html lang="de">
+<head><meta charset="utf-8"><title>Hey Jarvis</title></head>
+<body style="font: 14px system-ui; background: #111; color: #eee">
+<pre id="out">lädt …</pre>
+<script type="module">
+const out = document.querySelector("#out");
+const files = (new URLSearchParams(location.search).get("f") ?? "").split(",").filter(Boolean);
+const result = {};
+for (const f of files) {
+  const w = new Worker(new URL("/src/wake/worker.ts", location.href), { type: "module" });
+  let hits = 0, ready;
+  const isReady = new Promise((r) => (ready = r));
+  w.onmessage = (e) => { if (e.data.type === "ready") ready(); if (e.data.type === "wake") hits++; if (e.data.type === "error") out.textContent += `\nFehler: ${e.data.message}`; };
+  await isReady;
+  const b = new DataView(await (await fetch(`http://127.0.0.1:8768/${f}`)).arrayBuffer());
+  let o = 12, pcm;
+  while (o < b.byteLength) {
+    const id = String.fromCharCode(b.getUint8(o), b.getUint8(o + 1), b.getUint8(o + 2), b.getUint8(o + 3)), n = b.getUint32(o + 4, true);
+    if (id === "data") { pcm = new Float32Array(n / 2).map((_, i) => b.getInt16(o + 8 + i * 2, true)); break; }
+    o += 8 + n + (n & 1);
+  }
+  const audio = new Float32Array(16000 + pcm.length + 16000);
+  audio.set(pcm, 16000);
+  for (let i = 0; i + 1280 <= audio.length; i += 1280) w.postMessage({ type: "chunk", data: audio.slice(i, i + 1280) });
+  await new Promise((r) => setTimeout(r, 4000));
+  result[f] = hits;
+  out.textContent += `\n${hits ? "Treffer" : "–"} ${f}`;
+  w.terminate();
+}
+window.result = result;
+</script>
+</body>
+</html>

@@ -5,6 +5,7 @@ import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { Voice, type VoiceHooks, type VoiceState } from "./voice";
 import { ClaudeVoice } from "./voice-claude";
 import { Jarvis } from "./jarvis-live";
+import { Wake } from "./wake/wake";
 import { Wheel } from "./wheel";
 import { fillCard, isBg, type ChartData } from "./glucose";
 import { build, CLOCK_ID, needed, TIMER_ID, plan, planKey, planSig, PulseGate, sourceOf, type CAct, type Plan } from "./compact";
@@ -242,6 +243,7 @@ const voiceHooks: VoiceHooks = {
   onTurnEnd: () => jarvis.turnEnd(),
   onState: (s, detail) => {
     showVoice(s, detail);
+    syncWake();
     if (s === "off" || s === "error") padVoice = false;
   },
   onTranscript: (t) => { q(".v-text", voiceEl).textContent = t; render(false); },
@@ -327,6 +329,12 @@ const voice = {
   hold: (down: boolean) => (down ? pick() : engine).hold(down),
 };
 
+
+// „Hey Jarvis“ (src/wake/): hoert nur, solange es an ist und der Assistent das Mikrofon nicht selbst hat
+const wake = new Wake(() => { if (!voice.active) void toggleVoice(); });
+function syncWake() {
+  wake.set(settings.voice.wake && !voice.active);
+}
 
 async function toggleVoice() {
   if (voice.active && voiceUi !== "ready") { voice.stop(); return; }
@@ -1985,11 +1993,13 @@ async function main() {
   // Einstellungen (Rangliste der kleinen Notch) — aendern sich live aus dem Einstellungsfenster
   await listen<unknown>("settings", (e) => {
     settings = normalize(e.payload);
+    syncWake();
     compactSig = "";
     if (settings.music.react === "off") reactor.stop();
     render();
   });
   settings = normalize(await invoke<unknown>("settings_get").catch(() => null));
+  syncWake();
   await listen<Spectrum>("spectrum", (e) => { if (!hiddenByFullscreen()) reactor.feed(e.payload); });
   q(".settings-btn").addEventListener("click", () => { invoke("open_settings").catch(() => {}); });
   // iPhone: Knopf in der Ablage zeigt den QR-Code (aus: Einstellungen oeffnen)

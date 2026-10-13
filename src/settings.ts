@@ -527,6 +527,7 @@ function syncSegs() {
   setSeg("[data-engine]", (b) => b.dataset.engine === s.voice.engine);
   setSeg("[data-omodel]", (b) => b.dataset.omodel === s.voice.openaiModel);
   setSeg("[data-cmodel]", (b) => b.dataset.cmodel === s.voice.claudeModel);
+  setSeg("[data-wake]", (b) => (b.dataset.wake === "on") === s.voice.wake);
   q(".claude-only").hidden = s.voice.engine !== "claude";
   q(".openai-model").hidden = s.voice.engine === "claude";
   setSeg("[data-slots]", (b) => Number(b.dataset.slots) === s.slots);
@@ -1308,6 +1309,7 @@ async function main() {
   window.addEventListener("beforeunload", () => stopCapture());
   // Sprachassistent: Weg und Modell
   document.querySelectorAll<HTMLButtonElement>("[data-engine]").forEach((b) => b.addEventListener("click", () => { s.voice.engine = b.dataset.engine === "claude" ? "claude" : "openai"; syncSegs(); commit(); }));
+  document.querySelectorAll<HTMLButtonElement>("[data-wake]").forEach((b) => b.addEventListener("click", () => { s.voice.wake = b.dataset.wake === "on"; syncSegs(); commit(); }));
   document.querySelectorAll<HTMLButtonElement>("[data-omodel]").forEach((b) => b.addEventListener("click", () => { s.voice.openaiModel = b.dataset.omodel === "full" ? "full" : "mini"; syncSegs(); commit(); }));
   document.querySelectorAll<HTMLButtonElement>("[data-cmodel]").forEach((b) => b.addEventListener("click", () => {
     const m = b.dataset.cmodel;

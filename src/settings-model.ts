@@ -50,7 +50,13 @@ export type VoiceEngine = "openai" | "claude";
 export type OpenAIModel = "mini" | "full";
 export type ClaudeModel = "haiku" | "sonnet" | "opus";
 export const CLAUDE_IDS: Record<ClaudeModel, string> = { haiku: "claude-haiku-5-5", sonnet: "claude-sonnet-5-5", opus: "claude-opus-5-5" };
-export type VoiceSettings = { engine: VoiceEngine; openaiModel: OpenAIModel; claudeModel: ClaudeModel };
+export type VoiceSettings = {
+  engine: VoiceEngine;
+  openaiModel: OpenAIModel;
+  claudeModel: ClaudeModel;
+  /** „Hey Jarvis“: Mikrofon hoert lokal auf das Wort (src/wake/), startet dann den Assistenten */
+  wake: boolean;
+};
 
 export type ShareSettings = {
   /** aus, bis man es einschaltet: dann lauscht die Notch im lokalen Netz (Port 53317) */
@@ -118,7 +124,7 @@ export const DEFAULTS: CompactSettings = {
   fullscreen: { mode: "hide" },
   sport: { on: true, leagues: ["bl1", "dfbteam"], teams: [], scope: "all", expand: "goals", center: true, pitch: true, fullscreen: true },
   share: { on: false, name: "", folder: "", trusted: [] },
-  voice: { engine: "openai", openaiModel: "mini", claudeModel: "haiku" },
+  voice: { engine: "openai", openaiModel: "mini", claudeModel: "haiku", wake: false },
   shortcuts: { voiceKey: "", pad: { voice: ["dpad-left", "r3"], compact: ["dpad-left", "rb"], expanded: ["dpad-left", "rt"] } },
 };
 
@@ -165,6 +171,7 @@ export function normalize(raw: unknown): CompactSettings {
       engine: vo.engine === "claude" ? "claude" : "openai",
       openaiModel: vo.openaiModel === "full" ? "full" : "mini",
       claudeModel: vo.claudeModel === "sonnet" || vo.claudeModel === "opus" ? vo.claudeModel : "haiku",
+      wake: vo.wake === true,
     },
     share: {
       on: bool(sh.on, DEFAULTS.share.on),

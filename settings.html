@@ -104,6 +104,11 @@
           <div class="field openai-model" role="group" aria-label="OpenAI-Modell">Modell
             <div class="segmented compact"><button data-omodel="mini">mini · günstig</button><button data-omodel="full">2.1 · genauer</button></div>
           </div>
+          <!-- „Hey Jarvis“: lokale Spracherkennung des Worts (src/wake/), startet den Assistenten -->
+          <div class="field" role="group" aria-label="Hey Jarvis">„Hey Jarvis“
+            <div class="segmented compact"><button data-wake="off">Aus</button><button data-wake="on">An</button></div>
+            <small>Das Mikrofon hört dann ständig mit, aber nur hier auf dem PC auf dieses eine Wort; erst danach geht etwas an OpenAI. Windows zeigt dabei das Mikrofon-Symbol.</small>
+          </div>
           <!-- Jarvis M2c: Programme schon beim Sprechen starten (Laya-Modell, laya.rs / jarvis-live.ts) -->
           <div class="field" role="group" aria-label="Schon beim Sprechen handeln">Schon beim Sprechen handeln
             <div class="segmented compact"><button data-early="off">Aus</button><button data-early="on">An</button></div>

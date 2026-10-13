@@ -76,6 +76,10 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
   Startmenü/`shell:AppsFolder` starten oder nach vorn holen, offene Fenster wechseln, Seiten und Suchen im Browser
   öffnen (`src-tauri/src/jarvis.rs`). Nur, was im Katalog steht, Seiten nur http(s); jede Aktion zeigt sich kurz als Zeile.
   Frisch Gestartetes lässt sich dort mit × wieder schließen (15 s lang).
+- **„Hey Jarvis“ (optional, Einstellungen › App):** Das Mikrofon hört lokal auf das Wort (openWakeWord-Modelle in
+  `public/wakeword/`, Pipeline `src/wake/`, ONNX Runtime auf der CPU) und startet dann den Assistenten; vorher geht nichts
+  an OpenAI. Pausiert, solange der Assistent selbst das Mikrofon hat. Modelle nur nicht-kommerziell (CC BY-NC-SA 4.0,
+  `public/wakeword/README.md`). Test: `tools/wake-test.mjs` (Node) und `tools/wake-test.html` (Browser).
 - **Schon beim Sprechen handeln (Jarvis, Schritt 2, optional):** Einstellungen › App › „Schon beim Sprechen handeln“
   lädt ein feingetuntes Laya-Modell (354 MB, GitHub-Release `laya-jarvis-1`, Größe und SHA-256 fest in
   `src-tauri/src/laya.rs`). Dann schreibt eine zweite OpenAI-Sitzung (`gpt-live-transcribe`, ~1,7 ct/min Sprechzeit)
