@@ -55,10 +55,15 @@ const MESSENGERS: &[&str] = &["discord", "whatsapp", "telegram", "signal", "team
 
 enum Job {
     Read,
+    /// Fenster eines bestimmten Programms lesen (z. B. "discord.exe"), auch wenn es nicht vorn ist — nur fuer den Test screen_discord
+    #[cfg_attr(not(test), allow(dead_code))]
+    ReadExe(String),
     Click(usize, bool),
     Type(Option<usize>, String),
     Key(String, bool),
     Shot,
+    /// Discord: Server anklicken, dann den Sprachkanal (tritt bei)
+    Discord(Option<String>, String, bool),
 }
 type Reply = Result<Value, String>;
 static TX: OnceLock<Mutex<Sender<(Job, Sender<Reply>)>>> = OnceLock::new();
@@ -70,6 +75,7 @@ enum Target {
 struct Item {
     target: Target,
     name: String,
+    role: &'static str,
     password: bool,
 }
 
@@ -90,11 +96,13 @@ pub fn spawn() {
             let r = match st.as_mut() {
                 None => Err("Windows-Bedienschnittstelle nicht verfügbar.".to_string()),
                 Some(s) => match job {
-                    Job::Read => s.read(),
+                    Job::Read => target_window().ok_or("Kein Fenster im Vordergrund.".to_string()).and_then(|h| s.read(h)),
+                    Job::ReadExe(e) => window_of(&e).ok_or(format!("{e} hat kein Fenster.")).and_then(|h| s.read(h)),
                     Job::Click(n, ok) => s.click(n, ok),
                     Job::Type(n, t) => s.type_text(n, &t),
                     Job::Key(k, ok) => s.key(&k, ok),
                     Job::Shot => s.shot(),
+                    Job::Discord(server, kanal, dry) => s.discord(server.as_deref(), &kanal, dry),
                 },
             };
             let _ = back.send(r);
@@ -124,6 +132,11 @@ fn target_window() -> Option<HWND> {
     win::top_windows().first().map(|w| HWND(w.hwnd as *mut _))
 }
 
+/// Hauptfenster eines Programms (Programmname wie "discord.exe")
+fn window_of(exe: &str) -> Option<HWND> {
+    win::top_windows().into_iter().find(|w| w.exe.eq_ignore_ascii_case(exe)).map(|w| HWND(w.hwnd as *mut _))
+}
+
 #[allow(non_upper_case_globals)] // Konstanten aus windows-rs
 fn role(ct: UIA_CONTROLTYPE_ID) -> Option<&'static str> {
     Some(match ct {
@@ -142,6 +155,10 @@ fn role(ct: UIA_CONTROLTYPE_ID) -> Option<&'static str> {
     })
 }
 
+fn norm(s: &str) -> String {
+    s.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn short(s: &str, n: usize) -> String {
     let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if s.chars().count() > n { format!("{}…", s.chars().take(n).collect::<String>()) } else { s }
@@ -153,8 +170,7 @@ fn risky(name: &str) -> bool {
 }
 
 impl State {
-    unsafe fn read(&mut self) -> Reply {
-        let hwnd = target_window().ok_or("Kein Fenster im Vordergrund.")?;
+    unsafe fn read(&mut self, hwnd: HWND) -> Reply {
         let title = win::top_windows().into_iter().find(|w| w.hwnd == hwnd.0 as isize);
         self.items.clear();
         self.hwnd = Some(hwnd);
@@ -206,7 +222,7 @@ impl State {
                         line.push_str(&format!(" = „{value}“"));
                     }
                     lines.push(line);
-                    self.items.push(Item { target: Target::El(e), name, password });
+                    self.items.push(Item { target: Target::El(e), name, role: r, password });
                 }
             }
         }
@@ -217,7 +233,7 @@ impl State {
                 for (text, x, y) in found {
                     let n = self.items.len() + 1;
                     lines.push(format!("{n} Text „{}“", short(&text, 80)));
-                    self.items.push(Item { target: Target::Point(x, y), name: text, password: false });
+                    self.items.push(Item { target: Target::Point(x, y), name: text, role: "Text", password: false });
                     if self.items.len() >= MAX_ITEMS {
                         break;
                     }
@@ -330,6 +346,55 @@ impl State {
         let mut out = Cursor::new(Vec::new());
         image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 70).encode_image(&img).map_err(|e| e.to_string())?;
         Ok(json!({ "bild": format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(out.into_inner())) }))
+    }
+
+    /// Bestes Element nach Namen: `part` macht aus dem angezeigten Namen den Vergleichsteil
+    fn best(&self, roles: &[&str], want: &str, part: impl Fn(&str) -> Option<String>) -> Option<usize> {
+        let w = norm(want);
+        self.items
+            .iter()
+            .enumerate()
+            .filter(|(_, it)| roles.contains(&it.role))
+            .filter_map(|(i, it)| {
+                let n = norm(&part(&it.name)?);
+                let sc = if n == w { 3 } else if n.starts_with(&w) || w.starts_with(&n) { 2 } else if n.contains(&w) || w.contains(&n) { 1 } else { 0 };
+                (sc > 0 && !n.is_empty()).then_some((sc, i))
+            })
+            .max_by_key(|x| x.0)
+            .map(|x| x.1 + 1)
+    }
+
+    /// Discord: (optional) Server oeffnen, dann den Sprachkanal anklicken — damit tritt man bei.
+    /// Namen wie Discord sie meldet: Server „Ungelesene Nachrichten, Speerwurf“, Kanal „Lounge (Sprachkanal), Tim …“.
+    /// `dry`: nur nachsehen, was angeklickt wuerde (Test), nichts klicken
+    unsafe fn discord(&mut self, server: Option<&str>, kanal: &str, dry: bool) -> Reply {
+        let hwnd = window_of("discord.exe").ok_or("Discord hat kein Fenster.")?;
+        win::bring_to_front(hwnd.0 as isize);
+        self.hwnd = Some(hwnd);
+        self.read(hwnd)?;
+        let voice = |n: &str| n.split_once(" (Sprachkanal)").map(|x| x.0.to_string());
+        if let Some(sv) = server.filter(|s| !s.trim().is_empty()) {
+            // offener Server steht im Kopf der Kanalliste („Speerwurf, Serveraktionen“); ist es ein anderer: links anklicken
+            let current = self.items.iter().find_map(|it| it.name.strip_suffix(", Serveraktionen").map(norm));
+            if current.as_deref() != Some(norm(sv).as_str()) {
+                let n = self.best(&["Eintrag"], sv, |x| x.rsplit(", ").next().map(String::from)).ok_or(format!("Server „{sv}“ nicht gefunden."))?;
+                if dry {
+                    return Ok(json!({ "server_klick": self.items[n - 1].name }));
+                }
+                self.click(n, true)?;
+                std::thread::sleep(Duration::from_millis(900));
+                self.read(hwnd)?;
+            }
+        }
+        let n = self.best(&["Knopf", "Link"], kanal, voice).ok_or(format!("Sprachkanal „{kanal}“ nicht gefunden."))?;
+        let name = voice(&self.items[n - 1].name).unwrap_or_default();
+        // Server, in dem der Kanal liegt (zum Merken: naechstes Mal reicht der Kanalname)
+        let sv = self.items.iter().find_map(|it| it.name.strip_suffix(", Serveraktionen").map(String::from)).unwrap_or_default();
+        if dry {
+            return Ok(json!({ "kanal_klick": self.items[n - 1].name, "beigetreten": name, "server": sv }));
+        }
+        self.click(n, true)?;
+        Ok(json!({ "beigetreten": name, "server": sv }))
     }
 
     /// Ziel-Fenster nach vorn, bevor Maus oder Tastatur etwas schicken
@@ -499,6 +564,11 @@ pub async fn screen_key(tasten: String, bestaetigt: Option<bool>) -> Reply {
     job(Job::Key(tasten, bestaetigt == Some(true))).await
 }
 
+/// Discord-Sprachkanal beitreten (Discord muss laufen; main/discord.rs startet es bei Bedarf)
+pub fn discord_join(server: Option<String>, kanal: String) -> Reply {
+    run(Job::Discord(server, kanal, false))
+}
+
 #[tauri::command]
 pub async fn screen_shot() -> Reply {
     job(Job::Shot).await
@@ -540,6 +610,30 @@ mod tests {
         println!("{}", serde_json::to_string_pretty(&r).unwrap());
         let s = run(Job::Shot).unwrap();
         println!("Bild: {} Zeichen", s["bild"].as_str().unwrap().len());
+    }
+
+    /// Discord-Fenster lesen, nur Aufbau (keine Texte): cargo test --lib screen_discord -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn screen_discord() {
+        spawn();
+        let r = run(Job::ReadExe("discord.exe".into())).unwrap();
+        let els: Vec<String> = r["elemente"].as_array().unwrap().iter().filter_map(|e| e.as_str().map(String::from)).collect();
+        println!("{} Elemente, davon Text: {}", els.len(), els.iter().filter(|e| e.split(' ').nth(1) == Some("Text")).count());
+        for e in els.iter().filter(|e| e.split(' ').nth(1) != Some("Text")).take(70) {
+            println!("{}", e.chars().take(90).collect::<String>());
+        }
+    }
+
+    /// Discord: welcher Server/Kanal wuerde angeklickt? (klickt nichts)
+    /// DC_SERVER=Speerwurf DC_KANAL=Stream cargo test --lib discord_trocken -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn discord_trocken() {
+        spawn();
+        let sv = std::env::var("DC_SERVER").ok();
+        let k = std::env::var("DC_KANAL").unwrap_or_else(|_| "Lounge".into());
+        println!("{:?}", run(Job::Discord(sv, k, true)));
     }
 
     /// Texterkennung allein auf das vordere Fenster: cargo test --lib screen_ocr -- --ignored --nocapture

@@ -326,6 +326,7 @@ pub async fn spotify_play(app: AppHandle, art: String, was: Option<String>, zufa
             let _ = api(&app, "PUT", &format!("/me/player/shuffle?state={z}&device_id={dev}"), None);
         }
         api(&app, "PUT", &format!("/me/player/play?device_id={dev}"), Some(body))?;
+        crate::memory::remember(&app, "musik", &format!("{art}: {label}"));
         Ok(json!({ "spielt": label }))
     })
     .await

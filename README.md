@@ -99,6 +99,13 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
   `http://127.0.0.1:8738/callback`, Anmeldung mit PKCE ohne geheimen Schlüssel) spielt Jarvis Playlists,
   Lieblingssongs, Songs, Künstler und Alben über die Spotify-Web-API ab (`src-tauri/src/spotify.rs`, Premium nötig).
   Das Erneuerungs-Token liegt mit Windows verschlüsselt in `spotify.bin`.
+- **Gedächtnis und Vorhersage:** „Merk dir das als Zocken“ speichert einen Ablauf (z. B. Playlist + Spiel +
+  Discord-Kanal), „Zocken“ führt ihn aus. Discord-Sprachkanäle lernt Jarvis beim Beitreten mit ihrem Server
+  (danach reicht der Kanalname, ohne Namen der zuletzt genutzte); dazu merkt er sich zuletzt Gespieltes und
+  Gestartetes und nimmt bei fehlenden Angaben das Wahrscheinlichste statt nachzufragen
+  (`src-tauri/src/memory.rs`, `jarvis-memory.json`; Discord-Beitritt per Bedienschnittstelle in `screen.rs`).
+- **Selbst schließen:** Nach erledigtem Auftrag, Dank/Abschied oder wenn er merkt, dass nicht mehr mit ihm geredet
+  wird, legt Jarvis selbst auf (Werkzeug `beenden`).
 - **Chatprogramme:** Enter in Discord, WhatsApp, Telegram, Teams … schickt ab und geht deshalb nur nach Rückfrage.
 - **League of Legends:** „Starte eine Runde ARAM“ legt über die lokale Client-Schnittstelle eine Lobby an und startet
   die Suche, bei Bedarf nach dem Start des Clients (`src-tauri/src/lol.rs`). Annehmen und Championauswahl bleiben bei dir.

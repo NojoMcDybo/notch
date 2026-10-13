@@ -6,6 +6,7 @@ mod gamepad;
 mod jarvis;
 mod laya;
 mod lol;
+mod memory;
 mod screen;
 mod spotify;
 mod media;
@@ -542,6 +543,10 @@ pub fn run() {
             screen::screen_key,
             screen::screen_shot,
             lol::lol_queue,
+            memory::memory_get,
+            memory::memory_set,
+            memory::memory_delete,
+            memory::discord_channel,
             spotify::spotify_status,
             spotify::spotify_connect,
             spotify::spotify_disconnect,

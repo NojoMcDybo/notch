@@ -305,6 +305,13 @@ pub struct Done {
     pub aktion: String,
 }
 
+impl Done {
+    /// eben erst gestartet (Fenster kann noch fehlen)
+    pub fn started(&self) -> bool {
+        self.aktion == "gestartet"
+    }
+}
+
 fn show(app: &AppHandle, title: &str, what: &str, icon_of: Option<&App>, undo: bool) {
     let icon = icon_of.and_then(|a| match (&a.exe, a.id.contains("://")) {
         (Some(exe), _) => crate::thumb::render_now(exe, 64),
@@ -369,6 +376,7 @@ pub fn open_app(handle: &AppHandle, name: &str) -> Result<Done, String> {
         "gestartet"
     };
     show(handle, &a.name, if running { "nach vorn geholt" } else { "geöffnet" }, Some(a), !running);
+    crate::memory::remember(handle, "programm", &a.name);
     Ok(Done { app: a.name.clone(), aktion: aktion.into() })
 }
 

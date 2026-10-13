@@ -201,7 +201,7 @@ export class ClaudeVoice {
       const body: Record<string, unknown> = {
         model,
         max_tokens: 2048,
-        system: SYSTEM,
+        system: SYSTEM + (this.h.extra?.() ?? ""),
         tools: CLAUDE_TOOLS,
         messages: this.messages,
         // kurze Sprachbefehle: wenig Nachdenken, schnelle Antwort
