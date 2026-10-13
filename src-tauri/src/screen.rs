@@ -64,6 +64,8 @@ enum Job {
     Shot,
     /// Discord: Server anklicken, dann den Sprachkanal (tritt bei)
     Discord(Option<String>, String, bool),
+    /// Spotify-App lokal bedienen: Art, was, Zufall, nur nachsehen
+    Spotify(String, String, bool, bool),
 }
 type Reply = Result<Value, String>;
 static TX: OnceLock<Mutex<Sender<(Job, Sender<Reply>)>>> = OnceLock::new();
@@ -103,6 +105,7 @@ pub fn spawn() {
                     Job::Key(k, ok) => s.key(&k, ok),
                     Job::Shot => s.shot(),
                     Job::Discord(server, kanal, dry) => s.discord(server.as_deref(), &kanal, dry),
+                    Job::Spotify(art, was, zufall, dry) => s.spotify(&art, &was, zufall, dry),
                 },
             };
             let _ = back.send(r);
@@ -397,6 +400,89 @@ impl State {
         Ok(json!({ "beigetreten": name, "server": sv }))
     }
 
+    /// Spotify-App ohne Web-API bedienen (fuer alle, ohne Anmeldung): Playlists und Lieblingssongs ueber die
+    /// Seitenleiste („LOL Gemixte Playlist • Nojo“ -> Seite -> „LOL wiedergeben“), Songs/Kuenstler/Alben ueber die
+    /// Suchadresse der App (spotify:search:…) und den ersten passenden „… abspielen“-Knopf.
+    unsafe fn spotify(&mut self, art: &str, was: &str, zufall: bool, dry: bool) -> Reply {
+        let hwnd = window_of("spotify.exe").ok_or("Spotify hat kein Fenster.")?;
+        win::bring_to_front(hwnd.0 as isize);
+        self.hwnd = Some(hwnd);
+        let find = |items: &[Item], pred: &dyn Fn(&Item) -> bool| items.iter().position(|it| pred(it)).map(|i| i + 1);
+        if matches!(art, "playlist" | "lieblingssongs") {
+            let want = if art == "lieblingssongs" { "Lieblingssongs" } else { was };
+            self.read(hwnd)?;
+            // Seitenleiste: „Name Typ • Besitzer“ -> Vergleich mit dem Teil vor „ • “
+            let n = self
+                .best(&["Knopf"], want, |x| x.contains(" • ").then(|| x.split(" • ").next().unwrap_or("").to_string()))
+                .ok_or(format!("„{want}“ steht nicht in deiner Spotify-Bibliothek."))?;
+            let entry = self.items[n - 1].name.clone();
+            if dry {
+                return Ok(json!({ "seitenleiste": entry }));
+            }
+            self.click(n, true)?;
+            std::thread::sleep(Duration::from_millis(1100));
+            self.read(hwnd)?;
+            if zufall {
+                if let Some(z) = find(&self.items, &|it| it.role == "Knopf" && it.name.starts_with("Shuffle für") && it.name.ends_with("aktivieren")) {
+                    self.click(z, true)?;
+                }
+            }
+            // „X wiedergeben“ der geoeffneten Seite (der Knopf im Player heisst nur „Wiedergeben“)
+            let p = self
+                .best(&["Knopf"], want, |x| x.strip_suffix(" wiedergeben").map(String::from))
+                .or_else(|| find(&self.items, &|it| it.role == "Knopf" && it.name.ends_with(" wiedergeben") && it.name.len() > " wiedergeben".len()))
+                .ok_or("Kein Abspielen-Knopf auf der Seite gefunden.")?;
+            self.click(p, true)?;
+            return Ok(json!({ "spielt": entry.split(" • ").next().unwrap_or(want) }));
+        }
+        // Song, Kuenstler, Album: Suche der App; die Ergebnisse kommen nach und nach
+        // Leerzeichen kodieren: sonst endet die Adresse beim ersten Wort
+        let uri = windows::core::HSTRING::from(format!("spotify:search:{}", was.trim().replace(' ', "%20")));
+        windows::Win32::UI::Shell::ShellExecuteW(None, windows::core::w!("open"), &uri, None, None, windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL);
+        let q = norm(was);
+        // Karten heissen „Titel wiedergeben“: nimm die, deren Titel in der Anfrage steckt (laengster Treffer)
+        let pick = |items: &[Item]| {
+            items
+                .iter()
+                .enumerate()
+                .filter(|(_, it)| it.role == "Knopf")
+                .filter_map(|(i, it)| it.name.strip_suffix(" wiedergeben").map(|t| (i, norm(t))))
+                .filter(|(_, t)| t.len() >= 2 && format!(" {q} ").contains(&format!(" {t} ")))
+                .max_by_key(|(_, t)| t.len())
+                .map(|(i, _)| i + 1)
+        };
+        let mut hit = None;
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_millis(350));
+            self.read(hwnd)?;
+            hit = pick(&self.items);
+            // Kuenstler: Karte mit genau dem Namen oder sein Link; sonst weiter warten (Ergebnisse laden noch)
+            let exact = hit.is_some_and(|n| norm(self.items[n - 1].name.trim_end_matches(" wiedergeben")) == q);
+            let link = self.items.iter().any(|it| it.role == "Link" && norm(&it.name) == q);
+            if (art != "kuenstler" && hit.is_some()) || exact || (art == "kuenstler" && link) {
+                break;
+            }
+        }
+        if art == "kuenstler" && hit.is_none_or(|n| norm(self.items[n - 1].name.trim_end_matches(" wiedergeben")) != q) {
+            // Kuenstlerseite oeffnen, dort „Name wiedergeben“
+            let link = find(&self.items, &|it| it.role == "Link" && norm(&it.name) == q).ok_or(format!("Künstler*in „{was}“ nicht gefunden."))?;
+            if dry {
+                return Ok(json!({ "kuenstler_link": self.items[link - 1].name }));
+            }
+            self.click(link, true)?;
+            std::thread::sleep(Duration::from_millis(1200));
+            self.read(hwnd)?;
+            hit = pick(&self.items);
+        }
+        let p = hit.ok_or(format!("Nichts gefunden zu „{was}“."))?;
+        let name = self.items[p - 1].name.trim_end_matches(" wiedergeben").to_string();
+        if dry {
+            return Ok(json!({ "suche_klick": self.items[p - 1].name }));
+        }
+        self.click(p, true)?;
+        Ok(json!({ "spielt": name }))
+    }
+
     /// Ziel-Fenster nach vorn, bevor Maus oder Tastatur etwas schicken
     fn front(&self) {
         if let Some(h) = self.hwnd.or_else(target_window) {
@@ -564,6 +650,11 @@ pub async fn screen_key(tasten: String, bestaetigt: Option<bool>) -> Reply {
     job(Job::Key(tasten, bestaetigt == Some(true))).await
 }
 
+/// Spotify-App lokal bedienen (Spotify muss laufen; spotify.rs startet es bei Bedarf)
+pub fn spotify_local(art: &str, was: &str, zufall: bool) -> Reply {
+    run(Job::Spotify(art.into(), was.into(), zufall, false))
+}
+
 /// Discord-Sprachkanal beitreten (Discord muss laufen; main/discord.rs startet es bei Bedarf)
 pub fn discord_join(server: Option<String>, kanal: String) -> Reply {
     run(Job::Discord(server, kanal, false))
@@ -623,6 +714,29 @@ mod tests {
         for e in els.iter().filter(|e| e.split(' ').nth(1) != Some("Text")).take(70) {
             println!("{}", e.chars().take(90).collect::<String>());
         }
+    }
+
+    /// Fenster eines Programms lesen, nur Bedienelemente: EXE=spotify.exe cargo test --lib screen_exe -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn screen_exe() {
+        spawn();
+        let exe = std::env::var("EXE").unwrap_or_else(|_| "spotify.exe".into());
+        let r = run(Job::ReadExe(exe)).unwrap();
+        for e in r["elemente"].as_array().unwrap().iter().filter_map(|e| e.as_str()).filter(|e| e.split(' ').nth(1) != Some("Text")).take(120) {
+            println!("{}", e.chars().take(100).collect::<String>());
+        }
+    }
+
+    /// Spotify lokal: was wuerde angeklickt? (Suche wird geoeffnet, abgespielt nichts)
+    /// SP_ART=playlist SP_WAS=lol cargo test --lib spotify_trocken -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn spotify_trocken() {
+        spawn();
+        let art = std::env::var("SP_ART").unwrap_or_else(|_| "playlist".into());
+        let was = std::env::var("SP_WAS").unwrap_or_else(|_| "lol".into());
+        println!("{:?}", run(Job::Spotify(art, was, false, true)));
     }
 
     /// Discord: welcher Server/Kanal wuerde angeklickt? (klickt nichts)

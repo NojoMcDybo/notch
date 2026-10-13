@@ -1,6 +1,10 @@
 //! Spotify ueber die offizielle Web-API: Jarvis kennt die eigenen Playlists und Lieblingssongs und spielt direkt ab,
 //! ohne Suche in der App und ohne Klicken (Abspielen braucht Premium).
 //!
+//! Ohne Verbindung (oder wenn die API ablehnt) bedient Jarvis die Spotify-App selbst (screen.rs, `spotify_local`):
+//! fuer alle ohne Anmeldung. Die Web-API ist nur fuer wenige moeglich: seit Februar 2026 hoechstens 5 freigeschaltete
+//! Nutzer je Entwickler-App, der Besitzer braucht Premium.
+//!
 //! Anmeldung: OAuth mit PKCE — kein geheimer Schluessel, nur die Client-ID einer eigenen Spotify-App
 //! (developer.spotify.com, Redirect-URI `http://127.0.0.1:8738/callback`). Der Browser oeffnet die Spotify-Anmeldung,
 //! die Antwort kommt an einen kurzlebigen lokalen Server (nur 127.0.0.1, prueft `state`). Das Erneuerungs-Token liegt
@@ -258,6 +262,7 @@ pub async fn spotify_library(app: AppHandle) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let pls = playlists(&app)?;
         let liked = api(&app, "GET", "/me/tracks?limit=1", None)?["total"].as_u64().unwrap_or(0);
+        // ohne Verbindung: die Bibliothek steht in der Seitenleiste der App (bildschirm_lesen)
         Ok(json!({ "playlists": pls.into_iter().map(|p| p.0).collect::<Vec<_>>(), "lieblingssongs": liked }))
     })
     .await
@@ -287,11 +292,43 @@ fn device(app: &AppHandle) -> Result<String, String> {
     Err("Die Spotify-App meldet sich nicht als Gerät.".into())
 }
 
-/// Abspielen: `art` = playlist | lieblingssongs | song | kuenstler | album
+/// Abspielen: `art` = playlist | lieblingssongs | song | kuenstler | album. Ueber die Web-API, wenn verbunden,
+/// sonst (oder wenn sie ablehnt) ueber die Spotify-App selbst.
 #[tauri::command]
 pub async fn spotify_play(app: AppHandle, art: String, was: Option<String>, zufall: Option<bool>) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let was = was.unwrap_or_default();
+        let web = if refresh_token(&app).is_some() { play_web(&app, &art, &was, zufall) } else { Err(String::new()) };
+        let r = web.or_else(|_| play_local(&app, &art, &was, zufall == Some(true)))?;
+        if let Some(l) = r["spielt"].as_str() {
+            crate::memory::remember(&app, "musik", &format!("{art}: {l}"));
+        }
+        Ok(r)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Spotify-App selbst bedienen (startet sie bei Bedarf und wartet aufs Fenster)
+fn play_local(app: &AppHandle, art: &str, was: &str, zufall: bool) -> Result<Value, String> {
+    let fresh = crate::jarvis::open_app(app, "Spotify").map_err(|e| format!("Spotify startet nicht: {e}"))?.started();
+    let mut last = Err("Spotify hat kein Fenster.".to_string());
+    for i in 0..(if fresh { 20 } else { 1 }) {
+        if i > 0 {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        last = crate::screen::spotify_local(art, was, zufall);
+        if last.as_ref().is_ok_and(|_| true) || last.as_ref().is_err_and(|e| !e.contains("kein Fenster")) {
+            break;
+        }
+    }
+    last
+}
+
+fn play_web(app: &AppHandle, art: &str, was: &str, zufall: Option<bool>) -> Result<Value, String> {
+    {
+        let app = app.clone();
+        let (art, was) = (art.to_string(), was.to_string());
         let (body, label) = match art.as_str() {
             "lieblingssongs" => {
                 let me = api(&app, "GET", "/me", None)?;
@@ -326,11 +363,8 @@ pub async fn spotify_play(app: AppHandle, art: String, was: Option<String>, zufa
             let _ = api(&app, "PUT", &format!("/me/player/shuffle?state={z}&device_id={dev}"), None);
         }
         api(&app, "PUT", &format!("/me/player/play?device_id={dev}"), Some(body))?;
-        crate::memory::remember(&app, "musik", &format!("{art}: {label}"));
         Ok(json!({ "spielt": label }))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    }
 }
 
 #[cfg(test)]

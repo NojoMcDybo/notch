@@ -95,6 +95,10 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
   (UI Automation; meldet ein Fenster nichts, liest die Windows-Texterkennung offline), `klicken`, `tippen`, `taste`
   bedienen es, `bildschirm_ansehen` schickt nur auf Anforderung ein verkleinertes Bild ans Modell. Knöpfe wie
   Senden/Kaufen/Löschen erst nach Rückfrage, nie in Passwortfelder (`src-tauri/src/screen.rs`).
+- **Spotify ohne Anmeldung:** Jarvis bedient die Spotify-App selbst — Playlists und Lieblingssongs über die
+  Seitenleiste, Songs/Künstler/Alben über die Suchadresse der App und den passenden „… wiedergeben“-Knopf
+  (`screen.rs`, `spotify_local`). Das geht für alle; die Web-API unten ist optional (Spotify erlaubt seit Februar
+  2026 je Entwickler-App nur 5 freigeschaltete Nutzer).
 - **Spotify direkt:** Nach dem Verbinden (Einstellungen › App, eigene Spotify-App mit Redirect-URI
   `http://127.0.0.1:8738/callback`, Anmeldung mit PKCE ohne geheimen Schlüssel) spielt Jarvis Playlists,
   Lieblingssongs, Songs, Künstler und Alben über die Spotify-Web-API ab (`src-tauri/src/spotify.rs`, Premium nötig).
