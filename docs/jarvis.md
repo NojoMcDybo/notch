@@ -4,6 +4,17 @@ Arbeitsname. Ziel: Der Sprachassistent der Notch bekommt Zugriff auf den PC. Er 
 nach vorn, öffnet Seiten und Dateien und arbeitet Aufgaben in mehreren Schritten ab. Wichtigster Punkt: Er handelt
 schon **während** man spricht. Bei „Öffne Chrome, damit ich …“ startet Chrome, bevor der Satz zu Ende ist.
 
+## Stand (13.10.2026)
+
+- **M1 umgesetzt** (`src-tauri/src/jarvis.rs`): App-Katalog aus `shell:AppsFolder` (auf diesem PC 229 Programme),
+  Werkzeuge `programm_starten`, `fenster_nach_vorn`, `seite_oeffnen` im Sprachassistenten, kurze Bestätigungszeile
+  in der Notch. Noch ohne Rückgängig-× und ohne Schalter in den Einstellungen.
+- **M2a gemessen** (Abschnitt 2a): Laya erkennt die App sicher, aber Absicht, „fertig gesagt“ und Verneinung
+  ohne Feintuning nicht. Entwurf deshalb angepasst: App, „fertig“ und Verneinung über Regeln + Katalog,
+  Laya nur noch für die Absicht — und erst nach Feintuning (M2b).
+- **Teiltexte:** nur `gpt-live-transcribe` liefert Text *während* des Sprechens, und laut Doku nur in einer
+  eigenen Transkriptions-Sitzung (siehe 2b).
+
 ## 1. Die Kernidee: verstehen, während gesprochen wird
 
 Heute: Mikrofon → OpenAI Realtime → Antwort/Werkzeug erst nach dem Satzende (Server-VAD).
@@ -84,14 +95,60 @@ keine Zero-Shot-Engine“. Das Beispiel „Browser-Agent“ dort ging durch Fein
 Speicher: Das multilinguale Modell ist als fp32-ONNX grob 1,3 GB. Einmal beim Einschalten von Jarvis laden,
 nicht bei jedem Gespräch.
 
-### Spracherkennung (Teiltexte) — weiterhin nötig
+### 2a. Messung M2a (13.10.2026, `tools/jarvis/`)
 
-Laya braucht Text. Für die Teiltexte:
-- **Zuerst ohne neue Abhängigkeit:** Die bestehende Realtime-Sitzung schreibt mit (`input_audio_transcription`
-  mit einem Streaming-Modell) und liefert `conversation.item.input_audio_transcription.delta`.
-  Messen, wie früh die Teiltexte kommen.
-- **Falls zu spät:** lokale Streaming-Erkennung, z. B. sherpa-onnx (Zipformer/Paraformer) oder Moonshine,
-  ebenfalls auf der GPU.
+51 deutsche Sätze (`tools/jarvis/saetze.json`: Befehle, Wechseln, Suchen, Fragen ohne PC-Bezug, Verneinungen,
+abgeschnittene Anfänge), die vier Fragen aus 2. in einem Durchlauf, `laya-multilingual` ohne Feintuning
+(`node tools/jarvis/eval.mjs <modellordner>`):
+
+| | fp32 (1,3 GB) | INT4 (250 MB) |
+|---|---|---|
+| App richtig | 63 % — bei genanntem Namen fast immer, Sicherheit 0,99–1,00 | 65 % |
+| Absicht richtig | 59 % (verwechselt Programm/Fenster/Seite) | 67 % |
+| „fertig gesagt“ | 14 % — sagt fast immer „nein“ | 12 % |
+| Verneinung erkannt | 0 von 5 | 0 von 5 |
+| würde richtig starten | 0 von 17 | 0 von 17, 2 Fehlstarts |
+
+Andere Frageformen helfen nicht: Ja/Nein „Fordert er auf, ein Programm zu öffnen?“ auf Deutsch 21 Fehlstarts
+(„Ich hab gestern Chrome deinstalliert“ = ja), auf Englisch 12 verpasste Befehle.
+
+**Zeit je Durchlauf** (Ryzen 7 5700X3D / Radeon RX 6700 XT; Encoder, der teure Teil):
+
+| Laufzeit | 64 Tokens | 160 Tokens (typisch) | 256 Tokens |
+|---|---|---|---|
+| CPU nativ (onnxruntime-node), ganzes Laya, fp32 / INT4 | – | 236 / 302 ms | – |
+| WASM, 8 Threads, INT4 | 164 ms | 317 ms | 487 ms |
+| **WebGPU, INT4** | 146 ms | **146 ms** | 200 ms |
+| WebGPU, fp16 | 221 ms | 236 ms | 269 ms |
+
+- WebGPU läuft nur mit `graphOptimizationLevel: "basic"`; mit voller Optimierung bricht ONNX Runtime ab
+  („SkipLayerNormalization: Beta must be 1D“).
+- Die Zeit hängt kaum an der Länge: fester Aufwand, vermutlich rechnet ONNX Runtime einzelne Knoten nicht auf der
+  GPU und kopiert hin und her. Nachsehen, welche (ausführliches Log), bevor man weiter optimiert.
+- Gemessen im Chromium des Browser-Bereichs (`tools/jarvis/webgpu.html`, `serve-bench.mjs`), AMD RDNA 2, kein
+  Software-Ersatz. In der WebView2 der Notch noch einmal prüfen.
+
+**Folgerung — Entwurf angepasst:**
+- **Regeln statt Laya für App, „fertig“, Verneinung:** Der Katalogabgleich (`jarvis::find`) erkennt die App nur
+  bei ganzem Wort — „Öffne Chr“ trifft nichts, „Öffne Chrome“ trifft. Damit ist „fertig gesagt“ erledigt.
+  Verneinung über feste Wörter (nicht, nein, doch nicht, stattdessen, lass mal).
+- **Laya nur für die Absicht:** eine einzige Frage („Befehl, das Programm jetzt zu öffnen“ vs. „nur erwähnt“ vs.
+  „Fenster“ vs. „Seite“), und nur dann, wenn der Katalog im Teiltext eine App findet. Das spart Durchläufe:
+  ~150 ms je Treffer statt je Teiltext.
+- **Ohne Feintuning nicht live schalten.** Bis M2b fertig ist, entscheidet das große Modell nach dem Satzende
+  (M1, funktioniert schon).
+
+### 2b. Teiltexte (Spracherkennung beim Sprechen)
+
+Laya braucht Text. Stand der OpenAI-Doku (Realtime Transcription):
+- **`gpt-live-transcribe`** liefert `conversation.item.input_audio_transcription.delta` *während* des Sprechens,
+  Verzögerung einstellbar (`delay`: minimal … xhigh). Dokumentiert nur für Sitzungen vom Typ `transcription`,
+  ohne Server-VAD (selbst `input_audio_buffer.commit` senden). Praktisch: `keywords` nimmt Begriffe auf — dort
+  die App-Namen aus dem Katalog mitgeben.
+- `gpt-transcribe` (auch im Sprachassistenten nutzbar) liefert erst nach dem Satzende — für Jarvis zu spät.
+- Also: **zweite, parallele Sitzung** nur zum Mitschreiben, dasselbe Mikrofon, Commit, wenn der Assistent
+  „speech_stopped“ meldet. Kostet zusätzlich je Minute. Alternative ohne Kosten: lokale Streaming-Erkennung
+  (sherpa-onnx, Moonshine) — aufwendiger, Deutsch-Qualität offen.
 
 ## 3. Aktionen (Rust, neues Modul `jarvis.rs`)
 
@@ -133,12 +190,15 @@ Der Katalog liefert die Kandidaten für Layas `app`-Frage und geht als kurze Lis
 
 1. **M1 – Programme starten (ohne Früherkennung):** App-Katalog in Rust, Werkzeuge `programm_starten`,
    `fenster_nach_vorn` und `seite_oeffnen` im bestehenden Realtime-Assistenten, Aktionszeile in der Notch.
-2. **M2a – Laya messen:** `laya-multilingual` nach ONNX exportieren, mit `laya-ts` + WebGPU in der Notch laden,
-   die vier Fragen oben auf 100 echten deutschen Sätzen und ihren Präfixen testen: Trefferquote, Zeit je Durchlauf
-   auf der RX 6700 XT, Speicher. Parallel: wie früh kommen Realtime-Teiltexte?
-3. **M2b – Feintunen:** Datensatz aus dem App-Katalog erzeugen (siehe 2.), auf Kaggle trainieren, Schwellen
-   kalibrieren. Ziel: falsches spekulatives Starten < 1 %, Zeit vom gesprochenen App-Namen bis zum Fenster < 600 ms.
-4. **M2c – Handeln beim Sprechen:** Früherkenner live schalten, Widerruf, Chips in der Notch.
+2. ~~**M2a – Laya messen**~~ ✓ (2a): App gut, Absicht/fertig/Verneinung ohne Feintuning unbrauchbar;
+   WebGPU INT4 ~150 ms.
+3. **M2b – Feintunen (nur Absicht):** Datensatz aus dem App-Katalog erzeugen (Befehle, bloße Erwähnungen,
+   Fenster, Seiten, Verneinungen; Vorlagen + Umformulierungen vom großen Modell, einige Tausend Sätze), auf Kaggle
+   trainieren (Notebook im Laya-Repo, kostenloses Konto nötig), Schwellen kalibrieren, mit `tools/jarvis/eval.mjs`
+   gegenprüfen. Ziel: Fehlstarts < 1 %. Parallel: WebGPU-Rückfälle in ONNX Runtime finden (Ziel < 60 ms).
+4. **M2c – Handeln beim Sprechen:** zweite Sitzung mit `gpt-live-transcribe` (2b), Katalog + Regeln + Laya auf
+   jedem Teiltext mit App-Treffer, Modellpaket wie in Arena laden (`arena/src-tauri/src/laya.rs`, Worker aus
+   `arena/src/laya/`), Widerruf, Chips in der Notch. Ziel: App-Name gesprochen → Fenster < 600 ms.
 5. **M3 – Aufgaben fortsetzen:** Planer bekommt die ausgeführten Aktionen; Suche/URL im gestarteten Browser,
    Dateien öffnen, Fenster anordnen.
 6. **M4 – Bedienen:** UI Automation für Tippen/Klicken mit Bestätigung (Stufe 2).
@@ -148,5 +208,7 @@ Der Katalog liefert die Kandidaten für Layas `app`-Frage und geht als kurze Lis
 - Name: „Jarvis“ oder etwas Eigenes? Aktivierungswort, oder weiter Tastenkürzel/Controller?
 - Welche Apps sollen von Anfang an sicher funktionieren (Chrome, Spotify, VS Code, Discord, League …)?
 - Soll Jarvis Fenster auch schließen dürfen (Stufe 1 oder 2)?
+- Kaggle-Konto für das Feintunen (M2b)? Und ist die zweite, kostenpflichtige Mitschreib-Sitzung in Ordnung,
+  oder lieber lokale Spracherkennung?
 - Soll Laya später mehr entscheiden als „Programm öffnen“, z. B. ob eine Anfrage überhaupt das große Modell
   braucht (spart Kosten und Zeit bei einfachen Befehlen wie „lauter“, „nächstes Lied“)?

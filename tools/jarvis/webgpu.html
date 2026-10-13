@@ -1,0 +1,37 @@
+<!doctype html><meta charset="utf-8"><title>Laya WebGPU</title>
+<!-- Encoder-Zeit von Laya im Browser messen (docs/jarvis.md, M2a). Server: node tools/jarvis/serve-bench.mjs <laya-build-Ordner>,
+     dann http://127.0.0.1:8770/?ep=webgpu&opt=basic&m=model-ml-int4 -->
+<pre id="o">läuft …</pre>
+<script type="module">
+import * as ort from "/laya/laya-ts/node_modules/onnxruntime-web/dist/ort.all.bundle.min.mjs";
+const o = document.getElementById("o");
+const log = (s) => (o.textContent += "\n" + s);
+ort.env.wasm.wasmPaths = "/laya/laya-ts/node_modules/onnxruntime-web/dist/";
+ort.env.wasm.numThreads = self.crossOriginIsolated ? 8 : 1;
+log(`webgpu: ${!!navigator.gpu} · crossOriginIsolated: ${self.crossOriginIsolated}`);
+if (navigator.gpu) { const a = await navigator.gpu.requestAdapter(); log("Adapter: " + (a ? JSON.stringify(a.info ?? {}) : "keiner")); }
+const model = new URLSearchParams(location.search).get("m") ?? "model-ml-int4";
+log("Modell: " + model);
+const buf = await (await fetch(`/${model}/encoder.onnx`)).arrayBuffer();
+for (const ep of (new URLSearchParams(location.search).get("ep") ?? "webgpu,wasm").split(",")) {
+  try {
+    const t0 = performance.now();
+    const opt = new URLSearchParams(location.search).get("opt") ?? "basic";
+    const s = await ort.InferenceSession.create(buf, { executionProviders: [ep], graphOptimizationLevel: opt });
+    log(`opt=${opt}`);
+    log(`\n${ep}: laden ${(performance.now() - t0).toFixed(0)} ms`);
+    for (const seq of [64, 160, 256]) {
+      const ids = new BigInt64Array(seq).map((_, i) => BigInt(i === 0 ? 1 : 1000 + i));
+      const mask = new BigInt64Array(seq).fill(1n);
+      const feeds = { input_ids: new ort.Tensor("int64", ids, [1, seq]), attention_mask: new ort.Tensor("int64", mask, [1, seq]) };
+      await s.run(feeds); // aufwaermen
+      const t = [];
+      for (let i = 0; i < 8; i++) { const a = performance.now(); await s.run(feeds); t.push(performance.now() - a); }
+      t.sort((a, b) => a - b);
+      log(`  ${seq} Tokens: p50 ${t[4].toFixed(1)} ms, min ${t[0].toFixed(1)} ms`);
+    }
+    await s.release();
+  } catch (e) { log(`${ep}: FEHLER ${e.message ?? e}`); }
+}
+log("\nfertig");
+</script>

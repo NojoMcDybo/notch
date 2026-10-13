@@ -65,7 +65,10 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
 - Der API-Schlüssel bleibt in Rust (`src-tauri/src/voice.rs`); das Frontend bekommt nur einen kurzlebigen Sitzungsschlüssel
 - Schlüssel: in **Einstellungen › App** eintragen. Die Notch prüft ihn bei OpenAI und speichert ihn mit Windows (DPAPI, nur dieses Benutzerkonto) verschlüsselt in `%APPDATA%\de.nojo.notch\openai-key.bin`; angezeigt wird danach nur `sk-…` plus die letzten vier Zeichen. Ohne Schlüssel zeigt die Notch „Schlüssel eintragen“ und öffnet genau diese Einstellung. Die Umgebungsvariable `OPENAI_API_KEY` hat Vorrang; eine alte Klartextdatei `openai-key.txt` wird beim ersten Start übernommen und gelöscht.
 - Plan für den nächsten Schritt (PC-Steuerung, Handeln schon während man spricht): [`docs/jarvis.md`](docs/jarvis.md)
-- Werkzeuge des Assistenten: Musik steuern, Lautstärke, Timer/Pomodoro starten/stoppen, Status der Notch lesen, Datei aus der Ablage öffnen oder konvertieren
+- **PC-Zugriff (Jarvis, Schritt 1):** „Öffne Chrome“, „hol Discord nach vorn“, „such nach …“ — Programme aus dem
+  Startmenü/`shell:AppsFolder` starten oder nach vorn holen, offene Fenster wechseln, Seiten und Suchen im Browser
+  öffnen (`src-tauri/src/jarvis.rs`). Nur, was im Katalog steht, Seiten nur http(s); jede Aktion zeigt sich kurz als Zeile.
+- Werkzeuge des Assistenten: Programme/Fenster/Seiten (siehe oben), Musik steuern, Lautstärke, Timer/Pomodoro starten/stoppen, Status der Notch lesen, Datei aus der Ablage öffnen oder konvertieren
 - Mikrofonfreigabe wird für das Notch-Fenster automatisch erteilt (nur Mikrofon)
 - Kosten: API-Abrechnung pro Audiominute, getrennt von einem ChatGPT-Abo
 
@@ -323,6 +326,7 @@ Neue Version veröffentlichen: Version in `package.json`, `src-tauri/Cargo.toml`
 - `src-tauri/src/timer.rs` — Timer und Pomodoro als Activity (`src/pomodoro.ts`: Karte, Einstellen, Klang)
 - `src/cards.ts` — Karten der aufgeklappten Notch: Reihenfolge per Ziehen, ausblenden, zurückholen
 - `src-tauri/src/thumb.rs` — Vorschaubilder über die Windows-Shell
+- `src-tauri/src/jarvis.rs` — PC-Zugriff des Sprachassistenten (App-Katalog, starten, Fenster, Seiten); Plan und Messungen: `docs/jarvis.md`, `tools/jarvis/`
 - `src-tauri/src/update.rs` — Update-Prüfung und -Installation als Activity
 - `src-tauri/src/sport.rs`, `src/sport.ts` — Live-Sport: Quellen, Ticker, Ballverlauf, Wurfbild, Anzeige
 - `src/morph.ts` — Inhalte abgleichen statt neu bauen (kein Aufblinken); identisch in Arena

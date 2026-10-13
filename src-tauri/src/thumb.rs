@@ -98,6 +98,14 @@ unsafe fn shell_bitmap(path: &str, size: u32) -> Option<(u32, u32, Vec<u8>)> {
     Some((w as u32, h as u32, px))
 }
 
+/// Wie `thumb`, aber blockierend (aus einem Faden, der warten darf), ohne Zwischenspeicher
+pub fn render_now(path: &str, size: u32) -> Option<String> {
+    let tx = TX.get()?.lock().unwrap().clone();
+    let (back, rx) = channel();
+    tx.send((path.to_string(), size, back)).ok()?;
+    rx.recv_timeout(std::time::Duration::from_secs(3)).ok().flatten()
+}
+
 #[tauri::command]
 pub async fn thumb(path: String, size: Option<u32>) -> Option<String> {
     let size = size.unwrap_or(128).clamp(24, 256);

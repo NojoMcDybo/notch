@@ -3,6 +3,7 @@ mod audio;
 mod clipboard;
 mod convert;
 mod gamepad;
+mod jarvis;
 mod media;
 mod music_style;
 mod open;
@@ -521,6 +522,9 @@ pub fn run() {
             timer::timer_start,
             timer::pomo_start,
             thumb::thumb,
+            jarvis::jarvis_app,
+            jarvis::jarvis_window,
+            jarvis::jarvis_page,
             shelf::shelf_list,
             shelf::shelf_add,
             shelf::shelf_remove,

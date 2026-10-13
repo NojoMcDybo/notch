@@ -7,10 +7,11 @@ use windows::core::{BOOL, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, POINT, RECT};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    AttachThreadInput, GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowLongPtrW,
+    AllowSetForegroundWindow, BringWindowToTop, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowLongPtrW,
     GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
     SetForegroundWindow, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, GWL_STYLE, GW_OWNER, SW_RESTORE,
     WS_CAPTION,
@@ -176,14 +177,76 @@ pub fn focus_title(text: &str) -> bool {
 fn focus(mut s: Search) -> bool {
     unsafe {
         let _ = EnumWindows(Some(enum_cb), LPARAM(&mut s as *mut Search as isize));
-        if let Some(h) = s.found {
-            if IsIconic(h).as_bool() {
-                let _ = ShowWindow(h, SW_RESTORE);
-            }
-            return SetForegroundWindow(h).as_bool();
-        }
     }
-    false
+    s.found.is_some_and(|h| bring_to_front(h.0 as isize))
+}
+
+/// Fenster nach vorn holen. Kommt der Wunsch nicht von einem Klick (Sprachbefehl), sperrt Windows den Fokuswechsel
+/// oft; dann kurz an die Eingabe des vorderen Fensters haengen — derselbe Weg, den Umschalt-Werkzeuge nehmen.
+pub fn bring_to_front(raw: isize) -> bool {
+    let h = HWND(raw as *mut core::ffi::c_void);
+    unsafe {
+        if IsIconic(h).as_bool() {
+            let _ = ShowWindow(h, SW_RESTORE);
+        }
+        if SetForegroundWindow(h).as_bool() {
+            return true;
+        }
+        let fg = GetForegroundWindow();
+        let fg_thread = GetWindowThreadProcessId(fg, None);
+        let me = GetCurrentThreadId();
+        let attached = fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, true).as_bool();
+        let _ = BringWindowToTop(h);
+        let ok = SetForegroundWindow(h).as_bool();
+        if attached {
+            let _ = AttachThreadInput(me, fg_thread, false);
+        }
+        ok
+    }
+}
+
+/// Jedem Prozess erlauben, sich nach vorn zu holen (vor dem Start eines Programms per Sprache)
+pub fn allow_foreground_any() {
+    unsafe {
+        let _ = AllowSetForegroundWindow(u32::MAX); // ASFW_ANY
+    }
+}
+
+/// Sichtbares Hauptfenster: Titel und Programmname (ohne die Notch selbst)
+pub struct Win {
+    pub hwnd: isize,
+    pub title: String,
+    pub exe: String,
+}
+
+unsafe extern "system" fn list_cb(hwnd: HWND, lp: LPARAM) -> BOOL {
+    let out = &mut *(lp.0 as *mut Vec<Win>);
+    if !IsWindowVisible(hwnd).as_bool()
+        || GetWindowTextLengthW(hwnd) == 0
+        || GetWindow(hwnd, GW_OWNER).map(|o| !o.0.is_null()).unwrap_or(false)
+        || GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0
+    {
+        return true.into();
+    }
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    if pid == std::process::id() {
+        return true.into();
+    }
+    let mut buf = [0u16; 512];
+    let n = GetWindowTextW(hwnd, &mut buf) as usize;
+    let exe = process_path(pid).and_then(|p| p.rsplit('\\').next().map(|e| e.to_lowercase())).unwrap_or_default();
+    out.push(Win { hwnd: hwnd.0 as isize, title: String::from_utf16_lossy(&buf[..n]), exe });
+    true.into()
+}
+
+/// Alle sichtbaren Hauptfenster, vorderstes zuerst
+pub fn top_windows() -> Vec<Win> {
+    let mut v: Vec<Win> = Vec::new();
+    unsafe {
+        let _ = EnumWindows(Some(list_cb), LPARAM(&mut v as *mut Vec<Win> as isize));
+    }
+    v
 }
 
 /// Medien-Quelle nach vorn holen. Store-Apps (AUMID mit "!") ueber shell:AppsFolder starten —

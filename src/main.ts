@@ -250,6 +250,12 @@ const voice = new Voice({
       return { prozent: Math.round(volume.level * 100) };
     },
     timer_starten: async (a) => { await invoke("timer_start", { seconds: Math.max(1, Number(a.minuten) || 1) * 60 }); return { ok: true }; },
+    // PC-Zugriff (jarvis.rs): Fehler kommen als { fehler, vorschlaege } zurueck, damit das Modell nachfragen kann
+    programm_starten: (a) => invoke("jarvis_app", { name: String(a.name ?? "") }).catch((e) => e),
+    fenster_nach_vorn: (a) => invoke("jarvis_window", { name: String(a.name ?? "") }).catch((e) => e),
+    seite_oeffnen: (a) =>
+      invoke<string>("jarvis_page", { adresse: a.adresse ? String(a.adresse) : null, suche: a.suche ? String(a.suche) : null })
+        .then((url) => ({ geoeffnet: url }), (e) => ({ fehler: String(e) })),
     pomodoro_starten: async (a) => {
       await invoke("pomo_start", { work: Number(a.fokus_minuten) || 25, brk: Number(a.pause_minuten) || 5 });
       return { ok: true };
