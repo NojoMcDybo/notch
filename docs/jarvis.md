@@ -15,9 +15,10 @@ schon **während** man spricht. Bei „Öffne Chrome, damit ich …“ startet C
 - **Teiltexte:** nur `gpt-live-transcribe` liefert Text *während* des Sprechens, und laut Doku nur in einer
   eigenen Transkriptions-Sitzung (siehe 2b). Entschieden: diesen Weg nehmen (Deutsch ist wichtig; App-Namen als
   `keywords`), keine lokale Erkennung.
-- **M2b läuft:** Trainingssatz `tools/jarvis/make_train.py` (3121 Sätze, nur die Frage `absicht`), Notebook
-  `tools/jarvis/make_notebook.py` (aus dem Laya-Notebook, mehrsprachiges Modell), privater Kaggle-Datensatz
-  `jarvis-absicht-de`, Training auf 2×T4.
+- **M2b erledigt (13.10.2026):** Trainingssatz `tools/jarvis/make_train.py` (3121 Sätze, nur die Frage `absicht`),
+  Notebook `tools/jarvis/make_notebook.py` (aus dem Laya-Notebook, mehrsprachiges Modell), privater Kaggle-Datensatz
+  `jarvis-absicht-de`, Training auf 2×T4 in ~10 Min. Ergebnis siehe 2c. Modell lokal unter
+  `D:\Dev\_downloads\laya-build\model-ml-ft` (ONNX) bzw. `model-ml-ft-int4`, noch nicht veröffentlicht.
 - **Sprachassistent:** Standard jetzt `gpt-realtime-2.1-mini`; Claude (Haiku/Sonnet/Opus 5.5) als Alternative über
   eine Kette Sprache→Text→Claude→Sprache (`src/voice-claude.ts`). Beide nutzen dieselben PC-Werkzeuge aus M1.
 
@@ -137,12 +138,28 @@ Andere Frageformen helfen nicht: Ja/Nein „Fordert er auf, ein Programm zu öff
 **Folgerung — Entwurf angepasst:**
 - **Regeln statt Laya für App, „fertig“, Verneinung:** Der Katalogabgleich (`jarvis::find`) erkennt die App nur
   bei ganzem Wort — „Öffne Chr“ trifft nichts, „Öffne Chrome“ trifft. Damit ist „fertig gesagt“ erledigt.
-  Verneinung über feste Wörter (nicht, nein, doch nicht, stattdessen, lass mal).
+  Verneinung über feste Wörter (nicht, nein, doch nicht, stattdessen, lass mal, ich meine, äh … ich meine).
 - **Laya nur für die Absicht:** eine einzige Frage („Befehl, das Programm jetzt zu öffnen“ vs. „nur erwähnt“ vs.
   „Fenster“ vs. „Seite“), und nur dann, wenn der Katalog im Teiltext eine App findet. Das spart Durchläufe:
   ~150 ms je Treffer statt je Teiltext.
 - **Ohne Feintuning nicht live schalten.** Bis M2b fertig ist, entscheidet das große Modell nach dem Satzende
   (M1, funktioniert schon).
+
+### 2c. Ergebnis M2b (Feintuning, nur die Frage `absicht`)
+
+Gleiche 51 Testsätze (nie im Training), `ABSICHT=1 node tools/jarvis/eval.mjs <modell>`:
+
+| | richtig | „starten“, obwohl nicht gemeint | CPU je Satz | GPU (T4) | Größe |
+|---|---|---|---|---|---|
+| vorher | 28/51 (55 %) | 12 | 88 ms | 33 ms | 1,3 GB |
+| **nachher, fp32** | **46/51 (90 %)** | 4 | 82 ms | 35 ms | 1,3 GB |
+| nachher, INT4 | 46/51 (90 %) | 5 | 96 ms | – | 240 MB |
+
+Die Fehlstarts im Einzelnen: „Kannst du bitte“, „Mach mal“, „Starte einen Pomodoro“ (kein App-Name → die
+Katalog-Regel hält sie auf), „Öffne Steam, äh, ich meine Epic“ (→ **„ich meine“ in die Korrekturwörter**),
+bei INT4 zusätzlich „Öffne YouTube“ (würde die installierte App *YouTube Music* treffen statt der Seite).
+Mit den Regeln: fp32 0 Fehlstarts, INT4 1. Nächster Datensatz: mehr Seiten mit gleichnamiger App (YouTube,
+Spotify Web, Discord im Browser), Füllwörter („äh“, „ich meine“), längere Sätze.
 
 ### 2b. Teiltexte (Spracherkennung beim Sprechen)
 
@@ -198,7 +215,8 @@ Der Katalog liefert die Kandidaten für Layas `app`-Frage und geht als kurze Lis
    `fenster_nach_vorn` und `seite_oeffnen` im bestehenden Realtime-Assistenten, Aktionszeile in der Notch.
 2. ~~**M2a – Laya messen**~~ ✓ (2a): App gut, Absicht/fertig/Verneinung ohne Feintuning unbrauchbar;
    WebGPU INT4 ~150 ms.
-3. **M2b – Feintunen (nur Absicht):** Datensatz aus dem App-Katalog erzeugen (Befehle, bloße Erwähnungen,
+3. ~~**M2b – Feintunen (nur Absicht)**~~ ✓ (2c): 90 % statt 55 %, mit Regeln keine Fehlstarts (fp32).
+   Ursprünglicher Plan: Datensatz aus dem App-Katalog erzeugen (Befehle, bloße Erwähnungen,
    Fenster, Seiten, Verneinungen; Vorlagen + Umformulierungen vom großen Modell, einige Tausend Sätze), auf Kaggle
    trainieren (Notebook im Laya-Repo, kostenloses Konto nötig), Schwellen kalibrieren, mit `tools/jarvis/eval.mjs`
    gegenprüfen. Ziel: Fehlstarts < 1 %. Parallel: WebGPU-Rückfälle in ONNX Runtime finden (Ziel < 60 ms).

@@ -23,6 +23,36 @@ export const FRAGEN = {
 };
 
 const pct = (n, d) => `${n}/${d} (${Math.round((100 * n) / d)} %)`;
+
+// ABSICHT=1: nur die eine Frage, auf die M2b trainiert (make_train.py) — so fragt spaeter auch die Notch
+if (process.env.ABSICHT) {
+  const ABSICHT = { absicht: { type: "choice", instructions: "Was will der Sprecher gerade vom PC?", criteria: {
+    starten: "ein Programm jetzt öffnen oder starten",
+    wechseln: "zu einem schon offenen Fenster wechseln oder es nach vorn holen",
+    web: "eine Webseite öffnen oder im Internet suchen",
+    nichts: "nichts davon: eine Frage, eine Bemerkung, Musik, Timer, oder etwas zurücknehmen",
+  } } };
+  const SOLL = { programm: "starten", fenster: "wechseln", seite: "web", sonstiges: "nichts" };
+  for (const dir of process.argv.slice(2)) {
+    const agent = await Agent.load(dir, { numThreads: Number(process.env.T ?? 8) });
+    let ok = 0, fehlstart = 0;
+    const times = [];
+    for (const s of saetze) {
+      const want = s.zurueck && s.app === "keins" ? "nichts" : SOLL[s.absicht];
+      const t = performance.now();
+      const a = (await agent.predict(s.t, ABSICHT)).answers.absicht;
+      times.push(performance.now() - t);
+      ok += a.choice === want;
+      if (a.choice === "starten" && want !== "starten") fehlstart++;
+      if (process.env.V) console.log(`${a.choice === want ? " " : "✗"} ${a.choice.padEnd(9)} ${(a.answer_confidence ?? 0).toFixed(2)} | ${s.t}`);
+    }
+    times.sort((x, y) => x - y);
+    console.log(`
+== ${dir} (nur absicht)
+richtig ${pct(ok, saetze.length)} · „starten“ obwohl nicht gemeint: ${fehlstart} · je Satz p50 ${times[times.length >> 1].toFixed(0)} ms`);
+  }
+  process.exit(0);
+}
 for (const dir of process.argv.slice(2)) {
   const t0 = performance.now();
   const agent = await Agent.load(dir, { numThreads: Number(process.env.T ?? 8) });
