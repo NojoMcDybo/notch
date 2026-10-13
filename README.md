@@ -86,7 +86,13 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
   beim Sprechen mit; sobald ein Programm ganz genannt ist und Laya „starten“/„wechseln“ erkennt, startet die Notch
   es schon vor dem Satzende (`src/jarvis-live.ts`, Laya im Worker `src/laya/worker.ts` auf der Grafikkarte, ~0,2 s).
   „… nein, Firefox“ oder „ich meine …“ schließt das gerade Gestartete wieder; der Assistent macht danach wie gewohnt weiter.
-- Werkzeuge des Assistenten: Programme/Fenster/Seiten (siehe oben), Musik steuern, Lautstärke, Timer/Pomodoro starten/stoppen, Status der Notch lesen, Datei aus der Ablage öffnen oder konvertieren
+- **Bildschirm lesen und bedienen:** `bildschirm_lesen` liefert die Bedienelemente des vorderen Fensters mit Nummern
+  (UI Automation; meldet ein Fenster nichts, liest die Windows-Texterkennung offline), `klicken`, `tippen`, `taste`
+  bedienen es, `bildschirm_ansehen` schickt nur auf Anforderung ein verkleinertes Bild ans Modell. Knöpfe wie
+  Senden/Kaufen/Löschen erst nach Rückfrage, nie in Passwortfelder (`src-tauri/src/screen.rs`).
+- **League of Legends:** „Starte eine Runde ARAM“ legt über die lokale Client-Schnittstelle eine Lobby an und startet
+  die Suche, bei Bedarf nach dem Start des Clients (`src-tauri/src/lol.rs`). Annehmen und Championauswahl bleiben bei dir.
+- Werkzeuge des Assistenten: Programme/Fenster/Seiten (siehe oben), Videos abspielen, Bildschirm lesen/bedienen, LoL-Runde, Musik steuern, Lautstärke, Timer/Pomodoro starten/stoppen, Status der Notch lesen, Datei aus der Ablage öffnen oder konvertieren
 - Mikrofonfreigabe wird für das Notch-Fenster automatisch erteilt (nur Mikrofon)
 - Kosten: API-Abrechnung pro Audiominute, getrennt von einem ChatGPT-Abo
 
@@ -345,6 +351,8 @@ Neue Version veröffentlichen: Version in `package.json`, `src-tauri/Cargo.toml`
 - `src/cards.ts` — Karten der aufgeklappten Notch: Reihenfolge per Ziehen, ausblenden, zurückholen
 - `src-tauri/src/thumb.rs` — Vorschaubilder über die Windows-Shell
 - `src-tauri/src/jarvis.rs` — PC-Zugriff des Sprachassistenten (App-Katalog, starten, Fenster, Seiten, Rückgängig); Plan und Messungen: `docs/jarvis.md`, `tools/jarvis/`
+- `src-tauri/src/screen.rs`, `src-tauri/src/lol.rs` — Jarvis bedient Fenster (UI Automation, Texterkennung, Eingaben) und den LoL-Client
+- `src/wake/` — „Hey Jarvis“ (openWakeWord nachgebaut, Modelle in `public/wakeword/`)
 - `src-tauri/src/laya.rs`, `src/jarvis-live.ts`, `src/laya/` — Jarvis beim Sprechen: Modellpaket laden, Mitschrift, Laya (laya-ts eingebettet, `src/laya/vendor/README.md`)
 - `src-tauri/src/update.rs` — Update-Prüfung und -Installation als Activity
 - `src-tauri/src/sport.rs`, `src/sport.ts` — Live-Sport: Quellen, Ticker, Ballverlauf, Wurfbild, Anzeige

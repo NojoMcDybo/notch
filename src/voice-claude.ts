@@ -24,8 +24,8 @@ const SILENCE_MS = 800;
 const MAX_MS = 20_000;
 /** Pegel, ab dem es als Sprechen zaehlt (wie im Realtime-Assistenten) */
 const LOUD = 0.12;
-/** hoechstens so viele Werkzeug-Runden je Frage */
-const MAX_ROUNDS = 6;
+/** hoechstens so viele Werkzeug-Runden je Frage (Bedienen: lesen, klicken, lesen … braucht einige) */
+const MAX_ROUNDS = 14;
 
 const SYSTEM = `${INSTRUCTIONS}
 Deine Antwort wird vorgelesen: schreib so, wie man spricht, ohne Markdown, Listen, Emojis oder Links.`;
@@ -33,7 +33,7 @@ Deine Antwort wird vorgelesen: schreib so, wie man spricht, ohne Markdown, Liste
 /** Werkzeuge im Format der Messages-API (Name, Beschreibung, JSON-Schema wie beim Realtime-Assistenten) */
 const CLAUDE_TOOLS = TOOLS.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
 
-type Block = { type: string; id?: string; name?: string; input?: Record<string, unknown>; text?: string };
+type Block = { type: string; id?: string; name?: string; input?: Record<string, unknown>; text?: string; content?: unknown };
 type Reply = { content: Block[]; stop_reason: string };
 
 /** PCM16 mono 24 kHz -> WAV-Datei */
@@ -223,7 +223,21 @@ export class ClaudeVoice {
         } catch (e) {
           out = { fehler: String(e) };
         }
-        results.push({ type: "tool_result", tool_use_id: c.id, content: JSON.stringify(out ?? { ok: true }) });
+        const bild = (out as { bild?: string } | null)?.bild;
+        results.push({
+          type: "tool_result",
+          tool_use_id: c.id,
+          content: bild
+            ? [{ type: "text", text: "Bild des vorderen Fensters:" }, { type: "image", source: { type: "base64", media_type: "image/jpeg", data: bild.split(",")[1] ?? "" } }]
+            : JSON.stringify(out ?? { ok: true }),
+        });
+      }
+      // aeltere Bildschirmbilder aus dem Verlauf nehmen: sie wuerden bei jeder Runde neu mitbezahlt
+      for (const m of this.messages as { content?: unknown }[]) {
+        if (!Array.isArray(m.content)) continue;
+        for (const b of m.content as Block[]) {
+          if (b.type === "tool_result" && Array.isArray(b.content)) b.content = [{ type: "text", text: "(älteres Bild entfernt)" }];
+        }
       }
       // alle Ergebnisse in einer Nachricht, sonst ruft Claude Werkzeuge nicht mehr parallel auf
       this.messages.push({ role: "user", content: results });

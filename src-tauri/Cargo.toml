@@ -57,6 +57,9 @@ features = [
   "Win32_Security_Cryptography",
   "Win32_UI_Input_XboxController",
   "Win32_System_Registry",
+  "Win32_UI_Accessibility",
+  "Media_Ocr",
+  "Graphics_Imaging",
 ]
 
 [profile.release]

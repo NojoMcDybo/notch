@@ -22,6 +22,14 @@ schon **während** man spricht. Bei „Öffne Chrome, damit ich …“ startet C
 - **M2c gebaut (13.10.2026), wartet auf den ersten echten Test:** Mitschrift beim Sprechen, Katalog-Regel, Laya im
   Worker auf der GPU, Vorab-Start, Rückgängig, Schalter in den Einstellungen. Ergebnisse und Abweichungen in 2d.
   Modellpaket als Release `laya-jarvis-1` veröffentlicht (Download von GitHub samt Prüfsummen getestet), in 0.2.18.
+- **M3/M4 gebaut (13.10.2026), ungetestet mit Stimme:** `src-tauri/src/screen.rs` liest das vordere Fenster über UI
+  Automation (nummerierte Elemente; Spotify z. B. vollständig mit Suchfeld, Playlists, Player in 0,7 s), sonst
+  Windows-Texterkennung (offline, ~0,1 s); bedient per Invoke/Toggle/Select bzw. Mausklick, tippt, drückt Tasten.
+  Stufe 2 im Code: Knöpfe mit Senden/Kaufen/Löschen … nur mit `bestaetigt`, nie in Passwortfelder, kein Alt+F4.
+  Bild des Fensters nur auf Anforderung des Modells (JPEG ≤ 1280 px), danach wieder aus dem Verlauf (Kosten).
+  League: `src-tauri/src/lol.rs` legt über die Client-Schnittstelle (wie Vantage) eine Lobby an und startet die Suche.
+  Dazu: Spiele aus Epic/Steam im Katalog, `video_abspielen` (erstes YouTube-Ergebnis ohne API), „Hey Jarvis“
+  (openWakeWord, `src/wake/`).
 - **Sprachassistent:** Standard jetzt `gpt-realtime-2.1-mini`; Claude (Haiku/Sonnet/Opus 5.5) als Alternative über
   eine Kette Sprache→Text→Claude→Sprache (`src/voice-claude.ts`). Beide nutzen dieselben PC-Werkzeuge aus M1.
 
@@ -260,9 +268,9 @@ Der Katalog liefert die Kandidaten für Layas `app`-Frage und geht als kurze Lis
 4. **M2c – Handeln beim Sprechen** (gebaut, siehe 2d; offen: echter Test, Zeit Name → Fenster messen): zweite Sitzung mit `gpt-live-transcribe` (2b), Katalog + Regeln + Laya auf
    jedem Teiltext mit App-Treffer, Modellpaket wie in Arena laden (`arena/src-tauri/src/laya.rs`, Worker aus
    `arena/src/laya/`), Widerruf, Chips in der Notch. Ziel: App-Name gesprochen → Fenster < 600 ms.
-5. **M3 – Aufgaben fortsetzen:** Planer bekommt die ausgeführten Aktionen; Suche/URL im gestarteten Browser,
+5. **M3 – Aufgaben fortsetzen** (gebaut: Lesen/Bedienen in `screen.rs`, der Assistent arbeitet in seiner Werkzeug-Schleife weiter; Claude-Weg bis 14 Runden): Planer bekommt die ausgeführten Aktionen; Suche/URL im gestarteten Browser,
    Dateien öffnen, Fenster anordnen.
-6. **M4 – Bedienen:** UI Automation für Tippen/Klicken mit Bestätigung (Stufe 2).
+6. **M4 – Bedienen** (gebaut, siehe Stand; offen: OCR-Klicks in Spielen messen, Fensterwahl bei mehreren Monitoren): UI Automation für Tippen/Klicken mit Bestätigung (Stufe 2).
 
 ## 7. Offene Fragen
 

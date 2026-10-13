@@ -5,6 +5,8 @@ mod convert;
 mod gamepad;
 mod jarvis;
 mod laya;
+mod lol;
+mod screen;
 mod media;
 mod music_style;
 mod open;
@@ -533,6 +535,12 @@ pub fn run() {
             jarvis::jarvis_window,
             jarvis::jarvis_page,
             jarvis::jarvis_video,
+            screen::screen_read,
+            screen::screen_click,
+            screen::screen_type,
+            screen::screen_key,
+            screen::screen_shot,
+            lol::lol_queue,
             jarvis::jarvis_hint,
             jarvis::jarvis_keywords,
             jarvis::jarvis_undo,
@@ -608,6 +616,7 @@ pub fn run() {
             activities::spawn(app.handle().clone());
             timer::spawn(app.handle().clone());
             laya::spawn(app.handle().clone());
+            screen::spawn();
             audio::spawn_meter(app.handle().clone());
             spawn_pointer(w, hwnd);
             clipboard::spawn(app.handle().clone());
