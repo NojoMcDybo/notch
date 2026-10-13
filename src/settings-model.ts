@@ -42,7 +42,15 @@ export type CompactSettings = {
   shortcuts: Shortcuts;
   /** iPhone-Austausch (share.rs): LocalSend + Browser-Seite im WLAN */
   share: ShareSettings;
+  /** Sprachassistent: OpenAI Realtime (mini oder gross) oder Claude (Sprache rein/raus ueber OpenAI) */
+  voice: VoiceSettings;
 };
+
+export type VoiceEngine = "openai" | "claude";
+export type OpenAIModel = "mini" | "full";
+export type ClaudeModel = "haiku" | "sonnet" | "opus";
+export const CLAUDE_IDS: Record<ClaudeModel, string> = { haiku: "claude-haiku-5-5", sonnet: "claude-sonnet-5-5", opus: "claude-opus-5-5" };
+export type VoiceSettings = { engine: VoiceEngine; openaiModel: OpenAIModel; claudeModel: ClaudeModel };
 
 export type ShareSettings = {
   /** aus, bis man es einschaltet: dann lauscht die Notch im lokalen Netz (Port 53317) */
@@ -110,6 +118,7 @@ export const DEFAULTS: CompactSettings = {
   fullscreen: { mode: "hide" },
   sport: { on: true, leagues: ["bl1", "dfbteam"], teams: [], scope: "all", expand: "goals", center: true, pitch: true, fullscreen: true },
   share: { on: false, name: "", folder: "", trusted: [] },
+  voice: { engine: "openai", openaiModel: "mini", claudeModel: "haiku" },
   shortcuts: { voiceKey: "", pad: { voice: ["dpad-left", "r3"], compact: ["dpad-left", "rb"], expanded: ["dpad-left", "rt"] } },
 };
 
@@ -131,6 +140,7 @@ export function normalize(raw: unknown): CompactSettings {
   const uniq = [...new Set(order)];
   // neue Quellen (spaetere Versionen) an ihrer Standardstelle einfuegen
   for (const id of DEFAULTS.order) if (!uniq.includes(id)) uniq.splice(Math.min(DEFAULTS.order.indexOf(id), uniq.length), 0, id);
+  const vo = obj(r.voice);
   const g = obj(r.glucose), m = obj(r.music), t = obj(r.timer), p = obj(r.pulse), f = obj(r.folio), fs = obj(r.fullscreen), sp = obj(r.sport), sh = obj(r.share);
   return {
     v: 1,
@@ -151,6 +161,11 @@ export function normalize(raw: unknown): CompactSettings {
     fullscreen: { mode: FULLSCREEN_MODES.includes(fs.mode as FullscreenMode) ? (fs.mode as FullscreenMode) : DEFAULTS.fullscreen.mode },
     sport: sport(sp),
     shortcuts: shortcuts(obj(r.shortcuts)),
+    voice: {
+      engine: vo.engine === "claude" ? "claude" : "openai",
+      openaiModel: vo.openaiModel === "full" ? "full" : "mini",
+      claudeModel: vo.claudeModel === "sonnet" || vo.claudeModel === "opus" ? vo.claudeModel : "haiku",
+    },
     share: {
       on: bool(sh.on, DEFAULTS.share.on),
       name: typeof sh.name === "string" ? sh.name.slice(0, 40) : "",

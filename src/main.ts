@@ -2,7 +2,8 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
-import { Voice, type VoiceState } from "./voice";
+import { Voice, type VoiceHooks, type VoiceState } from "./voice";
+import { ClaudeVoice } from "./voice-claude";
 import { Wheel } from "./wheel";
 import { fillCard, isBg, type ChartData } from "./glucose";
 import { build, CLOCK_ID, needed, TIMER_ID, plan, planKey, planSig, PulseGate, sourceOf, type CAct, type Plan } from "./compact";
@@ -184,7 +185,7 @@ const V_LABEL: Record<string, string> = {
   thinking: "Denkt nach …",
   speaking: "Spricht",
   error: "Fehler",
-  nokey: "OpenAI-Schlüssel fehlt",
+  nokey: "API-Schlüssel fehlt",
 };
 
 /**
@@ -232,7 +233,7 @@ const findShelf = (name: string) => {
   return shelf.find((i) => i.name.toLowerCase() === n) ?? shelf.find((i) => i.name.toLowerCase().includes(n));
 };
 
-const voice = new Voice({
+const voiceHooks: VoiceHooks = {
   onState: (s, detail) => {
     showVoice(s, detail);
     if (s === "off" || s === "error") padVoice = false;
@@ -302,7 +303,22 @@ const voice = new Voice({
       return { gestartet: `${it.name} → ${ziel}` };
     },
   },
-});
+};
+
+// Zwei Wege mit derselben Schnittstelle: OpenAI Realtime (Standard) oder Claude (Einstellungen › App).
+// Gewaehlt wird beim Start einer Sitzung; eine laufende Sitzung bleibt bei ihrem Weg.
+const engines = { openai: new Voice(voiceHooks), claude: new ClaudeVoice(voiceHooks, () => settings.voice.claudeModel) };
+let engine: Voice | ClaudeVoice = engines.openai;
+const pick = () => { if (!engine.active) engine = engines[settings.voice.engine]; return engine; };
+const voice = {
+  get active() { return engine.active; },
+  get isPtt() { return engine.isPtt; },
+  get isHeld() { return engine.isHeld; },
+  start: () => pick().start(),
+  stop: () => engine.stop(),
+  hold: (down: boolean) => (down ? pick() : engine).hold(down),
+};
+
 
 async function toggleVoice() {
   if (voice.active && voiceUi !== "ready") { voice.stop(); return; }

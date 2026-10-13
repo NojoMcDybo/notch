@@ -524,6 +524,11 @@ function setSeg(sel: string, on: (b: HTMLButtonElement) => boolean) {
 let dock = "top";
 
 function syncSegs() {
+  setSeg("[data-engine]", (b) => b.dataset.engine === s.voice.engine);
+  setSeg("[data-omodel]", (b) => b.dataset.omodel === s.voice.openaiModel);
+  setSeg("[data-cmodel]", (b) => b.dataset.cmodel === s.voice.claudeModel);
+  q(".claude-only").hidden = s.voice.engine !== "claude";
+  q(".openai-model").hidden = s.voice.engine === "claude";
   setSeg("[data-slots]", (b) => Number(b.dataset.slots) === s.slots);
   setSeg("[data-mode]", (b) => b.dataset.mode === mode);
   setSeg("button[data-dock]", (b) => b.dataset.dock === dock);
@@ -1301,40 +1306,53 @@ async function main() {
   await listen<PadButton[]>("pad-buttons", (e) => onPadButtons(e.payload));
   // Fenster zu oder versteckt: Aufnehmen beenden (sonst bliebe das Kuerzel abgemeldet)
   window.addEventListener("beforeunload", () => stopCapture());
-  // OpenAI-Schluessel: wird nur hingeschickt (Rust prueft und verschluesselt), nie zurueckgelesen
+  // Sprachassistent: Weg und Modell
+  document.querySelectorAll<HTMLButtonElement>("[data-engine]").forEach((b) => b.addEventListener("click", () => { s.voice.engine = b.dataset.engine === "claude" ? "claude" : "openai"; syncSegs(); commit(); }));
+  document.querySelectorAll<HTMLButtonElement>("[data-omodel]").forEach((b) => b.addEventListener("click", () => { s.voice.openaiModel = b.dataset.omodel === "full" ? "full" : "mini"; syncSegs(); commit(); }));
+  document.querySelectorAll<HTMLButtonElement>("[data-cmodel]").forEach((b) => b.addEventListener("click", () => {
+    const m = b.dataset.cmodel;
+    s.voice.claudeModel = m === "sonnet" || m === "opus" ? m : "haiku";
+    syncSegs();
+    commit();
+  }));
+  // API-Schluessel (OpenAI, Claude): werden nur hingeschickt (Rust prueft und verschluesselt), nie zurueckgelesen
   type KeyStatus = { source: "env" | "app" | "none"; hint: string | null };
-  const keyInput = q<HTMLInputElement>(".key-input"), keyStatus = q(".key-status");
-  const keySave = q<HTMLButtonElement>(".key-save"), keyRemove = q<HTMLButtonElement>(".key-remove");
-  const showKey = (st: KeyStatus, msg?: string, error = false) => {
-    keyStatus.textContent = msg ?? (st.source === "env" ? `Aus der Umgebungsvariable OPENAI_API_KEY (${st.hint}) – hat Vorrang.`
-      : st.source === "app" ? `Gespeichert: ${st.hint}` : "Noch kein Schlüssel hinterlegt.");
-    keyStatus.classList.toggle("error", error);
-    keyRemove.hidden = st.source !== "app";
+  const keyBox = (pre: string, cmd: string, who: string, envName: string) => {
+    const input = q<HTMLInputElement>(`.${pre}-input`), status = q(`.${pre}-status`);
+    const save = q<HTMLButtonElement>(`.${pre}-save`), remove = q<HTMLButtonElement>(`.${pre}-remove`);
+    const show = (st: KeyStatus, msg?: string, error = false) => {
+      status.textContent = msg ?? (st.source === "env" ? `Aus der Umgebungsvariable ${envName} (${st.hint}) – hat Vorrang.`
+        : st.source === "app" ? `Gespeichert: ${st.hint}` : "Noch kein Schlüssel hinterlegt.");
+      status.classList.toggle("error", error);
+      remove.hidden = st.source !== "app";
+    };
+    let state: KeyStatus = { source: "none", hint: null };
+    invoke<KeyStatus>(`${cmd}_status`).then((st) => { state = st; show(st); }).catch(() => {});
+    const store = async () => {
+      if (!input.value.trim()) { input.focus(); return; }
+      save.disabled = true;
+      show(state, `Wird bei ${who} geprüft …`);
+      try {
+        state = await invoke<KeyStatus>(`${cmd}_save`, { key: input.value });
+        input.value = "";
+        show(state, `Gespeichert: ${state.hint} – der Sprachassistent ist bereit.`);
+        announce(`${who}-Schlüssel gespeichert`);
+      } catch (e) {
+        show(state, String(e), true);
+      } finally {
+        save.disabled = false;
+      }
+    };
+    save.addEventListener("click", () => void store());
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") void store(); });
+    remove.addEventListener("click", async () => {
+      state = await invoke<KeyStatus>(`${cmd}_remove`);
+      show(state, state.source === "env" ? undefined : "Schlüssel entfernt.");
+      announce(`${who}-Schlüssel entfernt`);
+    });
   };
-  let keyState: KeyStatus = { source: "none", hint: null };
-  invoke<KeyStatus>("voice_key_status").then((st) => { keyState = st; showKey(st); }).catch(() => {});
-  const saveKey = async () => {
-    if (!keyInput.value.trim()) { keyInput.focus(); return; }
-    keySave.disabled = true;
-    showKey(keyState, "Wird bei OpenAI geprüft …");
-    try {
-      keyState = await invoke<KeyStatus>("voice_key_save", { key: keyInput.value });
-      keyInput.value = "";
-      showKey(keyState, `Gespeichert: ${keyState.hint} – der Sprachassistent ist bereit.`);
-      announce("OpenAI-Schlüssel gespeichert");
-    } catch (e) {
-      showKey(keyState, String(e), true);
-    } finally {
-      keySave.disabled = false;
-    }
-  };
-  keySave.addEventListener("click", () => void saveKey());
-  keyInput.addEventListener("keydown", (e) => { if (e.key === "Enter") void saveKey(); });
-  keyRemove.addEventListener("click", async () => {
-    keyState = await invoke<KeyStatus>("voice_key_remove");
-    showKey(keyState, keyState.source === "env" ? undefined : "Schlüssel entfernt.");
-    announce("OpenAI-Schlüssel entfernt");
-  });
+  keyBox("key", "voice_key", "OpenAI", "OPENAI_API_KEY");
+  keyBox("ckey", "claude_key", "Anthropic", "ANTHROPIC_API_KEY");
 
   // Fensterknoepfe als Glaspille (gemeinsame Designsprache), Esc schliesst
   const close = () => { getCurrentWindow().close().catch(() => {}); };

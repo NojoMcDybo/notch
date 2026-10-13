@@ -97,6 +97,27 @@
           </div>
           <!-- Tastenkuerzel: Tastatur und Controller selbst belegen (settings.ts -> renderShortcuts) -->
           <div class="shortcut-options"></div>
+          <!-- Sprachassistent: OpenAI Realtime (mini Standard) oder Claude (settings.ts -> voice) -->
+          <div class="field" role="group" aria-label="Sprachassistent">Sprachassistent
+            <div class="segmented compact"><button data-engine="openai">OpenAI Realtime</button><button data-engine="claude">Claude</button></div>
+          </div>
+          <div class="field openai-model" role="group" aria-label="OpenAI-Modell">Modell
+            <div class="segmented compact"><button data-omodel="mini">mini · günstig</button><button data-omodel="full">2.1 · genauer</button></div>
+          </div>
+          <div class="claude-only" hidden>
+            <div class="field" role="group" aria-label="Claude-Modell">Claude-Modell
+              <div class="segmented compact"><button data-cmodel="haiku">Haiku · günstig</button><button data-cmodel="sonnet">Sonnet</button><button data-cmodel="opus">Opus</button></div>
+            </div>
+            <label class="field">Claude-API-Schlüssel
+              <input class="text-input ckey-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+              <small class="ckey-status" role="status">–</small>
+            </label>
+            <div class="button-row">
+              <button class="button secondary ckey-save">Prüfen &amp; speichern</button>
+              <button class="button secondary ckey-remove" hidden>Entfernen</button>
+            </div>
+            <p class="fine">Claude hat keine eigene Sprachschnittstelle: Die Notch nimmt deinen Satz auf, OpenAI schreibt ihn mit und liest die Antwort vor (dafür bleibt der OpenAI-Schlüssel nötig), Claude entscheidet und bedient die Notch. Antworten kommen dadurch etwa 1–2 s später. Schlüssel anlegen: platform.claude.com › API Keys.</p>
+          </div>
           <label class="field">OpenAI-API-Schlüssel
             <input class="text-input key-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
             <small class="key-status" role="status">–</small>

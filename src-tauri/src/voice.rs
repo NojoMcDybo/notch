@@ -17,7 +17,13 @@ use windows::Win32::Security::Cryptography::{
     CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
 };
 
-pub const MODEL: &str = "gpt-realtime-2.1";
+/// Realtime-Modell nach Einstellung (voice.openaiModel): mini ist Standard, etwa ein Drittel der Kosten
+fn realtime_model() -> &'static str {
+    match crate::settings_value("/voice/openaiModel").and_then(|v| v.as_str().map(String::from)).as_deref() {
+        Some("full") => "gpt-realtime-2.1",
+        _ => "gpt-realtime-2.1-mini",
+    }
+}
 const SECRETS_URL: &str = "https://api.openai.com/v1/realtime/client_secrets";
 const MODELS_URL: &str = "https://api.openai.com/v1/models";
 
@@ -42,7 +48,11 @@ fn dpapi(data: &[u8], protect: bool) -> Result<Vec<u8>, String> {
 }
 
 fn store(app: &AppHandle, key: &str) -> Result<(), String> {
-    let f = data_file(app, "openai-key.bin").ok_or("kein App-Ordner")?;
+    store_as(app, "openai-key.bin", key)
+}
+
+fn store_as(app: &AppHandle, file: &str, key: &str) -> Result<(), String> {
+    let f = data_file(app, file).ok_or("kein App-Ordner")?;
     if let Some(dir) = f.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -73,10 +83,14 @@ fn api_key(app: &AppHandle) -> Option<String> {
     env_key().or_else(|| stored_key(app))
 }
 
-/// Ist ein Schluessel hinterlegt?
+/// Sind die Schluessel fuer den gewaehlten Weg da? Claude braucht zusaetzlich OpenAI (Sprache rein/raus).
 #[tauri::command]
 pub fn voice_ready(app: AppHandle) -> bool {
-    api_key(&app).is_some()
+    api_key(&app).is_some() && (!claude_engine() || claude_key(&app).is_some())
+}
+
+fn claude_engine() -> bool {
+    crate::settings_value("/voice/engine").is_some_and(|v| v == "claude")
 }
 
 /// "Schluessel eintragen" in der Notch: Einstellungen auf dem Reiter App oeffnen.
@@ -157,7 +171,7 @@ pub async fn voice_token(app: AppHandle) -> Result<String, String> {
         let body = serde_json::json!({
             "session": {
                 "type": "realtime",
-                "model": MODEL,
+                "model": realtime_model(),
                 "audio": { "output": { "voice": "marin" } }
             }
         });
@@ -184,6 +198,187 @@ pub async fn voice_token(app: AppHandle) -> Result<String, String> {
             .and_then(|x| x.as_str())
             .map(String::from)
             .ok_or_else(|| "Antwort ohne Schlüssel".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ---------- Claude als Sprachassistent: Sprache -> Text (OpenAI) -> Claude -> Sprache (OpenAI) ----------
+// Claude hat keine Echtzeit-Sprachschnittstelle. Die Notch nimmt deshalb selbst auf (voice-claude.ts), laesst den
+// Satz hier verschriftlichen, schickt den Verlauf an Claude und laesst die Antwort vorlesen. Beide Schluessel
+// bleiben in Rust; das Frontend baut nur den Nachrichtenverlauf. Rust hat kein offizielles Anthropic-SDK,
+// deshalb rohes HTTP gegen die Messages-API.
+
+const CLAUDE_URL: &str = "https://api.anthropic.com/v1/messages";
+const CLAUDE_MODELS: &[&str] = &["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"];
+
+fn claude_env() -> Option<String> {
+    std::env::var("ANTHROPIC_API_KEY").ok().map(|k| k.trim().to_string()).filter(|k| k.starts_with("sk-ant-"))
+}
+
+fn claude_key(app: &AppHandle) -> Option<String> {
+    claude_env().or_else(|| {
+        let bytes = std::fs::read(data_file(app, "claude-key.bin")?).ok()?;
+        String::from_utf8(dpapi(&bytes, false).ok()?).ok()
+    })
+}
+
+#[tauri::command]
+pub fn claude_key_status(app: AppHandle) -> KeyStatus {
+    if let Some(k) = claude_env() {
+        return KeyStatus { source: "env", hint: Some(hint(&k)) };
+    }
+    match claude_key(&app) {
+        Some(k) => KeyStatus { source: "app", hint: Some(hint(&k)) },
+        None => KeyStatus { source: "none", hint: None },
+    }
+}
+
+/// Schluessel bei Anthropic pruefen (Modellliste) und erst dann verschluesselt speichern
+#[tauri::command]
+pub async fn claude_key_save(app: AppHandle, key: String) -> Result<KeyStatus, String> {
+    let key = key.trim().to_string();
+    if !key.starts_with("sk-ant-") || key.len() < 20 || key.chars().any(char::is_whitespace) {
+        return Err("Das sieht nicht nach einem Claude-API-Schlüssel aus (beginnt mit sk-ant-).".into());
+    }
+    let k = key.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let resp = ureq::get("https://api.anthropic.com/v1/models")
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .header("x-api-key", &k)
+            .header("anthropic-version", "2023-06-01")
+            .call()
+            .map_err(|e| format!("Anthropic nicht erreichbar: {e}"))?;
+        match resp.status().as_u16() {
+            200 => Ok(()),
+            401 => Err("Anthropic lehnt den Schlüssel ab (ungültig oder widerrufen).".to_string()),
+            s => Err(format!("Anthropic antwortet mit {s} – Schlüssel nicht gespeichert.")),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    store_as(&app, "claude-key.bin", &key)?;
+    Ok(claude_key_status(app))
+}
+
+#[tauri::command]
+pub fn claude_key_remove(app: AppHandle) -> KeyStatus {
+    if let Some(f) = data_file(&app, "claude-key.bin") {
+        let _ = std::fs::remove_file(f);
+    }
+    claude_key_status(app)
+}
+
+/// Fehlertext aus einer JSON-Antwort ({"error":{"message":…}}) oder die ersten Zeichen
+fn api_error(who: &str, status: u16, text: &str) -> String {
+    let msg = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|v| v.pointer("/error/message").and_then(|m| m.as_str()).map(String::from))
+        .unwrap_or_else(|| text.chars().take(160).collect());
+    format!("{who} {status}: {msg}")
+}
+
+/// Eine Anfrage an die Messages-API. Nur freigegebene Modelle, Antwortlaenge gedeckelt (kurze Sprachantworten).
+#[tauri::command]
+pub async fn claude_messages(app: AppHandle, mut body: serde_json::Value, beta: Option<String>) -> Result<serde_json::Value, String> {
+    let key = claude_key(&app).ok_or("Kein Claude-Schlüssel hinterlegt")?;
+    let model = body.get("model").and_then(|m| m.as_str()).unwrap_or_default();
+    if !CLAUDE_MODELS.contains(&model) {
+        return Err(format!("Modell {model} ist nicht freigegeben"));
+    }
+    let max = body.get("max_tokens").and_then(|m| m.as_u64()).unwrap_or(4000).min(8000);
+    body["max_tokens"] = max.into();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut req = ureq::post(CLAUDE_URL)
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .header("x-api-key", &key)
+            .header("anthropic-version", "2023-06-01");
+        if let Some(b) = beta.filter(|b| b.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == ',')) {
+            req = req.header("anthropic-beta", &b);
+        }
+        let mut resp = req.send_json(&body).map_err(|e| format!("Anthropic nicht erreichbar: {e}"))?;
+        let status = resp.status().as_u16();
+        let text = resp.body_mut().read_to_string().map_err(|e| e.to_string())?;
+        if status != 200 {
+            return Err(api_error("Claude", status, &text));
+        }
+        serde_json::from_str(&text).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Aufgenommenen Satz (WAV, base64) verschriftlichen lassen
+#[tauri::command]
+pub async fn voice_stt(app: AppHandle, wav: String) -> Result<String, String> {
+    use base64::Engine;
+    let key = api_key(&app).ok_or("Kein OpenAI-Schlüssel hinterlegt")?;
+    let audio = base64::engine::general_purpose::STANDARD.decode(wav).map_err(|e| e.to_string())?;
+    if audio.len() > 20 * 1024 * 1024 {
+        return Err("Aufnahme zu lang".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let boundary = "notchVoiceBoundary7f3a";
+        let mut body = Vec::with_capacity(audio.len() + 512);
+        for (name, value) in [("model", "gpt-transcribe"), ("language", "de")] {
+            body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
+        }
+        body.extend_from_slice(
+            format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"satz.wav\"\r\nContent-Type: audio/wav\r\n\r\n").as_bytes(),
+        );
+        body.extend_from_slice(&audio);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let mut resp = ureq::post("https://api.openai.com/v1/audio/transcriptions")
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .header("Authorization", &format!("Bearer {key}"))
+            .header("Content-Type", &format!("multipart/form-data; boundary={boundary}"))
+            .send(&body[..])
+            .map_err(|e| format!("OpenAI nicht erreichbar: {e}"))?;
+        let status = resp.status().as_u16();
+        let text = resp.body_mut().read_to_string().map_err(|e| e.to_string())?;
+        if status != 200 {
+            return Err(api_error("OpenAI", status, &text));
+        }
+        let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        Ok(v["text"].as_str().unwrap_or_default().trim().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Antwort vorlesen lassen: MP3 als base64
+#[tauri::command]
+pub async fn voice_tts(app: AppHandle, text: String) -> Result<String, String> {
+    use base64::Engine;
+    let key = api_key(&app).ok_or("Kein OpenAI-Schlüssel hinterlegt")?;
+    let text: String = text.chars().take(2000).collect();
+    tauri::async_runtime::spawn_blocking(move || {
+        let body = serde_json::json!({
+            "model": "gpt-4o-mini-tts",
+            "voice": "marin",
+            "input": text,
+            "instructions": "Sprich natürlich und freundlich auf Deutsch, eher zügig.",
+            "response_format": "mp3",
+        });
+        let mut resp = ureq::post("https://api.openai.com/v1/audio/speech")
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .header("Authorization", &format!("Bearer {key}"))
+            .send_json(&body)
+            .map_err(|e| format!("OpenAI nicht erreichbar: {e}"))?;
+        let status = resp.status().as_u16();
+        let bytes = resp.body_mut().with_config().limit(20 * 1024 * 1024).read_to_vec().map_err(|e| e.to_string())?;
+        if status != 200 {
+            return Err(api_error("OpenAI", status, &String::from_utf8_lossy(&bytes)));
+        }
+        Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
     })
     .await
     .map_err(|e| e.to_string())?

@@ -61,7 +61,14 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
 - **Sofort losreden:** Das Mikrofon läuft ab dem Drücken mit, auch während die Verbindung noch aufgebaut wird („Hört zu · verbindet …“). Steht sie, geht das schon Gesagte als Audio hinterher (`conversation.item.create` mit `input_audio`, PCM16 24 kHz, in Stücken von höchstens 2,5 s), danach läuft das Mikro live weiter. War man beim Verbinden schon fertig, antwortet er direkt darauf.
 - **Schließt von selbst:** Ist die Antwort zu Ende gesprochen, hört er noch 8 s auf eine Rückfrage, dann legt er auf und die Notch klappt zu. Per Controller verschwindet die Notch sofort nach der Antwort; die Verbindung wartet unsichtbar 20 s auf den nächsten Druck. Ohne Gespräch legt er spätestens nach 40 s auf.
 
-- Modell `gpt-realtime-2.1`, Stimme `marin`, Sprache rein/raus über WebRTC direkt zu OpenAI
+- **Modell wählbar** (Einstellungen › App › Sprachassistent): `gpt-realtime-2.1-mini` (Standard, etwa ein Drittel der
+  Kosten) oder `gpt-realtime-2.1` (genauer bei mehrstufigen Befehlen). Stimme `marin`, Sprache rein/raus über WebRTC direkt zu OpenAI
+- **Claude als Alternative** (gleiche Einstellung, Modell Haiku 5.5 / Sonnet 5.5 / Opus 5.5): Claude hat keine
+  Echtzeit-Sprachschnittstelle, deshalb eine Kette (`src/voice-claude.ts`): die Notch nimmt den Satz selbst auf (Ende nach
+  0,8 s Stille bzw. Loslassen am Controller), OpenAI `gpt-transcribe` schreibt mit, Claude entscheidet mit denselben
+  Werkzeugen, OpenAI `gpt-4o-mini-tts` liest vor. Braucht zusätzlich einen Claude-Schlüssel (`sk-ant-…`, gespeichert wie
+  der OpenAI-Schlüssel in `claude-key.bin`, `ANTHROPIC_API_KEY` hat Vorrang); Antworten kommen etwa 1–2 s später als mit
+  Realtime. Anfragen laufen über Rust (`voice.rs`: `claude_messages`, `voice_stt`, `voice_tts`), nur freigegebene Modelle.
 - Der API-Schlüssel bleibt in Rust (`src-tauri/src/voice.rs`); das Frontend bekommt nur einen kurzlebigen Sitzungsschlüssel
 - Schlüssel: in **Einstellungen › App** eintragen. Die Notch prüft ihn bei OpenAI und speichert ihn mit Windows (DPAPI, nur dieses Benutzerkonto) verschlüsselt in `%APPDATA%\de.nojo.notch\openai-key.bin`; angezeigt wird danach nur `sk-…` plus die letzten vier Zeichen. Ohne Schlüssel zeigt die Notch „Schlüssel eintragen“ und öffnet genau diese Einstellung. Die Umgebungsvariable `OPENAI_API_KEY` hat Vorrang; eine alte Klartextdatei `openai-key.txt` wird beim ersten Start übernommen und gelöscht.
 - Plan für den nächsten Schritt (PC-Steuerung, Handeln schon während man spricht): [`docs/jarvis.md`](docs/jarvis.md)

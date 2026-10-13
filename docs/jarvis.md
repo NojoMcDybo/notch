@@ -13,7 +13,13 @@ schon **während** man spricht. Bei „Öffne Chrome, damit ich …“ startet C
   ohne Feintuning nicht. Entwurf deshalb angepasst: App, „fertig“ und Verneinung über Regeln + Katalog,
   Laya nur noch für die Absicht — und erst nach Feintuning (M2b).
 - **Teiltexte:** nur `gpt-live-transcribe` liefert Text *während* des Sprechens, und laut Doku nur in einer
-  eigenen Transkriptions-Sitzung (siehe 2b).
+  eigenen Transkriptions-Sitzung (siehe 2b). Entschieden: diesen Weg nehmen (Deutsch ist wichtig; App-Namen als
+  `keywords`), keine lokale Erkennung.
+- **M2b läuft:** Trainingssatz `tools/jarvis/make_train.py` (3121 Sätze, nur die Frage `absicht`), Notebook
+  `tools/jarvis/make_notebook.py` (aus dem Laya-Notebook, mehrsprachiges Modell), privater Kaggle-Datensatz
+  `jarvis-absicht-de`, Training auf 2×T4.
+- **Sprachassistent:** Standard jetzt `gpt-realtime-2.1-mini`; Claude (Haiku/Sonnet/Opus 5.5) als Alternative über
+  eine Kette Sprache→Text→Claude→Sprache (`src/voice-claude.ts`). Beide nutzen dieselben PC-Werkzeuge aus M1.
 
 ## 1. Die Kernidee: verstehen, während gesprochen wird
 
