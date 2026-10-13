@@ -274,7 +274,11 @@ const voiceHooks: VoiceHooks = {
     klicken: (a) => invoke("screen_click", { nummer: Number(a.nummer) || 0, bestaetigt: a.bestaetigt === true }).catch((e) => ({ fehler: String(e) })),
     tippen: (a) =>
       invoke("screen_type", { text: String(a.text ?? ""), nummer: a.nummer == null ? null : Number(a.nummer) || null }).catch((e) => ({ fehler: String(e) })),
-    taste: (a) => invoke("screen_key", { tasten: String(a.tasten ?? "") }).catch((e) => ({ fehler: String(e) })),
+    taste: (a) => invoke("screen_key", { tasten: String(a.tasten ?? ""), bestaetigt: a.bestaetigt === true }).catch((e) => ({ fehler: String(e) })),
+    spotify_abspielen: (a) =>
+      invoke("spotify_play", { art: String(a.art ?? ""), was: a.was == null ? null : String(a.was), zufall: typeof a.zufall === "boolean" ? a.zufall : null })
+        .catch((e) => ({ fehler: String(e) })),
+    spotify_bibliothek: () => invoke("spotify_library").catch((e) => ({ fehler: String(e) })),
     bildschirm_ansehen: () => invoke("screen_shot").catch((e) => ({ fehler: String(e) })),
     lol_runde: (a) => invoke("lol_queue", { modus: String(a.modus ?? "") }).catch((e) => ({ fehler: String(e) })),
     pomodoro_starten: async (a) => {

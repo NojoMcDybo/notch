@@ -27,11 +27,11 @@ fn realtime_model() -> &'static str {
 const SECRETS_URL: &str = "https://api.openai.com/v1/realtime/client_secrets";
 const MODELS_URL: &str = "https://api.openai.com/v1/models";
 
-fn data_file(app: &AppHandle, name: &str) -> Option<PathBuf> {
+pub(crate) fn data_file(app: &AppHandle, name: &str) -> Option<PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join(name))
 }
 
-fn dpapi(data: &[u8], protect: bool) -> Result<Vec<u8>, String> {
+pub(crate) fn dpapi(data: &[u8], protect: bool) -> Result<Vec<u8>, String> {
     unsafe {
         let input = CRYPT_INTEGER_BLOB { cbData: data.len() as u32, pbData: data.as_ptr() as *mut u8 };
         let mut out = CRYPT_INTEGER_BLOB::default();
@@ -51,7 +51,7 @@ fn store(app: &AppHandle, key: &str) -> Result<(), String> {
     store_as(app, "openai-key.bin", key)
 }
 
-fn store_as(app: &AppHandle, file: &str, key: &str) -> Result<(), String> {
+pub(crate) fn store_as(app: &AppHandle, file: &str, key: &str) -> Result<(), String> {
     let f = data_file(app, file).ok_or("kein App-Ordner")?;
     if let Some(dir) = f.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;

@@ -77,8 +77,9 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
   öffnen (`src-tauri/src/jarvis.rs`). Nur, was im Katalog steht, Seiten nur http(s); jede Aktion zeigt sich kurz als Zeile.
   Frisch Gestartetes lässt sich dort mit × wieder schließen (15 s lang).
 - **Anzeige:** Der Assistent löst sich als Kreis (so hoch wie die eingeklappte Notch) flüssig rechts aus der Notch
-  (seitlich angedockt: darunter) und fließt am Ende zurück; Klick beendet ihn. Eigene Animation je Zustand: verbinden,
-  zuhören (Mikrofonpegel), nachdenken, arbeiten (Werkzeuge laufen), sprechen (Stimme). `src/bubble.ts`, `bubble.css`,
+  (seitlich angedockt: darunter) und fließt am Ende zurück; Klick beendet ihn. Schwarz-weiß, je Zustand ein eigenes
+  Punktmuster: verbinden (Ladekreis), zuhören (Ring weitet sich mit dem Mikrofon), nachdenken (Schweif kreist),
+  arbeiten (vier Punkte pumpen), sprechen (Balken). Der Kreis atmet mit der Stimme und staucht sich bei jedem Wechsel. `src/bubble.ts`, `bubble.css`,
   Entwurfsseite `tools/bubble-preview.html`. Das aufgeklappte Panel gibt es nur noch für Fehler und fehlenden Schlüssel.
 - **„Hey Jarvis“ (optional, Einstellungen › App):** Das Mikrofon hört lokal auf das Wort (openWakeWord-Modelle in
   `public/wakeword/`, Pipeline `src/wake/`, ONNX Runtime auf der CPU) und startet dann den Assistenten; vorher geht nichts
@@ -94,6 +95,11 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
   (UI Automation; meldet ein Fenster nichts, liest die Windows-Texterkennung offline), `klicken`, `tippen`, `taste`
   bedienen es, `bildschirm_ansehen` schickt nur auf Anforderung ein verkleinertes Bild ans Modell. Knöpfe wie
   Senden/Kaufen/Löschen erst nach Rückfrage, nie in Passwortfelder (`src-tauri/src/screen.rs`).
+- **Spotify direkt:** Nach dem Verbinden (Einstellungen › App, eigene Spotify-App mit Redirect-URI
+  `http://127.0.0.1:8738/callback`, Anmeldung mit PKCE ohne geheimen Schlüssel) spielt Jarvis Playlists,
+  Lieblingssongs, Songs, Künstler und Alben über die Spotify-Web-API ab (`src-tauri/src/spotify.rs`, Premium nötig).
+  Das Erneuerungs-Token liegt mit Windows verschlüsselt in `spotify.bin`.
+- **Chatprogramme:** Enter in Discord, WhatsApp, Telegram, Teams … schickt ab und geht deshalb nur nach Rückfrage.
 - **League of Legends:** „Starte eine Runde ARAM“ legt über die lokale Client-Schnittstelle eine Lobby an und startet
   die Suche, bei Bedarf nach dem Start des Clients (`src-tauri/src/lol.rs`). Annehmen und Championauswahl bleiben bei dir.
 - Werkzeuge des Assistenten: Programme/Fenster/Seiten (siehe oben), Videos abspielen, Bildschirm lesen/bedienen, LoL-Runde, Musik steuern, Lautstärke, Timer/Pomodoro starten/stoppen, Status der Notch lesen, Datei aus der Ablage öffnen oder konvertieren

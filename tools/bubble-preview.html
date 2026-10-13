@@ -32,7 +32,8 @@
     let on = false, st = "listening";
     const place = (o = on) => {
       on = o;
-      const w = 320, h = 34;
+      const w = Number(new URLSearchParams(location.search).get("w") || 320), h = 34;
+      notch.style.setProperty("--w", `${w}px`);
       b.place(on, st, { x: (innerWidth / z - w) / 2, y: 0, w, h, r: 13 }, "top", 10, 34);
     };
     window.bubble = { place: (o, s) => { if (s) st = s; place(o); }, b };

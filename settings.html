@@ -114,6 +114,16 @@
             <div class="segmented compact"><button data-early="off">Aus</button><button data-early="on">An</button></div>
             <small class="early-status" role="status">–</small>
           </div>
+          <!-- Spotify: Playlists und Lieblingssongs direkt abspielen (spotify.rs, OAuth mit PKCE) -->
+          <label class="field">Spotify-Client-ID
+            <input class="text-input sp-client" autocomplete="off" spellcheck="false" placeholder="32 Zeichen aus deiner Spotify-App">
+            <small class="sp-status" role="status">–</small>
+          </label>
+          <div class="button-row">
+            <button class="button secondary sp-connect">Mit Spotify verbinden</button>
+            <button class="button secondary sp-disconnect" hidden>Trennen</button>
+          </div>
+          <p class="fine">Damit spielt Jarvis deine Playlists und Lieblingssongs direkt ab (Spotify Premium). Einmalig auf developer.spotify.com › Dashboard › Create app: Redirect URI <code>http://127.0.0.1:8738/callback</code>, „Web API“ ankreuzen, speichern, dann die Client ID hier eintragen. Ein geheimer Schlüssel ist nicht nötig; die Anmeldung läuft im Browser.</p>
           <div class="claude-only" hidden>
             <div class="field" role="group" aria-label="Claude-Modell">Claude-Modell
               <div class="segmented compact"><button data-cmodel="haiku">Haiku · günstig</button><button data-cmodel="sonnet">Sonnet</button><button data-cmodel="opus">Opus</button></div>

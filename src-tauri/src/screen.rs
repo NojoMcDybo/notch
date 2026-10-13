@@ -50,11 +50,14 @@ const RISKY: &[&str] = &[
     "kündigen", "überweisen", "send", "buy", "pay", "purchase", "order", "delete", "remove", "uninstall", "subscribe",
 ];
 
+/// Programme, in denen Enter eine Nachricht abschickt
+const MESSENGERS: &[&str] = &["discord", "whatsapp", "telegram", "signal", "teams", "ms-teams", "slack", "skype", "outlook", "thunderbird", "olk"];
+
 enum Job {
     Read,
     Click(usize, bool),
     Type(Option<usize>, String),
-    Key(String),
+    Key(String, bool),
     Shot,
 }
 type Reply = Result<Value, String>;
@@ -90,7 +93,7 @@ pub fn spawn() {
                     Job::Read => s.read(),
                     Job::Click(n, ok) => s.click(n, ok),
                     Job::Type(n, t) => s.type_text(n, &t),
-                    Job::Key(k) => s.key(&k),
+                    Job::Key(k, ok) => s.key(&k, ok),
                     Job::Shot => s.shot(),
                 },
             };
@@ -295,8 +298,15 @@ impl State {
         Ok(json!({ "getippt": text }))
     }
 
-    unsafe fn key(&mut self, spec: &str) -> Reply {
+    unsafe fn key(&mut self, spec: &str, ok: bool) -> Reply {
         let (mods, key) = parse_keys(spec)?;
+        // Enter im Chatprogramm schickt die Nachricht ab: wie ein „Senden“-Knopf nur nach Rueckfrage (Stufe 2)
+        if key == VIRTUAL_KEY(0x0D) && mods.is_empty() && !ok {
+            let exe = self.hwnd.or_else(target_window).and_then(|h| win::top_windows().into_iter().find(|w| w.hwnd == h.0 as isize)).map(|w| w.exe.to_lowercase());
+            if exe.is_some_and(|e| MESSENGERS.iter().any(|m| e.starts_with(m))) {
+                return Ok(json!({ "bestaetigung_noetig": true, "frage": "Enter schickt die Nachricht ab. Erst den Nutzer fragen, dann mit bestaetigt wiederholen." }));
+            }
+        }
         self.front();
         let mut inputs = Vec::new();
         for m in &mods {
@@ -485,8 +495,8 @@ pub async fn screen_type(text: String, nummer: Option<usize>) -> Reply {
 }
 
 #[tauri::command]
-pub async fn screen_key(tasten: String) -> Reply {
-    job(Job::Key(tasten)).await
+pub async fn screen_key(tasten: String, bestaetigt: Option<bool>) -> Reply {
+    job(Job::Key(tasten, bestaetigt == Some(true))).await
 }
 
 #[tauri::command]

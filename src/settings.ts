@@ -1334,6 +1334,29 @@ async function main() {
   document.querySelectorAll<HTMLButtonElement>("[data-early]").forEach((b) => b.addEventListener("click", () => {
     invoke<LayaStatus>(b.dataset.early === "on" ? "laya_install" : "laya_uninstall").then(early, () => {});
   }));
+  // Spotify: Client-ID der eigenen Spotify-App, Anmeldung im Browser (spotify.rs)
+  type SpStatus = { verbunden: boolean; nutzer: string; client_id: string };
+  const spInput = q<HTMLInputElement>(".sp-client"), spStatus = q(".sp-status");
+  const spConnect = q<HTMLButtonElement>(".sp-connect"), spDisconnect = q<HTMLButtonElement>(".sp-disconnect");
+  const spShow = (st: SpStatus, msg?: string, error = false) => {
+    if (st.client_id && !spInput.value) spInput.value = st.client_id;
+    spStatus.textContent = msg ?? (st.verbunden ? `Verbunden als ${st.nutzer}.` : "Nicht verbunden.");
+    spStatus.classList.toggle("error", error);
+    spDisconnect.hidden = !st.verbunden;
+  };
+  invoke<SpStatus>("spotify_status").then((st) => spShow(st), () => {});
+  spConnect.addEventListener("click", async () => {
+    spConnect.disabled = true;
+    spStatus.textContent = "Anmeldung im Browser …";
+    try {
+      spShow(await invoke<SpStatus>("spotify_connect", { clientId: spInput.value }));
+    } catch (e) {
+      spShow({ verbunden: false, nutzer: "", client_id: "" }, String(e), true);
+    } finally {
+      spConnect.disabled = false;
+    }
+  });
+  spDisconnect.addEventListener("click", async () => spShow(await invoke<SpStatus>("spotify_disconnect")));
   // API-Schluessel (OpenAI, Claude): werden nur hingeschickt (Rust prueft und verschluesselt), nie zurueckgelesen
   type KeyStatus = { source: "env" | "app" | "none"; hint: string | null };
   const keyBox = (pre: string, cmd: string, who: string, envName: string) => {

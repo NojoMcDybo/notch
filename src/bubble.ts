@@ -4,8 +4,10 @@
  *
  * Fluessig: schwarze Formen in einer eigenen Ebene mit SVG-Filter (#goo: weichzeichnen, dann hart abschneiden).
  * Ein Stueck Notch-Rand („Stummel“, liegt unter der Notch) und der Kreis verschmelzen, ziehen sich lang und reissen
- * ab. Die Ebene liegt hinter der Notch, die Anzeige im Kreis (Knopf) davor. Je Zustand eine eigene Animation
- * (bubble.css): verbinden, zuhoeren (Mikrofonpegel), nachdenken, arbeiten (Werkzeuge laufen), sprechen (Stimme).
+ * ab. Die Ebene liegt hinter der Notch, die Anzeige im Kreis (Knopf) davor. Schwarz-weiss, je Zustand ein eigenes
+ * Punktmuster (bubble.css): verbinden (Ladekreis), zuhoeren (Ring weitet sich mit dem Mikrofon), nachdenken (Schweif
+ * kreist), arbeiten (vier Punkte pumpen und drehen), sprechen (Balken). Der Kreis selbst atmet mit der Stimme und
+ * staucht sich bei jedem Zustandswechsel kurz.
  * Klick auf den Kreis beendet den Assistenten.
  */
 import "./bubble.css";
@@ -43,7 +45,8 @@ export class Bubble {
     this.btn.className = "vbub";
     this.btn.title = "Assistent beenden";
     this.btn.setAttribute("aria-label", "Sprachassistent beenden");
-    this.btn.innerHTML = '<span class="vb-ring"></span><span class="vb-core"></span><span class="vb-bars"><i></i><i></i><i></i><i></i></span>';
+    const dots = Array.from({ length: 8 }, (_, i) => `<b style="--i:${i}"></b>`).join("");
+    this.btn.innerHTML = `<span class="vb-dots">${dots}</span><span class="vb-bars"><i></i><i></i><i></i><i></i></span>`;
     this.btn.addEventListener("click", onClick);
     this.bars = [...this.btn.querySelectorAll<HTMLElement>(".vb-bars i")];
     // Ebene vor der Notch im DOM = dahinter gemalt; Knopf danach = davor
@@ -69,7 +72,16 @@ export class Bubble {
     const vars = { "--d": px(d), "--hx": px(home.x), "--hy": px(home.y), "--tx": px(target.x), "--ty": px(target.y) };
     css(this.goo, { ...vars, "--sx": px(stub.x), "--sy": px(stub.y), "--sw": px(stub.w), "--sh": px(stub.h), "--sr": stub.r });
     css(this.btn, vars);
-    this.btn.dataset.s = st;
+    if (this.btn.dataset.s !== st) {
+      // Rueckmeldung beim Wechsel: Kreis staucht sich kurz (Animation neu starten)
+      if (this.on && on) {
+        this.goo.classList.remove("kick");
+        void this.goo.offsetWidth;
+        this.goo.classList.add("kick");
+      }
+      this.btn.dataset.s = st;
+      if (st !== "listening" && st !== "speaking") this.amp(0);
+    }
 
     if (on !== this.on) {
       this.on = on;
@@ -91,19 +103,28 @@ export class Bubble {
     return on ? { x: target.x - d / 2, y: target.y - d / 2, w: d, h: d } : null;
   }
 
+  /** Kreis atmet mit: 0..1 */
+  private amp(a: number) {
+    const v = a.toFixed(3);
+    this.goo.style.setProperty("--amp", v);
+    this.btn.style.setProperty("--amp", v);
+  }
+
   /** Mikrofonpegel 0..1 (zuhoeren) */
   level(l: number) {
     this.btn.style.setProperty("--lvl", l.toFixed(3));
+    if (this.btn.dataset.s === "listening") this.amp(l);
   }
 
   /** Pegel der Stimme 0..1 (sprechen): vier Balken, leicht versetzt */
   out(l: number) {
     if (this.btn.dataset.s !== "speaking") return;
+    this.amp(l);
     this.phase += 0.35;
     const shape = [0.6, 1, 0.85, 0.55];
     this.bars.forEach((b, i) => {
       const wob = 0.75 + 0.25 * Math.sin(this.phase + i * 1.4);
-      b.style.setProperty("--s", Math.max(0.18, Math.min(1, l * 1.7 * shape[i] * wob)).toFixed(3));
+      b.style.setProperty("--b", Math.max(0.18, Math.min(1, l * 1.7 * shape[i] * wob)).toFixed(3));
     });
   }
 }

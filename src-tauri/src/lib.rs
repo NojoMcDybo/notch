@@ -7,6 +7,7 @@ mod jarvis;
 mod laya;
 mod lol;
 mod screen;
+mod spotify;
 mod media;
 mod music_style;
 mod open;
@@ -541,6 +542,11 @@ pub fn run() {
             screen::screen_key,
             screen::screen_shot,
             lol::lol_queue,
+            spotify::spotify_status,
+            spotify::spotify_connect,
+            spotify::spotify_disconnect,
+            spotify::spotify_library,
+            spotify::spotify_play,
             jarvis::jarvis_hint,
             jarvis::jarvis_keywords,
             jarvis::jarvis_undo,

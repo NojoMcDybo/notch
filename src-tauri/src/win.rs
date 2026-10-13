@@ -212,6 +212,15 @@ pub fn allow_foreground_any() {
     }
 }
 
+/// Laeuft ein Prozess mit diesem Programmnamen (z. B. "EpicGamesLauncher.exe")? Auch ohne Fenster (Infobereich).
+pub fn process_running(exe: &str) -> bool {
+    Command::new("tasklist")
+        .args(["/FI", &format!("IMAGENAME eq {exe}"), "/NH", "/FO", "CSV"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains(&format!("\"{}\"", exe.to_lowercase())))
+}
+
 /// Fenster bitten zu schliessen (wie das × in der Titelleiste)
 pub fn close(raw: isize) {
     unsafe {

@@ -351,7 +351,11 @@ pub fn open_app(handle: &AppHandle, name: &str) -> Result<Done, String> {
         "nach vorn"
     } else {
         win::allow_foreground_any();
-        if a.id.contains("://") {
+        if a.id.starts_with("com.epicgames.launcher://") && !win::process_running("EpicGamesLauncher.exe") {
+            // Epic ignoriert die Start-Adresse, solange der Launcher nicht laeuft (getestet mit Rocket League):
+            // erst den Launcher starten, dann die Adresse nachschicken
+            epic_then(handle.clone(), a.id.clone())?;
+        } else if a.id.contains("://") {
             // Spiele (Epic/Steam): Adresse ihres Launchers direkt an Windows (ShellExecute) — explorer.exe meldet
             // nichts zurueck, wenn es eine solche Adresse nicht weitergibt
             handle.opener().open_url(&a.id, None::<&str>).map_err(|e| format!("Start fehlgeschlagen: {e}"))?;
@@ -366,6 +370,27 @@ pub fn open_app(handle: &AppHandle, name: &str) -> Result<Done, String> {
     };
     show(handle, &a.name, if running { "nach vorn geholt" } else { "geöffnet" }, Some(a), !running);
     Ok(Done { app: a.name.clone(), aktion: aktion.into() })
+}
+
+/// Epic-Launcher starten und die Spiel-Adresse schicken, sobald er laeuft (im Hintergrund, die Antwort kommt sofort).
+/// shortcut: Standard-Installationsort des Launchers; liegt er woanders, den Pfad aus der Registry lesen
+/// (HKCR\com.epicgames.launcher\shell\open\command).
+fn epic_then(handle: AppHandle, uri: String) -> Result<(), String> {
+    let pf = std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into());
+    let exe = format!(r"{pf}\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe");
+    std::process::Command::new(&exe).spawn().map_err(|e| format!("Epic-Launcher startet nicht: {e}"))?;
+    std::thread::spawn(move || {
+        for _ in 0..60 {
+            std::thread::sleep(Duration::from_secs(1));
+            if win::process_running("EpicGamesLauncher.exe") {
+                // laeuft, aber nimmt die Adresse erst nach dem Anmelden an
+                std::thread::sleep(Duration::from_secs(8));
+                let _ = handle.opener().open_url(&uri, None::<&str>);
+                return;
+            }
+        }
+    });
+    Ok(())
 }
 
 /// "Lissabon flug" -> Google-Suche; "github.com", "https://…" -> diese Seite. Nur http(s).
