@@ -67,6 +67,8 @@ export class ClaudeVoice {
   private outCtx?: AudioContext;
   private outRaf = 0;
   private messages: unknown[] = [];
+  /** Werkzeug beenden: nach dem Sprechen auflegen */
+  private endAfter = false;
   /** laufende Runde; eine neue (Unterbrechen, Stopp) macht alte Antworten wirkungslos */
   private run = 0;
 
@@ -124,6 +126,7 @@ export class ClaudeVoice {
     this.held = down;
     if (down) {
       this.ptt = true;
+      this.endAfter = false; // er redet weiter: nicht mehr auflegen
       if (!this.active) { await this.start(); return; }
       this.silence();
       this.h.onTranscript("");
@@ -211,6 +214,15 @@ export class ClaudeVoice {
       this.messages.push({ role: "assistant", content: r.content });
       if (r.stop_reason === "refusal") return "Dabei kann ich leider nicht helfen.";
       const calls = r.content.filter((b) => b.type === "tool_use");
+      const said = () => r.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join(" ").trim();
+      // Gespraech beenden: andere Werkzeuge dieser Runde noch ausfuehren, dann das Gesagte sprechen und auflegen
+      if (calls.some((c) => c.name === "beenden")) {
+        this.endAfter = true;
+        for (const c of calls) if (c.name !== "beenden") await this.h.tools[c.name ?? ""]?.(c.input ?? {}).catch(() => {});
+        // Verlauf gueltig halten (jede Werkzeug-Anfrage braucht ein Ergebnis), falls er doch weiterredet
+        this.messages.push({ role: "user", content: calls.map((c) => ({ type: "tool_result", tool_use_id: c.id, content: '{"ok":true}' })) });
+        return said();
+      }
       if (r.stop_reason !== "tool_use" || !calls.length) {
         return r.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join(" ").trim();
       }
@@ -264,6 +276,7 @@ export class ClaudeVoice {
   /** Antwort vorbei: per Controller unsichtbar bereit, sonst kurz auf eine Rueckfrage hoeren */
   private after() {
     if (!this.active) return;
+    if (this.endAfter) { this.stop(); return; }
     this.h.onOutLevel?.(0);
     if (this.held) { this.listen(MAX_MS); return; }
     if (this.ptt) { this.set("ready"); this.idleIn(READY_MS); return; }
@@ -323,7 +336,7 @@ export class ClaudeVoice {
     this.mic = undefined;
     void this.ctx?.close().catch(() => {});
     this.ctx = undefined;
-    this.ptt = this.held = false;
+    this.ptt = this.held = this.endAfter = false;
     this.h.onLevel(0);
     this.h.onMic?.(null);
     if (this.state !== "error") this.set("off");
