@@ -163,18 +163,31 @@ pub fn voice_key_remove(app: AppHandle) -> KeyStatus {
     voice_key_status(app)
 }
 
-/// Kurzlebigen Schluessel fuer eine Sprachsitzung holen.
+/// Kurzlebigen Schluessel fuer eine Sprachsitzung holen. `transcribe`: reine Mitschrift fuer Jarvis
+/// (gpt-live-transcribe liefert Teiltexte beim Sprechen, docs/jarvis.md 2b; Stichwoerter setzt jarvis-live.ts).
 #[tauri::command]
-pub async fn voice_token(app: AppHandle) -> Result<String, String> {
+pub async fn voice_token(app: AppHandle, transcribe: Option<bool>) -> Result<String, String> {
     let key = api_key(&app).ok_or("Kein OpenAI-Schlüssel hinterlegt")?;
     tauri::async_runtime::spawn_blocking(move || {
-        let body = serde_json::json!({
-            "session": {
-                "type": "realtime",
-                "model": realtime_model(),
-                "audio": { "output": { "voice": "marin" } }
-            }
-        });
+        let body = if transcribe == Some(true) {
+            serde_json::json!({
+                "session": {
+                    "type": "transcription",
+                    "audio": { "input": {
+                        "transcription": { "model": "gpt-live-transcribe", "languages": ["de"], "delay": "low" },
+                        "turn_detection": null
+                    } }
+                }
+            })
+        } else {
+            serde_json::json!({
+                "session": {
+                    "type": "realtime",
+                    "model": realtime_model(),
+                    "audio": { "output": { "voice": "marin" } }
+                }
+            })
+        };
         let mut resp = ureq::post(SECRETS_URL)
             .config()
             .http_status_as_error(false)

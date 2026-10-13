@@ -1,0 +1,34 @@
+<!doctype html>
+<!-- Laya-Worker der Notch (src/laya/worker.ts) im Browser pruefen: Vite starten (npm run dev), Modellordner im
+     installierten Layout ausliefern (node tools/jarvis/serve-pkg.mjs <ordner> 8768), dann
+     http://localhost:1420/tools/jarvis/worker-test.html oeffnen. Ergebnis steht in #out und in window.result. -->
+<html lang="de">
+<head><meta charset="utf-8"><title>Laya-Worker</title></head>
+<body style="font: 14px system-ui; background: #111; color: #eee">
+<pre id="out">lädt …</pre>
+<script type="module">
+const out = document.querySelector("#out");
+const log = (s) => { out.textContent += `\n${s}`; };
+const t0 = performance.now();
+const w = new Worker(new URL("/src/laya/worker.ts", location.href), { type: "module" });
+const asks = new Map();
+let id = 0;
+const ask = (text) => new Promise((r) => { asks.set(++id, r); w.postMessage({ type: "ask", id, text }); });
+w.onmessage = async (e) => {
+  const m = e.data;
+  if (m.type === "error") { log(`Fehler: ${m.message}`); window.result = { error: m.message }; asks.get(m.id)?.(null); return; }
+  if (m.type === "answer") { asks.get(m.id)?.(m); asks.delete(m.id); return; }
+  if (m.type !== "ready") return;
+  log(`bereit nach ${Math.round(performance.now() - t0)} ms (WebGPU im Worker: ${m.gpu})`);
+  const rows = [];
+  for (const t of ["Öffne Chrome", "Öffne Chrome, um", "Hol Discord nach vorn", "Spotify ist echt teuer geworden", "Such mir Flüge nach Lissabon", "Starte Steam"]) {
+    const a = await ask(t);
+    rows.push({ t, choice: a?.choice, p: +(a?.p ?? 0).toFixed(2), ms: Math.round(a?.ms ?? 0) });
+    log(`${a?.choice?.padEnd(9)} ${(a?.p ?? 0).toFixed(2)} ${Math.round(a?.ms ?? 0)} ms | ${t}`);
+  }
+  window.result = { loadMs: Math.round(performance.now() - t0), rows };
+};
+w.postMessage({ type: "load", base: "http://127.0.0.1:8768" });
+</script>
+</body>
+</html>

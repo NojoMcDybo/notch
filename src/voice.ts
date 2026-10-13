@@ -25,6 +25,9 @@ export type VoiceHooks = {
   onLevel: (level: number) => void;
   /** Pegel der Stimme des Assistenten (0..1) — fuer die Animation in der kleinen Notch */
   onOutLevel?: (level: number) => void;
+  /** Mikrofon der Sitzung (null = zu) und Satzende — fuer die Jarvis-Mitschrift (jarvis-live.ts) */
+  onMic?: (stream: MediaStream | null) => void;
+  onTurnEnd?: () => void;
   tools: Record<string, Tool>;
 };
 
@@ -348,6 +351,7 @@ export class Voice {
   }
 
   private release() {
+    this.h.onTurnEnd?.();
     const live = Date.now() - this.liveAt;
     this.setMic(false);
     // nur abschliessen, wenn live wirklich etwas ankam (sonst „Puffer leer“) — das Vorgespeicherte ist schon drin
@@ -399,6 +403,7 @@ export class Voice {
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
       this.meter(this.mic);
+      this.h.onMic?.(this.mic);
       try { this.pre = new PreCapture(this.mic); } catch { /* ohne Vorspeichern: wie bisher erst nach dem Verbinden */ }
       if (!this.active) { this.stop(); return; } // waehrenddessen abgebrochen: Mikro wieder freigeben
       const token = await invoke<string>("voice_token");
@@ -454,6 +459,7 @@ export class Voice {
     this.ptt = this.held = this.playing = this.answered = this.sentPre = false;
     this.h.onLevel(0);
     this.h.onOutLevel?.(0);
+    this.h.onMic?.(null);
     if (this.state !== "error") this.set("off");
   }
 
@@ -506,6 +512,7 @@ export class Voice {
         this.bumpIdle();
         break;
       case "input_audio_buffer.speech_stopped":
+        this.h.onTurnEnd?.();
         this.set("thinking");
         break;
       case "response.output_audio_transcript.delta":

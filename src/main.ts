@@ -4,6 +4,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { Voice, type VoiceHooks, type VoiceState } from "./voice";
 import { ClaudeVoice } from "./voice-claude";
+import { Jarvis } from "./jarvis-live";
 import { Wheel } from "./wheel";
 import { fillCard, isBg, type ChartData } from "./glucose";
 import { build, CLOCK_ID, needed, TIMER_ID, plan, planKey, planSig, PulseGate, sourceOf, type CAct, type Plan } from "./compact";
@@ -233,7 +234,12 @@ const findShelf = (name: string) => {
   return shelf.find((i) => i.name.toLowerCase() === n) ?? shelf.find((i) => i.name.toLowerCase().includes(n));
 };
 
+// Jarvis M2c: Mitschrift beim Sprechen, startet sicher genannte Programme schon vor dem Satzende (jarvis-live.ts)
+const jarvis = new Jarvis();
+
 const voiceHooks: VoiceHooks = {
+  onMic: (m) => jarvis.onMic(m),
+  onTurnEnd: () => jarvis.turnEnd(),
   onState: (s, detail) => {
     showVoice(s, detail);
     if (s === "off" || s === "error") padVoice = false;

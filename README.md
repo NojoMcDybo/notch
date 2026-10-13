@@ -75,6 +75,13 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
 - **PC-Zugriff (Jarvis, Schritt 1):** „Öffne Chrome“, „hol Discord nach vorn“, „such nach …“ — Programme aus dem
   Startmenü/`shell:AppsFolder` starten oder nach vorn holen, offene Fenster wechseln, Seiten und Suchen im Browser
   öffnen (`src-tauri/src/jarvis.rs`). Nur, was im Katalog steht, Seiten nur http(s); jede Aktion zeigt sich kurz als Zeile.
+  Frisch Gestartetes lässt sich dort mit × wieder schließen (15 s lang).
+- **Schon beim Sprechen handeln (Jarvis, Schritt 2, optional):** Einstellungen › App › „Schon beim Sprechen handeln“
+  lädt ein feingetuntes Laya-Modell (354 MB, GitHub-Release `laya-jarvis-1`, Größe und SHA-256 fest in
+  `src-tauri/src/laya.rs`). Dann schreibt eine zweite OpenAI-Sitzung (`gpt-live-transcribe`, ~1,7 ct/min Sprechzeit)
+  beim Sprechen mit; sobald ein Programm ganz genannt ist und Laya „starten“/„wechseln“ erkennt, startet die Notch
+  es schon vor dem Satzende (`src/jarvis-live.ts`, Laya im Worker `src/laya/worker.ts` auf der Grafikkarte, ~0,2 s).
+  „… nein, Firefox“ oder „ich meine …“ schließt das gerade Gestartete wieder; der Assistent macht danach wie gewohnt weiter.
 - Werkzeuge des Assistenten: Programme/Fenster/Seiten (siehe oben), Musik steuern, Lautstärke, Timer/Pomodoro starten/stoppen, Status der Notch lesen, Datei aus der Ablage öffnen oder konvertieren
 - Mikrofonfreigabe wird für das Notch-Fenster automatisch erteilt (nur Mikrofon)
 - Kosten: API-Abrechnung pro Audiominute, getrennt von einem ChatGPT-Abo
@@ -333,7 +340,8 @@ Neue Version veröffentlichen: Version in `package.json`, `src-tauri/Cargo.toml`
 - `src-tauri/src/timer.rs` — Timer und Pomodoro als Activity (`src/pomodoro.ts`: Karte, Einstellen, Klang)
 - `src/cards.ts` — Karten der aufgeklappten Notch: Reihenfolge per Ziehen, ausblenden, zurückholen
 - `src-tauri/src/thumb.rs` — Vorschaubilder über die Windows-Shell
-- `src-tauri/src/jarvis.rs` — PC-Zugriff des Sprachassistenten (App-Katalog, starten, Fenster, Seiten); Plan und Messungen: `docs/jarvis.md`, `tools/jarvis/`
+- `src-tauri/src/jarvis.rs` — PC-Zugriff des Sprachassistenten (App-Katalog, starten, Fenster, Seiten, Rückgängig); Plan und Messungen: `docs/jarvis.md`, `tools/jarvis/`
+- `src-tauri/src/laya.rs`, `src/jarvis-live.ts`, `src/laya/` — Jarvis beim Sprechen: Modellpaket laden, Mitschrift, Laya (laya-ts eingebettet, `src/laya/vendor/README.md`)
 - `src-tauri/src/update.rs` — Update-Prüfung und -Installation als Activity
 - `src-tauri/src/sport.rs`, `src/sport.ts` — Live-Sport: Quellen, Ticker, Ballverlauf, Wurfbild, Anzeige
 - `src/morph.ts` — Inhalte abgleichen statt neu bauen (kein Aufblinken); identisch in Arena

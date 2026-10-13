@@ -4,6 +4,7 @@ mod clipboard;
 mod convert;
 mod gamepad;
 mod jarvis;
+mod laya;
 mod media;
 mod music_style;
 mod open;
@@ -531,6 +532,12 @@ pub fn run() {
             jarvis::jarvis_app,
             jarvis::jarvis_window,
             jarvis::jarvis_page,
+            jarvis::jarvis_hint,
+            jarvis::jarvis_keywords,
+            jarvis::jarvis_undo,
+            laya::laya_status,
+            laya::laya_install,
+            laya::laya_uninstall,
             shelf::shelf_list,
             shelf::shelf_add,
             shelf::shelf_remove,
@@ -599,6 +606,7 @@ pub fn run() {
             media::spawn(app.handle().clone());
             activities::spawn(app.handle().clone());
             timer::spawn(app.handle().clone());
+            laya::spawn(app.handle().clone());
             audio::spawn_meter(app.handle().clone());
             spawn_pointer(w, hwnd);
             clipboard::spawn(app.handle().clone());

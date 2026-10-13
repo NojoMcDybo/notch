@@ -1315,6 +1315,23 @@ async function main() {
     syncSegs();
     commit();
   }));
+  // Jarvis: Programme schon beim Sprechen starten — An laedt das Laya-Modell (laya.rs), Aus loescht es wieder
+  type LayaStatus = { want: boolean; state: string; done: number; total: number; message: string };
+  const early = (st: LayaStatus) => {
+    setSeg("[data-early]", (b) => (b.dataset.early === "on") === st.want);
+    const mb = (n: number) => `${Math.round(n / 1e6)} MB`;
+    q(".early-status").textContent =
+      st.state === "ready" ? "Bereit: Sagst du „Öffne Chrome …“, startet Chrome, noch während du sprichst. Kostet zusätzlich eine OpenAI-Mitschrift (etwa 1,7 Cent pro Minute Sprechzeit)."
+      : st.state === "downloading" ? `Lädt das Modell … ${Math.round((100 * st.done) / Math.max(1, st.total))} % von ${mb(st.total)}`
+      : st.state === "error" ? `Fehler: ${st.message}`
+      : st.state === "missing" ? "Wartet auf den Download …"
+      : `Aus. An lädt ein kleines Sprachmodell (${mb(st.total)}), das erkennt, ob du gerade ein Programm öffnen willst. Es läuft auf deiner Grafikkarte.`;
+  };
+  invoke<LayaStatus>("laya_status").then(early, () => {});
+  await listen<LayaStatus>("laya", (e) => early(e.payload));
+  document.querySelectorAll<HTMLButtonElement>("[data-early]").forEach((b) => b.addEventListener("click", () => {
+    invoke<LayaStatus>(b.dataset.early === "on" ? "laya_install" : "laya_uninstall").then(early, () => {});
+  }));
   // API-Schluessel (OpenAI, Claude): werden nur hingeschickt (Rust prueft und verschluesselt), nie zurueckgelesen
   type KeyStatus = { source: "env" | "app" | "none"; hint: string | null };
   const keyBox = (pre: string, cmd: string, who: string, envName: string) => {

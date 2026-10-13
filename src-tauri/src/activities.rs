@@ -452,6 +452,10 @@ pub fn activity_action(app: AppHandle, id: String, action: String) -> Result<(),
         crate::timer::action(&app, &action);
         return Ok(());
     }
+    if id == crate::jarvis::ID {
+        crate::jarvis::action(&app, &action);
+        return Ok(());
+    }
     if id == crate::update::ID {
         crate::update::action(&app, &action);
         return Ok(());

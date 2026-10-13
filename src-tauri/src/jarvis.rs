@@ -3,7 +3,10 @@
 //! - Programme starten oder, wenn sie schon laufen, nach vorn holen; offene Fenster nach vorn holen; Seiten/Suchen oeffnen.
 //! - Nur Stufe 1 (harmlos, umkehrbar). Gestartet wird ausschliesslich, was im App-Katalog steht (alles aus
 //!   `shell:AppsFolder`, also Startmenue + Store-Apps), nie ein freier Pfad oder Befehl; Seiten nur http(s).
-//! - Jede Aktion erscheint kurz als Zeile in der Notch (`notch:jarvis`).
+//! - Jede Aktion erscheint kurz als Zeile in der Notch (`notch:jarvis`); was Jarvis neu gestartet hat, laesst sich
+//!   dort (×) oder per Korrektur im Satz („… nein, Firefox“) rueckgaengig machen, solange es frisch ist.
+//! - M2c: `jarvis_hint` findet im Teiltext einen sicher genannten Programmnamen (ganzer Name oder Alias), damit
+//!   die Notch schon beim Sprechen starten kann (src/jarvis-live.ts entscheidet mit Laya, ob es ein Befehl ist).
 
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -101,8 +104,68 @@ const ALIASES: &[(&str, &str)] = &[
     ("dateiexplorer", "explorer"),
     ("taschenrechner", "rechner"),
     ("notepad", "editor"),
-    ("browser", "chrome"),
+    ("browser", "google chrome"),
 ];
+
+/// Hersteller vor dem eigentlichen Namen: "Google Chrome" heisst gesprochen meist nur "Chrome"
+const VENDORS: &[&str] = &["google", "microsoft", "adobe", "mozilla", "apple", "jetbrains", "epic games", "riot"];
+
+/// Woerter, die zufaellig wie ein App-Name klingen, aber im Satz fast immer etwas anderes meinen
+const NOT_NAMES: &[&str] = &["start", "einstellungen", "mail", "kamera", "uhr", "fotos", "kalender", "karten", "musik", "rechner", "editor"];
+
+/// Gesprochene Namen einer App: der ganze Name, ohne Hersteller, plus Aliase
+fn spoken(a: &App) -> Vec<String> {
+    let mut v = vec![a.key.clone()];
+    for vnd in VENDORS {
+        if let Some(rest) = a.key.strip_prefix(&format!("{vnd} ")) {
+            v.push(rest.to_string());
+        }
+    }
+    v.extend(ALIASES.iter().filter(|(_, b)| *b == a.key).map(|(al, _)| al.to_string()));
+    v
+}
+
+/// Programm, das im Satz sicher genannt ist: ganzer Name oder Alias als ganze Woerter. Bei mehreren das zuletzt
+/// genannte ("Öffne Chrome, nein Firefox"), bei Gleichstand der laengere Name. Woerter wie „Einstellungen“
+/// zaehlen nicht — da wartet die Notch auf das Satzende.
+pub fn mention<'a>(text: &str, apps: &'a [App]) -> Option<&'a App> {
+    let t = format!(" {} ", norm(text));
+    let mut best: Option<(usize, usize, &App)> = None;
+    for a in apps {
+        for n in spoken(a) {
+            if n.len() < 3 || NOT_NAMES.contains(&n.as_str()) {
+                continue;
+            }
+            if let Some(pos) = t.rfind(&format!(" {n} ")) {
+                if best.is_none_or(|(bp, bl, _)| pos > bp || (pos == bp && n.len() > bl)) {
+                    best = Some((pos, n.len(), a));
+                }
+            }
+        }
+    }
+    best.map(|b| b.2)
+}
+
+/// Namen fuer die Mitschrift (`keywords` von gpt-live-transcribe): kurze, gesprochene Formen
+pub fn keywords(apps: &[App], max: usize) -> Vec<String> {
+    let mut v: Vec<String> = apps
+        .iter()
+        .filter_map(|a| {
+            let lower = a.name.to_lowercase();
+            let short = VENDORS.iter().find_map(|vnd| lower.starts_with(&format!("{vnd} ")).then(|| a.name[vnd.len() + 1..].to_string()));
+            let n = short.unwrap_or_else(|| a.name.clone());
+            let k = norm(&n);
+            // die API lehnt Stichwoerter mit < > oder Zeilenumbruch ab
+            let ok = n.split_whitespace().count() <= 3 && n.chars().count() <= 30 && k.len() >= 3 && !n.contains(['<', '>', '\r', '\n']);
+            (ok && !NOT_NAMES.contains(&k.as_str()) && !["client", "launcher", "dienste", "store", "files"].contains(&k.as_str())).then_some(n)
+        })
+        .collect();
+    // kurze, eigenstaendige Namen zuerst (die verhoert die Erkennung am ehesten)
+    v.sort_by_key(|n| (n.split_whitespace().count(), n.to_lowercase()));
+    v.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    v.truncate(max);
+    v
+}
 
 /// Wie gut passt der gesprochene Name zum App-Namen? 0 = gar nicht
 fn score(q: &str, key: &str) -> u32 {
@@ -154,6 +217,17 @@ fn exe_of(id: &str) -> Option<String> {
     l.rsplit_once('!').map(|(_, app)| format!("{app}.exe"))
 }
 
+/// Was Jarvis zuletzt neu gestartet hat (fuer Rueckgaengig und gegen Doppelstarts)
+struct Launch {
+    id: String,
+    name: String,
+    exe: Option<String>,
+    at: Instant,
+}
+static LAST: Mutex<Option<Launch>> = Mutex::new(None);
+/// so lange gilt ein Start als frisch: nicht nochmal starten, Rueckgaengig erlaubt
+const FRESH: Duration = Duration::from_secs(15);
+
 #[derive(Serialize)]
 pub struct Done {
     pub app: String,
@@ -161,8 +235,13 @@ pub struct Done {
     pub aktion: String,
 }
 
-fn show(app: &AppHandle, title: &str, what: &str, icon_of: Option<&str>) {
+fn show(app: &AppHandle, title: &str, what: &str, icon_of: Option<&str>, undo: bool) {
     let icon = icon_of.and_then(|id| crate::thumb::render_now(&format!("shell:AppsFolder\\{id}"), 64));
+    let actions = if undo {
+        vec![activities::Action { id: "undo".into(), label: "Rückgängig".into(), icon: Some("close".into()), ..Default::default() }]
+    } else {
+        vec![]
+    };
     activities::upsert(
         app,
         Activity {
@@ -174,6 +253,7 @@ fn show(app: &AppHandle, title: &str, what: &str, icon_of: Option<&str>) {
             color: Some("#8fb8ff".into()),
             ttl: Some(6),
             priority: 1,
+            actions,
             ..Default::default()
         },
     );
@@ -186,6 +266,10 @@ pub fn open_app(handle: &AppHandle, name: &str) -> Result<Done, String> {
     let Some((_, a)) = hits.first() else {
         return Err(format!("Kein Programm „{name}“ gefunden."));
     };
+    // gerade erst gestartet (z. B. schon beim Sprechen), Fenster vielleicht noch nicht da: nicht doppelt starten
+    if LAST.lock().unwrap().as_ref().is_some_and(|l| l.id == a.id && l.at.elapsed() < FRESH) {
+        return Ok(Done { app: a.name.clone(), aktion: "gestartet".into() });
+    }
     // laeuft schon? ueber den Programmnamen, sonst ueber den Fenstertitel ("… - Google Chrome")
     let running = exe_of(&a.id).is_some_and(|e| win::focus_exe(&e)) || (a.name.len() >= 4 && win::focus_title(&a.name));
     let aktion = if running {
@@ -196,9 +280,10 @@ pub fn open_app(handle: &AppHandle, name: &str) -> Result<Done, String> {
             .arg(format!("shell:AppsFolder\\{}", a.id))
             .spawn()
             .map_err(|e| format!("Start fehlgeschlagen: {e}"))?;
+        *LAST.lock().unwrap() = Some(Launch { id: a.id.clone(), name: a.name.clone(), exe: exe_of(&a.id), at: Instant::now() });
         "gestartet"
     };
-    show(handle, &a.name, if running { "nach vorn geholt" } else { "geöffnet" }, Some(&a.id));
+    show(handle, &a.name, if running { "nach vorn geholt" } else { "geöffnet" }, Some(&a.id), !running);
     Ok(Done { app: a.name.clone(), aktion: aktion.into() })
 }
 
@@ -261,7 +346,7 @@ pub async fn jarvis_window(app: AppHandle, name: String) -> Result<Done, Miss> {
         match best {
             Some((_, w)) if win::bring_to_front(w.hwnd) => {
                 let label = w.exe.trim_end_matches(".exe").to_string();
-                show(&app, &label, "nach vorn geholt", None);
+                show(&app, &label, "nach vorn geholt", None, false);
                 Ok(Done { app: label, aktion: "nach vorn".into() })
             }
             _ => {
@@ -283,8 +368,63 @@ pub fn jarvis_page(app: AppHandle, adresse: Option<String>, suche: Option<String
     win::allow_foreground_any();
     app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())?;
     let label = suche.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| url.clone());
-    show(&app, &label, "im Browser geöffnet", None);
+    show(&app, &label, "im Browser geöffnet", None, false);
     Ok(url)
+}
+
+/// Zuletzt gestartetes Programm wieder schliessen, wenn der Start frisch ist (WM_CLOSE, also wie das ×
+/// am Fenster; das Programm darf nachfragen). Das Fenster kann noch am Aufgehen sein: ein paar Sekunden warten.
+/// `name`: nur, wenn es genau dieses Programm war (vorab nur nach vorn geholt = nichts zu schliessen).
+pub fn undo(app: &AppHandle, name: Option<&str>) -> bool {
+    let Some(l) = LAST.lock().unwrap().take_if(|l| l.at.elapsed() < FRESH && name.is_none_or(|n| n == l.name)) else { return false };
+    activities::remove(app, ID);
+    std::thread::spawn(move || {
+        for _ in 0..20 {
+            // ueber den Programmnamen, sonst (Chrome heisst im Katalog nur "Chrome") ueber den Fenstertitel — lief
+            // das Programm vorher nicht, sind alle seine Fenster die neuen
+            let wins: Vec<_> = win::top_windows()
+                .into_iter()
+                .filter(|w| match &l.exe {
+                    Some(e) => w.exe.eq_ignore_ascii_case(e),
+                    None => l.name.len() >= 4 && w.title.ends_with(&l.name),
+                })
+                .collect();
+            if !wins.is_empty() {
+                wins.iter().for_each(|w| win::close(w.hwnd));
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(300));
+        }
+    });
+    true
+}
+
+pub fn action(app: &AppHandle, action: &str) {
+    if action == "undo" {
+        undo(app, None);
+    }
+}
+
+#[derive(Serialize)]
+pub struct Hint {
+    name: String,
+}
+
+/// Teiltext beim Sprechen: welches Programm ist sicher genannt? (Laya entscheidet danach, ob es ein Befehl ist)
+#[tauri::command]
+pub async fn jarvis_hint(text: String) -> Option<Hint> {
+    tauri::async_runtime::spawn_blocking(move || mention(&text, &catalog()).map(|a| Hint { name: a.name.clone() })).await.ok().flatten()
+}
+
+#[tauri::command]
+pub async fn jarvis_keywords() -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(|| keywords(&catalog(), 100)).await.unwrap_or_default()
+}
+
+/// Korrektur im Satz („nein, Firefox“): das eben vorab gestartete Programm wieder schliessen
+#[tauri::command]
+pub fn jarvis_undo(app: AppHandle, name: String) -> bool {
+    undo(&app, Some(&name))
 }
 
 #[cfg(test)]
@@ -329,6 +469,24 @@ mod tests {
     }
 
     #[test]
+    fn namen_im_satz() {
+        let c = cat();
+        let m = |t: &str| mention(t, &c).map(|a| a.name.clone());
+        assert_eq!(m("Öffne Chrome, damit ich"), Some("Google Chrome".into()));
+        assert_eq!(m("öffne google chrome"), Some("Google Chrome".into()));
+        assert_eq!(m("Öffne Chr"), None, "abgeschnittener Name startet nichts");
+        assert_eq!(m("mach mal vs code auf"), Some("Visual Studio Code".into()));
+        assert_eq!(m("Öffne Steam, äh, ich meine Discord"), Some("Discord".into()), "das zuletzt Genannte");
+        assert_eq!(m("öffne edge"), Some("Microsoft Edge".into()));
+        assert_eq!(m("öffne den Editor"), None, "Allerweltswort: aufs Satzende warten");
+        assert_eq!(m("starte League"), Some("League of Legends".into()));
+        assert_eq!(m("öffne youtube"), None);
+        let k = keywords(&c, 60);
+        assert!(k.contains(&"Chrome".to_string()) && k.contains(&"Spotify".to_string()), "{k:?}");
+        assert!(!k.contains(&"Google Chrome".to_string()));
+    }
+
+    #[test]
     fn seiten_nur_http() {
         assert_eq!(page_url(Some("github.com"), None).unwrap(), "https://github.com");
         assert_eq!(page_url(Some("https://x.de/a?b=1"), None).unwrap(), "https://x.de/a?b=1");
@@ -349,6 +507,12 @@ mod tests {
             let h = find(q, &c);
             println!("{q:>10} -> {:?}", h.iter().map(|(s, a)| format!("{} ({s}) [{}]", a.name, a.id)).collect::<Vec<_>>());
         }
+        // Saetze aus tools/jarvis/saetze.json: welches Programm gilt als sicher genannt?
+        let saetze: serde_json::Value = serde_json::from_str(include_str!("../../tools/jarvis/saetze.json")).unwrap();
+        for t in saetze["saetze"].as_array().unwrap().iter().filter_map(|s| s["t"].as_str()) {
+            println!("{:>22} | {t}", mention(t, &c).map(|a| a.name.as_str()).unwrap_or("-"));
+        }
+        println!("Stichwoerter: {:?}", keywords(&c, 100));
         assert!(c.len() > 20);
     }
 }

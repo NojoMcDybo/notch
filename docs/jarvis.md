@@ -19,6 +19,10 @@ schon **während** man spricht. Bei „Öffne Chrome, damit ich …“ startet C
   Notebook `tools/jarvis/make_notebook.py` (aus dem Laya-Notebook, mehrsprachiges Modell), privater Kaggle-Datensatz
   `jarvis-absicht-de`, Training auf 2×T4 in ~10 Min. Ergebnis siehe 2c. Modell lokal unter
   `D:\Dev\_downloads\laya-build\model-ml-ft` (ONNX) bzw. `model-ml-ft-int4`, noch nicht veröffentlicht.
+- **M2c gebaut (13.10.2026), wartet auf den ersten echten Test:** Mitschrift beim Sprechen, Katalog-Regel, Laya im
+  Worker auf der GPU, Vorab-Start, Rückgängig, Schalter in den Einstellungen. Ergebnisse und Abweichungen in 2d.
+  Das Modellpaket liegt lokal fertig (`D:\Dev\_downloads\laya-build\pkg-jarvis`), ist aber **noch nicht** als
+  Release `laya-jarvis-1` hochgeladen — bis dahin meldet der Schalter einen Download-Fehler.
 - **Sprachassistent:** Standard jetzt `gpt-realtime-2.1-mini`; Claude (Haiku/Sonnet/Opus 5.5) als Alternative über
   eine Kette Sprache→Text→Claude→Sprache (`src/voice-claude.ts`). Beide nutzen dieselben PC-Werkzeuge aus M1.
 
@@ -161,6 +165,40 @@ bei INT4 zusätzlich „Öffne YouTube“ (würde die installierte App *YouTube 
 Mit den Regeln: fp32 0 Fehlstarts, INT4 1. Nächster Datensatz: mehr Seiten mit gleichnamiger App (YouTube,
 Spotify Web, Discord im Browser), Füllwörter („äh“, „ich meine“), längere Sätze.
 
+### 2d. Umsetzung M2c (13.10.2026)
+
+**Ablauf je Teiltext** (`src/jarvis-live.ts`, Klasse `Turn` ohne Seiteneffekte):
+1. Korrekturwort (nicht, nein, nee, doch nicht, stattdessen, lass mal, lieber, ich meine, sondern, warte, halt) →
+   in diesem Satz nichts mehr vorab; schon vorab Gestartetes schließen (`jarvis_undo`: WM_CLOSE an die Fenster des
+   Programms, nur wenn Jarvis es gestartet hat und der Start < 15 s her ist).
+2. `jarvis_hint` (Rust, `jarvis::mention`): Programm *ganz* genannt — Katalogname, Name ohne Hersteller („Chrome“
+   für „Google Chrome“) oder Alias; Allerweltswörter („Editor“, „Einstellungen“, „Musik“ …) zählen nicht.
+3. Laya, nur die trainierte Frage `absicht` (Wortlaut in `src/laya/worker.ts`).
+4. „starten“/„wechseln“ ab 0,8 sofort, ab 0,6 erst beim zweiten gleichen Teiltext. Ein Vorab-Schritt je Satz.
+
+Der Assistent bekommt danach den ganzen Satz wie bisher. Startet er dasselbe Programm, merkt `open_app`, dass es
+frisch gestartet ist (kein zweites Fenster). Die Mitschrift ist eine eigene WebRTC-Sitzung (`voice_token` mit
+`transcribe`), Satzende = Server-VAD bzw. Loslassen bzw. Satzende im Claude-Weg (`input_audio_buffer.commit`);
+App-Namen gehen als `keywords` mit (`jarvis_keywords`, höchstens 100).
+
+**Schwelle** (`node --experimental-transform-types tools/jarvis/early-eval.mjs <modell>`: jeder Satz Wort für Wort,
+dazu der Endtext): vorab richtig 21/22, davon 8 vor dem letzten Wort, ein „Fehlstart“ („Starte League of …“ →
+League of Legends, gemeint war es auch), 3 zurückgenommen („Öffne Chrome, nein, …“, „Starte Discord, ach nee …“,
+„Öffne Steam, äh, ich meine Epic“). Mit 0,9 kämen 4 Starts erst mit dem Endtext, mit 0,7 wird öfter zurückgenommen.
+Nur 51 Sätze — mit echten Mitschriften nachmessen.
+
+**WebGPU-Fehler gefunden:** In M2a war nur die Zeit gemessen, nicht das Ergebnis. Mit dem INT4-Modell rechnet der
+Encoder auf WebGPU (onnxruntime-web 1.30, JSEP) **falsch** (Abweichung bis 23 bei Werten um 1,3, Laya rät dann nur
+noch). Ursache: die quantisierte Einbettungstabelle (`GatherBlockQuantized`); `MatMulNBits` stimmt exakt. Lösung
+(`tools/jarvis/quantize.py`): Tabelle als int8 je Zeile aus Grundbausteinen (Gather → Cast → Mul), Rest INT4.
+Gleiche Genauigkeit (46/51), Encoder 269 MB. Das Paket `onnxruntime-web/webgpu` (native WebGPU, asyncify-WASM) kennt
+`GatherBlockQuantized` gar nicht; die Notch nimmt `onnxruntime-web/all` (JSEP) wie in M2a.
+
+**Zeit im Browser** (Chromium wie WebView2, RX 6700 XT; `tools/jarvis/worker-test.html`): Laden + Aufwärmen ~4 s
+(einmal, das Modell bleibt geladen, solange der Schalter an ist), je Teiltext ~210 ms: Encoder GPU ~120 ms, Head
+WASM ~90 ms. Der Head liefe auf der GPU in ~25 ms, weicht dort aber leicht ab (0,80 statt 0,84) — erst umstellen,
+wenn die Schwellen mit GPU-Werten neu gemessen sind.
+
 ### 2b. Teiltexte (Spracherkennung beim Sprechen)
 
 Laya braucht Text. Stand der OpenAI-Doku (Realtime Transcription):
@@ -220,7 +258,7 @@ Der Katalog liefert die Kandidaten für Layas `app`-Frage und geht als kurze Lis
    Fenster, Seiten, Verneinungen; Vorlagen + Umformulierungen vom großen Modell, einige Tausend Sätze), auf Kaggle
    trainieren (Notebook im Laya-Repo, kostenloses Konto nötig), Schwellen kalibrieren, mit `tools/jarvis/eval.mjs`
    gegenprüfen. Ziel: Fehlstarts < 1 %. Parallel: WebGPU-Rückfälle in ONNX Runtime finden (Ziel < 60 ms).
-4. **M2c – Handeln beim Sprechen:** zweite Sitzung mit `gpt-live-transcribe` (2b), Katalog + Regeln + Laya auf
+4. **M2c – Handeln beim Sprechen** (gebaut, siehe 2d; offen: Paket hochladen, echter Test, Zeit Name → Fenster messen): zweite Sitzung mit `gpt-live-transcribe` (2b), Katalog + Regeln + Laya auf
    jedem Teiltext mit App-Treffer, Modellpaket wie in Arena laden (`arena/src-tauri/src/laya.rs`, Worker aus
    `arena/src/laya/`), Widerruf, Chips in der Notch. Ziel: App-Name gesprochen → Fenster < 600 ms.
 5. **M3 – Aufgaben fortsetzen:** Planer bekommt die ausgeführten Aktionen; Suche/URL im gestarteten Browser,

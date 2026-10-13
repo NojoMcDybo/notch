@@ -13,8 +13,8 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, BringWindowToTop, EnumWindows, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowLongPtrW,
     GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
-    SetForegroundWindow, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, GWL_STYLE, GW_OWNER, SW_RESTORE,
-    WS_CAPTION,
+    PostMessageW, SetForegroundWindow, SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, GWL_STYLE, GW_OWNER, SW_RESTORE,
+    WM_CLOSE, WS_CAPTION,
     SW_SHOWNOACTIVATE, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
@@ -209,6 +209,13 @@ pub fn bring_to_front(raw: isize) -> bool {
 pub fn allow_foreground_any() {
     unsafe {
         let _ = AllowSetForegroundWindow(u32::MAX); // ASFW_ANY
+    }
+}
+
+/// Fenster bitten zu schliessen (wie das × in der Titelleiste)
+pub fn close(raw: isize) {
+    unsafe {
+        let _ = PostMessageW(Some(HWND(raw as *mut core::ffi::c_void)), WM_CLOSE, Default::default(), Default::default());
     }
 }
 

@@ -100,6 +100,7 @@ export class ClaudeVoice {
       return;
     }
     if (!this.active) { this.stop(); return; }
+    this.h.onMic?.(this.mic);
     this.meter();
     if (this.ptt && !this.held) { this.set("ready"); this.idleIn(READY_MS); return; }
     this.listen(FIRST_MS);
@@ -164,6 +165,7 @@ export class ClaudeVoice {
 
   /** Satz zu Ende: verschriftlichen, Claude fragen, Antwort vorlesen */
   private async sentence() {
+    this.h.onTurnEnd?.();
     const rec = this.rec;
     this.rec = undefined;
     if (!rec) return;
@@ -309,6 +311,7 @@ export class ClaudeVoice {
     this.ctx = undefined;
     this.ptt = this.held = false;
     this.h.onLevel(0);
+    this.h.onMic?.(null);
     if (this.state !== "error") this.set("off");
   }
 }
