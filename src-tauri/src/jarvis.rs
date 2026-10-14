@@ -343,7 +343,9 @@ fn show(app: &AppHandle, title: &str, what: &str, icon_of: Option<&App>, undo: b
 /// Programm nach vorn holen, wenn es laeuft, sonst starten
 pub fn open_app(handle: &AppHandle, name: &str) -> Result<Done, String> {
     let apps = catalog();
-    let hits = find(name, &apps);
+    // selbst beigebrachter Name ("starte mein Zockprogramm") vor dem Katalog
+    let learned = crate::memory::alias(handle, "programm", name);
+    let hits = find(learned.as_deref().unwrap_or(name), &apps);
     let Some((_, a)) = hits.first() else {
         return Err(format!("Kein Programm „{name}“ gefunden."));
     };
@@ -526,7 +528,12 @@ pub async fn jarvis_window(app: AppHandle, name: String) -> Result<Done, Miss> {
 
 #[tauri::command]
 pub fn jarvis_page(app: AppHandle, adresse: Option<String>, suche: Option<String>) -> Result<String, String> {
-    let url = page_url(adresse.as_deref(), suche.as_deref())?;
+    // selbst beigebrachte Seite ("oeffne die Uni-Seite") vor Adresse und Google-Suche
+    let learned = adresse.as_deref().or(suche.as_deref()).and_then(|q| crate::memory::alias(&app, "seite", q));
+    let url = match learned {
+        Some(u) => u,
+        None => page_url(adresse.as_deref(), suche.as_deref())?,
+    };
     win::allow_foreground_any();
     app.opener().open_url(&url, None::<&str>).map_err(|e| e.to_string())?;
     let label = suche.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| url.clone());

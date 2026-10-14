@@ -242,17 +242,19 @@ const jarvis = new Jarvis();
 
 // Gedaechtnis (memory.rs): Ablaeufe und gelernte Discord-Kanaele, geht als Absatz in jede neue Sitzung
 type Memory = {
+  namen: { art: string; name: string; ziel: string }[];
   ablaeufe: { name: string; inhalt: string }[];
   discord: { kanal: string; server: string }[];
   zuletzt: { art: string; was: string }[];
 };
-let memory: Memory = { ablaeufe: [], discord: [], zuletzt: [] };
+let memory: Memory = { namen: [], ablaeufe: [], discord: [], zuletzt: [] };
 const loadMemory = () => invoke<Memory>("memory_get").then((m) => { memory = m; }, () => {});
 void loadMemory();
 /** Absatz fuer die Anweisungen: Ablaeufe (vom Nutzer) und Namen aus Discord/Spotify (nur Daten) */
 function memoryText() {
   const lines: string[] = [];
   if (memory.ablaeufe.length) lines.push("Ablaeufe:", ...memory.ablaeufe.map((r) => `- ${r.name}: ${r.inhalt}`));
+  if (memory.namen.length) lines.push(`Eigene Namen: ${memory.namen.map((n) => `${n.name} = ${n.art} ${n.ziel}`).join("; ")}`);
   const list = (art: string) => memory.zuletzt.filter((r) => r.art === art).map((r) => r.was).join("; ");
   if (memory.discord.length) lines.push(`Discord-Sprachkanaele: ${memory.discord.map((c) => `${c.kanal} (${c.server})`).join(", ")}`);
   if (list("musik")) lines.push(`Zuletzt auf Spotify: ${list("musik")}`);
@@ -307,7 +309,12 @@ const voiceHooks: VoiceHooks = {
     discord_sprachkanal: (a) =>
       invoke("discord_channel", { kanal: a.kanal ? String(a.kanal) : null, server: a.server ? String(a.server) : null })
         .then((r) => { void loadMemory(); return r; }, (e) => ({ fehler: String(e) })),
-    lol_runde: (a) => invoke("lol_queue", { modus: String(a.modus ?? "") }).catch((e) => ({ fehler: String(e) })),
+    lol_runde: (a) =>
+      invoke("lol_queue", { modus: a.modus ? String(a.modus) : null, annehmen: typeof a.annehmen === "boolean" ? a.annehmen : null })
+        .catch((e) => ({ fehler: String(e) })),
+    lernen: (a) =>
+      invoke("memory_learn", { art: String(a.art ?? ""), name: String(a.name ?? ""), ziel: a.ziel ? String(a.ziel) : null })
+        .then((r) => { void loadMemory(); return r; }, (e) => ({ fehler: String(e) })),
     pomodoro_starten: async (a) => {
       await invoke("pomo_start", { work: Number(a.fokus_minuten) || 25, brk: Number(a.pause_minuten) || 5 });
       return { ok: true };
@@ -1906,8 +1913,8 @@ function render(full = true) {
     : { x: dock === "left" ? 0 : innerWidth - s.w, y: (innerHeight - s.h) / 2, w: s.w, h: s.h, r: s.r };
   const fold = (side ? SIDE : SIZE)[state === "idle" ? "idle" : "compact"];
   const bub = bubble.place(voiceMode() === "bubble", (acting > 0 && voiceUi === "thinking" ? "acting" : voiceUi) as BubbleState, box, dock, e, side ? fold.w : fold.h);
-  if (bub) rect = union(rect, bub);
-  invoke("set_hit_rect", { rect: passiveInFullscreen() ? { x: 0, y: 0, w: 0, h: 0 } : rect });
+  // Kreis: klickbar, aber kein Hover-Bereich (sonst klappt die Notch auf, wenn man ueber den Kreis faehrt)
+  invoke("set_hit_rect", { rect: passiveInFullscreen() ? { x: 0, y: 0, w: 0, h: 0 } : rect, bubble: bub });
   if (state === "expanded" && countdowns.size) tickCountdowns();
 }
 

@@ -47,15 +47,18 @@ struct Rect {
     h: f64,
 }
 static HIT: Mutex<Rect> = Mutex::new(Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 });
+/// Kreis des Sprachassistenten: faengt Klicks, zaehlt aber nicht als Hover (oeffnet die Notch nicht)
+static BUBBLE: Mutex<Rect> = Mutex::new(Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 });
 /// letzte sichtbare Form — im Vollbild meldet das Frontend eine leere; daran misst sich die Kante
 static LAST_HIT: Mutex<Rect> = Mutex::new(Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 });
 
 #[tauri::command]
-fn set_hit_rect(rect: Rect) {
+fn set_hit_rect(rect: Rect, bubble: Option<Rect>) {
     if rect.w > 0.0 && rect.h > 0.0 {
         *LAST_HIT.lock().unwrap() = rect;
     }
     *HIT.lock().unwrap() = rect;
+    *BUBBLE.lock().unwrap() = bubble.unwrap_or(Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 });
 }
 
 /// Einstellung "Im Vollbild: Am Rand einblenden" (compact.fullscreen.mode == "peek", Schema im Frontend)
@@ -373,6 +376,7 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
         let mut geo = place(&w, None)
             .unwrap_or(Geo { wx: 0, wy: 0, ww: 640, wh: 400, scale: 1.0, mon: (0, 0, 1920, 1080) });
         let mut inside_prev = false;
+        let mut click_prev = false;
         let mut fs_prev = false;
         let mut peek = false;
         let mut away_since: Option<std::time::Instant> = None;
@@ -439,20 +443,19 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
                 PEEK.store(true, Ordering::Relaxed);
                 let _ = w.emit("peek", true);
             }
-            let inside = (!fs_prev || peek)
-                && match cursor {
-                    Some((cx, cy)) => {
-                        let r = *HIT.lock().unwrap();
-                        let pad = 6.0;
-                        let l = wx as f64 + (r.x - pad) * s;
-                        let rr = wx as f64 + (r.x + r.w + pad) * s;
-                        let t = wy as f64 + (r.y - pad) * s;
-                        let b = wy as f64 + (r.y + r.h + pad) * s;
-                        let (cx, cy) = (cx as f64, cy as f64);
-                        r.w > 0.0 && cx >= l && cx <= rr && cy >= t && cy <= b
-                    }
-                    None => false,
-                };
+            let within = |r: Rect, pad: f64| match cursor {
+                Some((cx, cy)) => {
+                    let l = wx as f64 + (r.x - pad) * s;
+                    let rr = wx as f64 + (r.x + r.w + pad) * s;
+                    let t = wy as f64 + (r.y - pad) * s;
+                    let b = wy as f64 + (r.y + r.h + pad) * s;
+                    let (cx, cy) = (cx as f64, cy as f64);
+                    r.w > 0.0 && cx >= l && cx <= rr && cy >= t && cy <= b
+                }
+                None => false,
+            };
+            let inside = (!fs_prev || peek) && within(*HIT.lock().unwrap(), 6.0);
+            let on_bubble = within(*BUBBLE.lock().unwrap(), 2.0);
             if peek && fs_prev {
                 if inside || at_edge {
                     away_since = None;
@@ -462,9 +465,13 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
                     let _ = w.emit("peek", false);
                 }
             }
+            // Klicks fangen: Notch oder Kreis; Hover (Notch aufklappen): nur die Notch
+            if (inside || on_bubble) != click_prev {
+                click_prev = inside || on_bubble;
+                win::enforce(hwnd, !click_prev);
+            }
             if inside != inside_prev {
                 inside_prev = inside;
-                win::enforce(hwnd, !inside);
                 HOVER.store(inside, Ordering::Relaxed);
                 let _ = w.emit("hover", inside);
             }
@@ -547,6 +554,7 @@ pub fn run() {
             memory::memory_set,
             memory::memory_delete,
             memory::discord_channel,
+            memory::memory_learn,
             spotify::spotify_status,
             spotify::spotify_connect,
             spotify::spotify_disconnect,

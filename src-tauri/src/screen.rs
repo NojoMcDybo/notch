@@ -64,6 +64,8 @@ enum Job {
     Shot,
     /// Discord: Server anklicken, dann den Sprachkanal (tritt bei)
     Discord(Option<String>, String, bool),
+    /// Adresse der Seite im Browser im Vordergrund
+    BrowserUrl,
     /// Spotify-App lokal bedienen: Art, was, Zufall, nur nachsehen
     Spotify(String, String, bool, bool),
 }
@@ -106,6 +108,7 @@ pub fn spawn() {
                     Job::Shot => s.shot(),
                     Job::Discord(server, kanal, dry) => s.discord(server.as_deref(), &kanal, dry),
                     Job::Spotify(art, was, zufall, dry) => s.spotify(&art, &was, zufall, dry),
+                    Job::BrowserUrl => s.browser_url(),
                 },
             };
             let _ = back.send(r);
@@ -483,6 +486,23 @@ impl State {
         Ok(json!({ "spielt": name }))
     }
 
+    /// Adresse aus der Adressleiste des Browsers im Vordergrund: erstes Eingabefeld, dessen Inhalt wie eine
+    /// Webadresse aussieht (Chrome/Edge zeigen sie oft ohne https://)
+    unsafe fn browser_url(&mut self) -> Reply {
+        let hwnd = target_window().ok_or("Kein Fenster im Vordergrund.")?;
+        self.read(hwnd)?;
+        for it in self.items.iter().filter(|it| it.role == "Eingabefeld") {
+            let Target::El(e) = &it.target else { continue };
+            let v = e.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId).and_then(|v| v.CurrentValue()).map(|b| b.to_string()).unwrap_or_default();
+            let v = v.trim();
+            let host = v.split("://").last().unwrap_or("").split('/').next().unwrap_or("");
+            if !v.is_empty() && !v.contains(char::is_whitespace) && host.contains('.') {
+                return Ok(json!(v));
+            }
+        }
+        Err("Im Vordergrund ist keine Webseite offen (Adressleiste nicht gefunden).".into())
+    }
+
     /// Ziel-Fenster nach vorn, bevor Maus oder Tastatur etwas schicken
     fn front(&self) {
         if let Some(h) = self.hwnd.or_else(target_window) {
@@ -648,6 +668,11 @@ pub async fn screen_type(text: String, nummer: Option<usize>) -> Reply {
 #[tauri::command]
 pub async fn screen_key(tasten: String, bestaetigt: Option<bool>) -> Reply {
     job(Job::Key(tasten, bestaetigt == Some(true))).await
+}
+
+/// Adresse der Seite im Browser im Vordergrund (fuer „merk dir diese Seite“)
+pub fn browser_url() -> Result<String, String> {
+    run(Job::BrowserUrl).map(|v| v.as_str().unwrap_or_default().to_string())
 }
 
 /// Spotify-App lokal bedienen (Spotify muss laufen; spotify.rs startet es bei Bedarf)

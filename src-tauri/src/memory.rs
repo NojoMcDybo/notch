@@ -37,8 +37,19 @@ pub struct Recent {
     was: String,
 }
 
+/// Eigener Name fuer eine Seite oder ein Programm ("Uni" -> learnweb…, "Zockprogramm" -> Steam)
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct Name {
+    /// "seite" | "programm"
+    art: String,
+    name: String,
+    ziel: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Memory {
+    #[serde(default)]
+    namen: Vec<Name>,
     #[serde(default)]
     ablaeufe: Vec<Routine>,
     #[serde(default)]
@@ -106,6 +117,23 @@ impl Memory {
         });
     }
 
+    fn learn_name(&mut self, art: &str, name: &str, ziel: &str) {
+        let k = norm(name);
+        self.namen.retain(|n| !(n.art == art && norm(&n.name) == k));
+        self.namen.insert(0, Name { art: art.into(), name: clip(name, 60), ziel: clip(ziel, 300) });
+        self.namen.truncate(80);
+    }
+
+    /// Gelernter Name: genau, sonst als ganze Woerter im Gesagten ("oeffne meine Uni Seite" -> "Uni")
+    fn name_of(&self, art: &str, q: &str) -> Option<String> {
+        let q = norm(q);
+        let mine = || self.namen.iter().filter(|n| n.art == art);
+        mine()
+            .find(|n| norm(&n.name) == q)
+            .or_else(|| mine().find(|n| format!(" {q} ").contains(&format!(" {} ", norm(&n.name)))))
+            .map(|n| n.ziel.clone())
+    }
+
     fn server_of(&self, kanal: &str) -> Option<String> {
         let k = norm(kanal);
         self.discord.iter().find(|c| norm(&c.kanal) == k).or_else(|| self.discord.iter().find(|c| norm(&c.kanal).contains(&k))).map(|c| c.server.clone())
@@ -118,6 +146,50 @@ pub fn remember(app: &AppHandle, art: &str, was: &str) {
     let mut m = load(app);
     m.learn_recent(art, was);
     let _ = save(app, &m);
+}
+
+/// Gelernter Name fuer eine Seite bzw. ein Programm (jarvis.rs fragt das vor dem Katalog bzw. der Google-Suche)
+pub fn alias(app: &AppHandle, art: &str, q: &str) -> Option<String> {
+    load(app).name_of(art, q)
+}
+
+/// Zuletzt Genutztes einer Art (z. B. "lol" -> "aram")
+pub fn last(app: &AppHandle, art: &str) -> Option<String> {
+    load(app).zuletzt.into_iter().find(|r| r.art == art).map(|r| r.was)
+}
+
+/// Eigenen Namen lernen. Seite ohne Adresse: die Adresse aus dem Browser im Vordergrund ("das hier").
+/// Programm: das Ziel muss im App-Katalog stehen (gestartet wird nie ein freier Pfad).
+#[tauri::command]
+pub async fn memory_learn(app: AppHandle, art: String, name: String, ziel: Option<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if name.trim().is_empty() {
+            return Err("Name fehlt.".to_string());
+        }
+        let ziel = match art.as_str() {
+            "seite" => {
+                let raw = match ziel.filter(|z| !z.trim().is_empty()) {
+                    Some(z) => z,
+                    None => crate::screen::browser_url()?,
+                };
+                crate::jarvis::page_url(Some(&raw), None)?
+            }
+            "programm" => {
+                let z = ziel.filter(|z| !z.trim().is_empty()).ok_or("Welches Programm?")?;
+                let apps = crate::jarvis::catalog();
+                let hit = crate::jarvis::find(&z, &apps).into_iter().next().ok_or(format!("„{z}“ steht nicht im Startmenü."))?;
+                hit.1.name.clone()
+            }
+            _ => return Err(format!("Unbekannte Art „{art}“ (seite oder programm).")),
+        };
+        let _g = LOCK.lock().unwrap();
+        let mut m = load(&app);
+        m.learn_name(&art, &name, &ziel);
+        save(&app, &m)?;
+        Ok(json!({ "gelernt": name.trim(), "ziel": ziel }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -141,7 +213,10 @@ pub fn memory_set(app: AppHandle, name: String, inhalt: String) -> Result<Value,
 pub fn memory_delete(app: AppHandle, name: String) -> Result<Value, String> {
     let _g = LOCK.lock().unwrap();
     let mut m = load(&app);
-    if !m.remove_routine(&name) {
+    let k = norm(&name);
+    let names = m.namen.len();
+    m.namen.retain(|n| norm(&n.name) != k);
+    if !m.remove_routine(&name) && names == m.namen.len() {
         return Err(format!("„{name}“ war nicht gemerkt."));
     }
     save(&app, &m)?;
@@ -219,6 +294,12 @@ mod tests {
         assert_eq!(m.zuletzt.iter().filter(|r| r.art == "musik").count(), 6);
         assert_eq!(m.zuletzt[0].was, "playlist 3");
         assert_eq!(m.zuletzt.iter().filter(|r| norm(&r.was) == "playlist 3").count(), 1);
+        m.learn_name("seite", "Uni", "https://www.uni-muenster.de/LearnWeb/");
+        m.learn_name("programm", "Zocken", "Steam");
+        assert_eq!(m.name_of("seite", "uni").as_deref(), Some("https://www.uni-muenster.de/LearnWeb/"));
+        assert_eq!(m.name_of("seite", "meine uni seite").as_deref(), Some("https://www.uni-muenster.de/LearnWeb/"));
+        assert_eq!(m.name_of("programm", "uni"), None, "nur die eigene Art");
+        assert_eq!(m.name_of("seite", "universitaet"), None, "nur ganze Woerter");
         m.set_routine("x", &"a".repeat(2000));
         assert_eq!(m.ablaeufe[0].inhalt.len(), MAX_TEXT);
     }

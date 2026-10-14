@@ -108,6 +108,12 @@ Mikrofon-Knopf oben rechts in der aufgeklappten Notch oder Tastenkürzel (Standa
   (danach reicht der Kanalname, ohne Namen der zuletzt genutzte); dazu merkt er sich zuletzt Gespieltes und
   Gestartetes und nimmt bei fehlenden Angaben das Wahrscheinlichste statt nachzufragen
   (`src-tauri/src/memory.rs`, `jarvis-memory.json`; Discord-Beitritt per Bedienschnittstelle in `screen.rs`).
+- **Lernen:** „Merk dir diese Seite als Uni“ übernimmt die Adresse der gerade im Browser offenen Seite, „mit
+  Zockprogramm meine ich Steam“ einen eigenen Programmnamen (nur Programme aus dem Startmenü). `seite_oeffnen` und
+  `programm_starten` fragen diese Namen zuerst (`memory.rs`, Werkzeug `lernen`).
+- **League spielen:** „Starte League“ legt die Lobby im zuletzt gespielten Modus an, startet die Suche und nimmt das
+  gefundene Spiel an (`lol.rs`, bis 20 Minuten, hört bei Championauswahl/Abbruch auf); nur „öffne den Client“ öffnet
+  bloß den Client.
 - **Selbst schließen:** Nach erledigtem Auftrag, Dank/Abschied oder wenn er merkt, dass nicht mehr mit ihm geredet
   wird, legt Jarvis selbst auf (Werkzeug `beenden`).
 - **Chatprogramme:** Enter in Discord, WhatsApp, Telegram, Teams … schickt ab und geht deshalb nur nach Rückfrage.

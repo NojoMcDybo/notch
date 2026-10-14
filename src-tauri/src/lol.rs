@@ -1,7 +1,8 @@
 //! Jarvis: League-of-Legends-Runde per Sprache starten — ueber die lokale Schnittstelle des Clients (LCU), wie
 //! Vantage (vantage/src-tauri/src/me.rs: Lockfile, Basic-Auth "riot:<passwort>", selbst signiertes Zertifikat, nur
 //! 127.0.0.1). Lobby fuer einen Modus anlegen und die Suche starten. Annehmen und Championauswahl bleiben beim
-//! Spieler; das Spiel selbst wird nicht automatisiert.
+//! Spieler; das Spiel selbst wird nicht automatisiert. Auf Wunsch nimmt Jarvis das gefundene Spiel an
+//! (wie Blitz/Porofessor, ueber dieselbe Schnittstelle), damit es ohne Klick losgeht.
 //!
 //! Laeuft der Client noch nicht, startet ihn Jarvis und wartet im Hintergrund (bis 3 Minuten, bis man eingeloggt
 //! ist); die Sprachsitzung bekommt sofort eine Antwort.
@@ -133,15 +134,49 @@ fn start(lcu: &Lcu, id: u32) -> Result<(), String> {
 }
 
 static WAITING: AtomicBool = AtomicBool::new(false);
+static ACCEPTING: AtomicBool = AtomicBool::new(false);
 
+/// Gefundenes Spiel annehmen, solange gesucht wird (hoechstens 20 Minuten). Hoert auf, sobald die Suche endet
+/// (Championauswahl, abgebrochen, Lobby verlassen); lehnt jemand ab, sucht der Client weiter und es geht von vorn los.
+fn accept_when_found(app: AppHandle, label: &'static str) {
+    if ACCEPTING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(20 * 60) {
+            std::thread::sleep(Duration::from_millis(1500));
+            let Some(lcu) = lockfile() else { break };
+            match lcu.phase().as_deref() {
+                Some("ReadyCheck") => {
+                    let rc = lcu.call("GET", "/lol-matchmaking/v1/ready-check", None).unwrap_or(Value::Null);
+                    if rc["playerResponse"].as_str() == Some("None") && lcu.call("POST", "/lol-matchmaking/v1/ready-check/accept", None).is_ok() {
+                        show(&app, label, "Spiel angenommen");
+                    }
+                }
+                Some("Matchmaking") | Some("Lobby") => {}
+                _ => break,
+            }
+        }
+        ACCEPTING.store(false, Ordering::SeqCst);
+    });
+}
+
+/// `modus` weglassen = der zuletzt gespielte (memory.rs); `annehmen` (Standard an) = gefundenes Spiel selbst annehmen
 #[tauri::command]
-pub async fn lol_queue(app: AppHandle, modus: String) -> Result<Value, String> {
+pub async fn lol_queue(app: AppHandle, modus: Option<String>, annehmen: Option<bool>) -> Result<Value, String> {
+    let modus = modus.filter(|m| !m.trim().is_empty()).or_else(|| crate::memory::last(&app, "lol")).ok_or("Welcher Modus? (ARAM, Normal, Ranked, Flex, Swiftplay, Arena)")?;
     let (id, label) = queue(&modus).ok_or_else(|| format!("Modus „{modus}“ kenne ich nicht (ARAM, Normal, Ranked, Flex, Swiftplay, Arena)."))?;
+    let accept = annehmen != Some(false);
+    crate::memory::remember(&app, "lol", QUEUES.iter().find(|q| q.1 == id).map(|q| q.0).unwrap_or("aram"));
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(lcu) = lockfile().filter(|l| l.phase().is_some()) {
             start(&lcu, id)?;
             show(&app, label, "Suche läuft");
-            return Ok(json!({ "suche": label }));
+            if accept {
+                accept_when_found(app.clone(), label);
+            }
+            return Ok(json!({ "suche": label, "annehmen": accept }));
         }
         // Client starten und im Hintergrund warten, bis man eingeloggt ist
         if WAITING.swap(true, Ordering::SeqCst) {
@@ -166,7 +201,12 @@ pub async fn lol_queue(app: AppHandle, modus: String) -> Result<Value, String> {
             }
             WAITING.store(false, Ordering::SeqCst);
             match result {
-                Ok(()) => show(&app, label, "Suche läuft"),
+                Ok(()) => {
+                    show(&app, label, "Suche läuft");
+                    if accept {
+                        accept_when_found(app.clone(), label);
+                    }
+                }
                 Err(e) => show(&app, label, &e),
             }
         });

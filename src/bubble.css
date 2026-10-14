@@ -16,13 +16,15 @@
   translate: calc(var(--hx) - var(--d) / 2) calc(var(--hy) - var(--d) / 2);
   /* der Kreis selbst atmet mit der Stimme (zuhoeren: Mikrofon, sprechen: Antwort) */
   scale: calc(1 + var(--amp) * 0.16);
-  /* zurueck: zieht sich zuegig hinein */
-  transition: translate 0.48s cubic-bezier(0.55, 0, 0.7, 0.2), scale 0.09s linear;
+  /* Lage springt; den Weg (Tropfen) zeichnet bubble.ts drip() per transform */
+  transition: scale 0.09s linear;
 }
-/* hinaus: holt kurz Schwung, loest sich, dehnt sich, schnellt mit Ueberschwingen an seinen Platz */
-.vgoo.out .g-blob {
-  translate: calc(var(--tx) - var(--d) / 2) calc(var(--ty) - var(--d) / 2);
-  transition: translate 0.95s cubic-bezier(0.55, -0.12, 0.25, 1.32), scale 0.09s linear;
+.vgoo.out .g-blob { translate: calc(var(--tx) - var(--d) / 2) calc(var(--ty) - var(--d) / 2); }
+/* Wulst am Notch-Rand, aus dem der Tropfen waechst (nur waehrend drip() sichtbar) */
+.g-bulge {
+  left: calc(var(--bx) - var(--d) * 0.45); top: calc(var(--by) - var(--d) * 0.45);
+  width: calc(var(--d) * 0.9); height: calc(var(--d) * 0.9); border-radius: 50%;
+  transform: scale(0);
 }
 /* Zustandswechsel: kurz gestaucht, dann zurueck (Rueckmeldung „jetzt passiert etwas anderes“) */
 .vgoo.kick .g-blob { animation: vb-squish 0.42s cubic-bezier(0.3, 1.6, 0.5, 1); }
@@ -39,7 +41,7 @@
   transform: scale(0.6);
   transition: opacity 0.18s, transform 0.25s, left 0.62s var(--settle), top 0.62s var(--settle);
 }
-.vbub.out { opacity: 1; transform: scale(calc(1 + var(--amp) * 0.16)); pointer-events: auto; cursor: pointer; transition: opacity 0.3s 0.32s, transform 0.09s linear, left 0.62s var(--settle), top 0.62s var(--settle); }
+.vbub.out { opacity: 1; transform: scale(calc(1 + var(--amp) * 0.16)); pointer-events: auto; cursor: pointer; transition: opacity 0.3s 0.7s, transform 0.09s linear, left 0.62s var(--settle), top 0.62s var(--settle); }
 
 /* acht Punkte im Kreis angeordnet (--i), je Zustand anders bewegt */
 .vb-dots { position: absolute; inset: 0; }
@@ -90,3 +92,8 @@
   .vbub *, .vgoo.kick .g-blob { animation: none !important; }
   .g-blob, .vgoo.out .g-blob { transition: none; }
 }
+
+/* Notch federt beim Abtropfen mit (drip): von der Bildschirmkante aus, an der sie haengt */
+#notch .shape { transform-origin: 50% 0; }
+#notch[data-dock="left"] .shape { transform-origin: 0 50%; }
+#notch[data-dock="right"] .shape { transform-origin: 100% 50%; }
