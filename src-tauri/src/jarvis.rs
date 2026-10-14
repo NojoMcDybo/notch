@@ -368,6 +368,10 @@ pub fn open_app(handle: &AppHandle, name: &str) -> Result<Done, String> {
             // Spiele (Epic/Steam): Adresse ihres Launchers direkt an Windows (ShellExecute) — explorer.exe meldet
             // nichts zurueck, wenn es eine solche Adresse nicht weitergibt
             handle.opener().open_url(&a.id, None::<&str>).map_err(|e| format!("Start fehlgeschlagen: {e}"))?;
+        } else if let Some(lnk) = start_menu_lnk(&a.name) {
+            // Verknuepfung selbst starten: ueber shell:AppsFolder gehen ihre Argumente verloren (League: nur der
+            // Riot-Launcher statt --launch-product=league_of_legends)
+            handle.opener().open_path(lnk.to_string_lossy(), None::<&str>).map_err(|e| format!("Start fehlgeschlagen: {e}"))?;
         } else {
             std::process::Command::new("explorer.exe")
                 .arg(format!("shell:AppsFolder\\{}", a.id))
@@ -380,6 +384,30 @@ pub fn open_app(handle: &AppHandle, name: &str) -> Result<Done, String> {
     show(handle, &a.name, if running { "nach vorn geholt" } else { "geöffnet" }, Some(a), !running);
     crate::memory::remember(handle, "programm", &a.name);
     Ok(Done { app: a.name.clone(), aktion: aktion.into() })
+}
+
+/// Startmenue-Verknuepfung mit genau diesem Namen (alle Benutzer, dann eigener), bis 4 Ordner tief
+fn start_menu_lnk(name: &str) -> Option<std::path::PathBuf> {
+    fn walk(dir: &std::path::Path, file: &str, depth: u8) -> Option<std::path::PathBuf> {
+        for e in std::fs::read_dir(dir).ok()?.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if depth > 0 {
+                    if let Some(f) = walk(&p, file, depth - 1) {
+                        return Some(f);
+                    }
+                }
+            } else if p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(file)) {
+                return Some(p);
+            }
+        }
+        None
+    }
+    let file = format!("{name}.lnk");
+    ["ProgramData", "APPDATA"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .find_map(|root| walk(&std::path::Path::new(&root).join(r"Microsoft\Windows\Start Menu\Programs"), &file, 4))
 }
 
 /// Epic-Launcher starten und die Spiel-Adresse schicken, sobald er laeuft (im Hintergrund, die Antwort kommt sofort).
@@ -669,6 +697,15 @@ mod tests {
         let html = r#"..."videoId":"kurz","videoId":"kXYiU_JCYtU","videoId":"aaaaaaaaaaa""#;
         assert_eq!(first_video(html).as_deref(), Some("kXYiU_JCYtU"));
         assert_eq!(first_video("nichts"), None);
+    }
+
+    #[test]
+    fn verknuepfung_finden() {
+        // auf diesem PC: League liegt unter Riot Games; ohne Riot-Installation einfach None
+        if let Some(p) = start_menu_lnk("League of Legends") {
+            assert!(p.to_string_lossy().ends_with("League of Legends.lnk"), "{p:?}");
+        }
+        assert_eq!(start_menu_lnk("gibt es nicht 123"), None);
     }
 
     #[test]
