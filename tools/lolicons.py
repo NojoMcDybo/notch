@@ -44,7 +44,7 @@ color = {
   'ocean': [983,203,999,220], 'mountain': [1003,202,1019,221], 'chemtech': [846,206,863,224], 'hextech': [871,207,888,225],
   'coins': [962,228,993,251], 'sword': [891,231,910,248],
 }
-masks = { 'tower': [956,255,972,271], 'inhib': [929,255,948,274], 'baron': [876,255,895,272], 'herald': [537,255,564,274] }
+masks = { 'tower': [956,255,972,271], 'inhib': [929,255,948,274], 'baron': [876,255,895,272] }
 lums = { 'goldm': [962,228,993,251], 'killsm': [891,231,910,248] }
 lines = []
 for k,b in color.items(): lines.append(f'  {k}: "{url(crop(b))}",')
@@ -52,6 +52,9 @@ for k,b in masks.items(): lines.append(f'  {k}: "{url(mask(crop(b)))}",')
 for k,b in lums.items(): lines.append(f'  {k}: "{url(mask(crop(b), True))}",')
 g = Image.open(GRUB).convert('RGBA'); g.thumbnail((32,32), Image.LANCZOS)
 lines.append(f'  grubs: "{url(g)}",')
+# Herold: farbig aus dem Scoreboard des Spiels
+h = Image.open(get('ux/scoreboard/_riftherald.png', 'herald.png')).convert('RGBA'); h = h.crop(h.getbbox()); h.thumbnail((40, 40), Image.LANCZOS)
+lines.append(f'  herald: "{url(h)}",')
 for k,f in [('melee',MELEE),('cannon',CANNON),('super',SUPER),('superRed',SUPER_R)]:
     im = Image.open(f).convert('RGBA').resize((56,56), Image.LANCZOS); lines.append(f'  {k}: "{url(im)}",')
 src = '''/**
@@ -65,7 +68,7 @@ export const LOL = {
 } as const;
 export type LolIcon = keyof typeof LOL;
 /** als Maske gedacht (Farbe = currentColor) */
-export const LOL_MASK = new Set<LolIcon>(["tower", "inhib", "baron", "herald", "goldm", "killsm"]);
+export const LOL_MASK = new Set<LolIcon>(["tower", "inhib", "baron", "goldm", "killsm"]);
 '''
 open(OUT, 'w', encoding='utf-8', newline='\n').write(src)
 print(len(src))
