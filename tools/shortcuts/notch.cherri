@@ -54,6 +54,10 @@ if !@eingabe {
         if text {
             setClipboard(text)
         }
+        // wie AirDrop: nach Fotos/Videos gleich die Fotos-App zeigen
+        if antwortText contains "/foto" || antwortText contains "/video" {
+            openApp("com.apple.mobileslideshow")
+        }
     }
 } else {
     for item in @eingabe {

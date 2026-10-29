@@ -508,11 +508,11 @@ fn push(app: &AppHandle) {
         return;
     }
     std::thread::spawn(move || {
+        // ohne Tags (die setzt ntfy als Emoji vor den Titel); das Symbol ist auf iOS immer das der ntfy-App
         let r = ureq::post(&format!("{NTFY}/{topic}"))
-            .header("Title", "Vom PC")
+            .header("Title", "NotchDrop")
             .header("Click", "shortcuts://run-shortcut?name=Notch")
-            .header("Tags", "inbox_tray")
-            .send(format!("{what} bereit – antippen zum Abholen"));
+            .send(what);
         if let Err(e) = r {
             eprintln!("[notch] ntfy: {e}");
         }
