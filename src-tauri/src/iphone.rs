@@ -350,10 +350,14 @@ fn log(app: &AppHandle, line: String) {
 }
 
 /// Alles unter /k/ (aus share.rs weitergereicht)
-pub fn handle(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpAddr) -> Response<std::io::Cursor<Vec<u8>>> {
+pub fn handle(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpAddr) -> Response<Box<dyn Read + Send>> {
     let method = req.method().to_string();
-    let r = handle_inner(app, req, path, q, ip);
-    let sub = path.strip_prefix("/k/").and_then(|r| r.split_once('/')).map(|x| x.1).unwrap_or("?");
+    let (tok, sub) = path.strip_prefix("/k/").and_then(|r| r.split_once('/')).unwrap_or(("", "?"));
+    // Dateien fuers iPhone werden gestreamt, alles andere ist klein
+    let r = match sub.strip_prefix("datei/") {
+        Some(rest) if *req.method() == Method::Get && same(tok, &token(app)) => serve(app, rest.split('/').next().unwrap_or("")),
+        _ => handle_inner(app, req, path, q, ip).boxed(),
+    };
     log(app, format!("{ip} {method} /{sub} -> {}", r.status_code().0));
     r
 }
@@ -369,7 +373,12 @@ fn handle_inner(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpA
         (Method::Get, "") => {
             seen(app, ip, q); // QR-Code mit dem iPhone gescannt = gekoppelt
             let (ip_pc, port, _) = share::addr();
-            let base = format!("http://{ip_pc}:{port}/k/{tok}");
+            // Rechnername statt IP: iOS findet <PC>.local per Bonjour, und der Kurzbefehl ueberlebt eine neue IP
+            let host = std::env::var("COMPUTERNAME").ok().filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
+            let base = match host {
+                Some(h) => format!("http://{h}.local:{port}/k/{tok}"),
+                None => format!("http://{ip_pc}:{port}/k/{tok}"),
+            };
             let page = PAGE
                 .replace("{{BASE}}", &share::html_escape(&base))
                 .replace("{{NAME}}", &share::html_escape(&share::alias()))
@@ -391,8 +400,7 @@ fn handle_inner(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpA
             fetch_list(app, tok)
         }
         (Method::Get, "text") => fetch_text(app),
-        // /datei/<id>/<art>: die Art steht nur fuer den Kurzbefehl in der Adresse
-        (Method::Get, s) if s.starts_with("datei/") => serve(app, s[6..].split('/').next().unwrap_or("")),
+        // /datei/<id>/<art> beantwortet handle (gestreamt); die Art steht nur fuer den Kurzbefehl in der Adresse
         (Method::Post, "senden" | "clip") => {
             seen(app, ip, q);
             receive(app, req, q, sub == "clip")
@@ -606,7 +614,8 @@ fn fetch_text(app: &AppHandle) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 /// Eine bereitgelegte Datei ausliefern; sie verschwindet damit aus der Ablage fuers iPhone
-fn serve(app: &AppHandle, id: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+/// Gestreamt (nicht erst in den Speicher), damit auch grosse Videos gehen
+fn serve(app: &AppHandle, id: &str) -> Response<Box<dyn Read + Send>> {
     let found = {
         let mut o = outbox();
         let i = o.files.iter().position(|f| f.id == id);
@@ -616,13 +625,14 @@ fn serve(app: &AppHandle, id: &str) -> Response<std::io::Cursor<Vec<u8>>> {
             f
         })
     };
-    let Some(f) = found else { return plain(404, "nicht mehr da") };
-    let Ok(bytes) = std::fs::read(&f.path) else { return plain(404, "Datei fehlt") };
+    let Some(f) = found else { return plain(404, "nicht mehr da").boxed() };
+    let Ok(file) = File::open(&f.path) else { return plain(404, "Datei fehlt").boxed() };
     out_activity(app);
     let disp = format!("attachment; filename*=UTF-8''{}", share::pct(&f.name));
-    Response::from_data(bytes)
+    Response::from_file(file)
         .with_header(header("Content-Type", share::mime_of(&f.name)))
         .with_header(header("Content-Disposition", &disp))
+        .boxed()
 }
 
 // ---------- Explorer: Senden an › iPhone ----------
