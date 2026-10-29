@@ -341,12 +341,19 @@ Abfragen: laufendes Spiel alle 15 s, kurz vor Anpfiff alle 30 s, sonst alle 5–
 
 ## iPhone ↔ PC (wie AirDrop)
 
-Echtes AirDrop geht unter Windows nicht – Apple funkt dafür über ein eigenes WLAN-Protokoll (AWDL) mit Apple-Zertifikaten. Die Notch bietet zwei Wege, die sich fast genauso anfühlen (`src-tauri/src/share.rs`). Einschalten: Einstellungen › **iPhone** (aus, bis man es einschaltet; dann lauscht die Notch im lokalen Netz auf Port 53317 – beim ersten Mal fragt die Windows-Firewall: „Private Netzwerke“ erlauben).
+Echtes AirDrop geht unter Windows nicht – Apple funkt dafür über ein eigenes WLAN-Protokoll (AWDL) mit Apple-Zertifikaten. Die Notch bietet drei Wege, die sich fast genauso anfühlen (`src-tauri/src/share.rs`, `iphone.rs`). Einschalten: Einstellungen › **iPhone** (aus, bis man es einschaltet; dann lauscht die Notch im lokalen Netz auf Port 53317 – beim ersten Mal fragt die Windows-Firewall: „Private Netzwerke“ erlauben).
 
 1. **LocalSend** (kostenlos, Open Source, App Store): Die Notch spricht das offene [LocalSend-Protokoll v2](https://github.com/localsend/protocol) und taucht in der App als Gerät „Notch · PC-Name“ auf.
    - iPhone → PC: Foto/Datei › Teilen › LocalSend › Notch. Die Notch klappt auf wie bei einem Anruf: **Annehmen** / **Ablehnen** / **Immer annehmen** (Gerät merken). Fortschritt als Zeile, danach „3 Fotos von Nojos iPhone“; die Dateien liegen in der Ablage und in `Downloads\Notch` (einstellbar). Text und Links aus LocalSend erscheinen zum **Kopieren** bzw. **Öffnen**.
    - PC → iPhone: LocalSend auf dem iPhone offen lassen, dann Ablage › Rechtsklick › **An iPhone senden** › Gerät; auf dem iPhone annehmen.
 2. **Ohne App (Browser):** iPhone-Knopf in der Ablage zeigt einen QR-Code. Mit der Kamera scannen → Seite in Safari zum Hochladen (Fotos/Dateien wählen) und zum Laden von Dateien, die man am PC über Rechtsklick › An iPhone senden › **Per QR-Code** anbietet (Fotos: gedrückt halten › Zu Fotos hinzufügen).
+
+3. **Kurzbefehl „Notch“ (ohne App, empfohlen)** (`src-tauri/src/iphone.rs`, Einrichtungsseite `iphone-page.html`): Einstellungen › iPhone › Kurzbefehl › **Einrichten (QR-Code)**. Mit der iPhone-Kamera scannen koppelt das iPhone. Die Seite bietet die Adresse zum Kopieren und den fertigen, signierten Kurzbefehl zum Laden (`src-tauri/src/Notch.shortcut`, fragt beim Hinzufügen nach der Adresse; Quelle `tools/shortcuts/notch.cherri`, erzeugt im [Cherri-Playground](https://playground.cherrilang.org) und dort über HubSign signiert, Anleitung im Kopf der Datei). Die Bauanleitung von Hand steht darunter zum Aufklappen.
+   - Teilen-Menü › **Notch**: Dateien landen in der Ablage und im Empfangsordner („3 Fotos vom iPhone“, Dateien innerhalb von 8 s zählen als eine Sendung), ein einzelner Link öffnet sich im Browser, anderer Text kommt in die Zwischenablage.
+   - **Auf Rückseite tippen** (Bedienungshilfen) startet den Kurzbefehl ohne Eingabe: Die Zwischenablage des iPhones landet am PC.
+   - **Verbindungsanzeige:** Aufgeklappt zeigt eine Karte „iPhone“, ob es im WLAN ist (die Notch löst seine Adresse alle 20 s per ARP neu auf, ohne App, auch gesperrt; nach drei Fehlversuchen „nicht im WLAN · zuletzt …“), dazu den Akku, den der Kurzbefehl bei jeder Anfrage mitschickt (oder eine Automation „WLAN verbunden“ / „Ladegerät“ über `/hallo`). Kommt das iPhone ins WLAN, zeigt die kleine Notch kurz „Verbunden“. Die Karte belegt nie einen Platz in der kleinen Notch.
+   - Schnittstelle: `POST /k/<schlüssel>/senden?name=<datei>`, `POST /k/<schlüssel>/clip`, `GET /k/<schlüssel>/hallo`, jeweils optional `akku` (0..1 oder 0..100) und `geraet`. Text oder Datei entscheidet die Notch (klein, UTF-8, kein Bild/PDF und ohne Dateiendung = Text).
+   - Fester Schlüssel (128 Bit, `iphone-token.txt` im App-Ordner), **Entkoppeln** macht ihn ungültig. Prüfen: `cargo test --lib iphone`; ARP von Hand: `ARP_IP=<adresse> cargo test --lib arp_probe -- --ignored --nocapture`.
 
 Sicherheit: Fremde Geräte werden jedes Mal gefragt (60 s, sonst abgelehnt); Uploads nur mit dem Einmal-Schlüssel aus der Zusage und von derselben Adresse; Dateinamen werden bereinigt (kein Pfad, keine reservierten Namen), nichts wird überschrieben; höchstens angekündigte Größe. Die Browser-Seite braucht den zufälligen Schlüssel aus dem QR-Code (30 Min gültig). Übertragen wird unverschlüsselt (HTTP) wie LocalSend mit ausgeschalteter Verschlüsselung – gedacht fürs Heim-WLAN, nicht für öffentliche Netze.
 
@@ -385,6 +392,7 @@ Neue Version veröffentlichen: Version in `package.json`, `src-tauri/Cargo.toml`
 - `src-tauri/src/sport.rs`, `src/sport.ts` — Live-Sport: Quellen, Ticker, Ballverlauf, Wurfbild, Anzeige
 - `src/morph.ts` — Inhalte abgleichen statt neu bauen (kein Aufblinken); identisch in Arena
 - `src-tauri/src/share.rs`, `share-page.html` — iPhone-Austausch: LocalSend-Protokoll, Browser-Seite, QR-Code
+- `src-tauri/src/iphone.rs`, `iphone-page.html` — iPhone per Kurzbefehl: Teilen-Menü, Zwischenablage, Verbindungsanzeige (ARP)
 - `src-tauri/src/gamepad.rs` — Controller-Kürzel (XInput)
 - `src-tauri/src/shelf.rs`, `convert.rs` — Ablage und Konvertieren
 - `src-tauri/src/win.rs` — Win32: Cursor, Vollbild, Fensterstile, Fenster nach vorn holen

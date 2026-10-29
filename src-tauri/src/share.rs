@@ -44,7 +44,7 @@ const MAX_TOTAL: u64 = 50 * 1024 * 1024 * 1024;
 
 pub const ASK_ID: &str = "notch:share:ask";
 const RECV_ID: &str = "notch:share:recv";
-const DONE_ID: &str = "notch:share:done";
+pub(crate) const DONE_ID: &str = "notch:share:done";
 const TEXT_ID: &str = "notch:share:text";
 const SEND_ID: &str = "notch:share:send";
 
@@ -200,7 +200,7 @@ pub fn fmt_size(b: u64) -> String {
     }
 }
 
-fn kind_of(name: &str, mime: &str) -> &'static str {
+pub(crate) fn kind_of(name: &str, mime: &str) -> &'static str {
     let ext = name.rsplit_once('.').map(|x| x.1.to_ascii_lowercase()).unwrap_or_default();
     if mime.starts_with("image/") || matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "heic" | "heif" | "gif" | "webp") {
         "Foto"
@@ -230,15 +230,15 @@ pub fn count_text(kinds: &[&str]) -> String {
     }
 }
 
-fn header(k: &str, v: &str) -> Header {
+pub(crate) fn header(k: &str, v: &str) -> Header {
     Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap()
 }
 
-fn query<'a>(q: &'a str, key: &str) -> Option<&'a str> {
+pub(crate) fn query<'a>(q: &'a str, key: &str) -> Option<&'a str> {
     q.split('&').find_map(|kv| kv.strip_prefix(key).and_then(|r| r.strip_prefix('=')))
 }
 
-fn url_decode(s: &str) -> String {
+pub(crate) fn url_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -271,11 +271,11 @@ fn url_decode(s: &str) -> String {
 
 // ---------- Einstellungen ----------
 
-fn enabled() -> bool {
+pub(crate) fn enabled() -> bool {
     crate::settings_value("/share/on").and_then(|v| v.as_bool()).unwrap_or(false)
 }
 
-fn alias() -> String {
+pub(crate) fn alias() -> String {
     let n = crate::settings_value("/share/name").and_then(|v| v.as_str().map(|s| s.trim().to_string())).unwrap_or_default();
     if !n.is_empty() {
         return n.chars().take(40).collect();
@@ -290,7 +290,7 @@ fn trusted(fp: &str) -> bool {
         .is_some_and(|a| a.iter().any(|t| t["fp"].as_str() == Some(fp)))
 }
 
-fn folder(app: &AppHandle) -> PathBuf {
+pub(crate) fn folder(app: &AppHandle) -> PathBuf {
     let custom = crate::settings_value("/share/folder").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
     if !custom.trim().is_empty() {
         return PathBuf::from(custom.trim());
@@ -324,7 +324,7 @@ fn fingerprint(app: &AppHandle) -> String {
 
 /// Nur Entwicklungs-Builds: NOTCH_SHARE_TEST=1 -> nur 127.0.0.1, keine Geraete-Suche (keine Firewall-Abfrage),
 /// Adresse der Browser-Seite steht im Log. In ausgelieferten Versionen gibt es das nicht.
-fn test_mode() -> bool {
+pub(crate) fn test_mode() -> bool {
     cfg!(debug_assertions) && std::env::var("NOTCH_SHARE_TEST").is_ok()
 }
 
@@ -360,7 +360,7 @@ fn info(fp: &str, port: u16, announce: Option<bool>) -> Value {
 
 // ---------- Aktivitaeten in der Notch ----------
 
-fn act(id: &str, title: String, subtitle: String) -> Activity {
+pub(crate) fn act(id: &str, title: String, subtitle: String) -> Activity {
     Activity {
         id: id.into(),
         app: "iPhone".into(),
@@ -373,11 +373,11 @@ fn act(id: &str, title: String, subtitle: String) -> Activity {
     }
 }
 
-fn btn(id: &str, label: &str, icon: Option<&str>) -> Action {
+pub(crate) fn btn(id: &str, label: &str, icon: Option<&str>) -> Action {
     Action { id: id.into(), label: label.into(), icon: icon.map(String::from), ..Default::default() }
 }
 
-fn status_event(app: &AppHandle) {
+pub(crate) fn status_event(app: &AppHandle) {
     let _ = app.emit("share-state", status(app));
 }
 
@@ -452,11 +452,11 @@ fn trust(app: &AppHandle, fp: &str, alias: &str) {
 
 // ---------- Empfangen (LocalSend: prepare-upload / upload / cancel) ----------
 
-fn json_resp(v: Value) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn json_resp(v: Value) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string(v.to_string()).with_header(header("Content-Type", "application/json; charset=utf-8"))
 }
 
-fn plain(code: u16, msg: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn plain(code: u16, msg: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string(msg).with_status_code(code)
 }
 
@@ -805,7 +805,7 @@ fn web(app: &AppHandle, req: &mut Request, path: &str, q: &str) -> Option<Respon
     Some(resp.boxed())
 }
 
-fn html_escape(s: &str) -> String {
+pub(crate) fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
@@ -842,6 +842,11 @@ fn handle(app: AppHandle, mut req: Request) {
         if let Some(r) = web(&app, &mut req, &path, &q) {
             let _ = req.respond(r);
         }
+        return;
+    }
+    if path.starts_with("/k/") {
+        let r = crate::iphone::handle(&app, &mut req, &path, &q, ip);
+        let _ = req.respond(r);
         return;
     }
     let (fp, port) = {
@@ -1074,7 +1079,14 @@ fn status(app: &AppHandle) -> Value {
         "folder": folder,
         "devices": devices.iter().map(|d| json!({ "fp": d.fp, "alias": d.alias, "model": d.model, "kind": d.kind, "recent": d.seen.is_some_and(|s| s.elapsed() < Duration::from_secs(120)) })).collect::<Vec<_>>(),
         "offers": st.offers.iter().map(|o| json!({ "id": o.id, "name": o.name, "size": o.size })).collect::<Vec<_>>(),
+        "phone": crate::iphone::status_json(),
     })
+}
+
+/// Adresse im WLAN, Port, laeuft der Server
+pub(crate) fn addr() -> (String, u16, bool) {
+    let st = STATE.lock().unwrap();
+    (st.ip.clone(), st.port, st.running)
 }
 
 #[tauri::command]
@@ -1082,7 +1094,7 @@ pub fn share_status(app: AppHandle) -> Value {
     status(&app)
 }
 
-fn qr_svg(text: &str) -> Result<String, String> {
+pub(crate) fn qr_svg(text: &str) -> Result<String, String> {
     let code = qrcode::QrCode::with_error_correction_level(text.as_bytes(), qrcode::EcLevel::M).map_err(|e| e.to_string())?;
     Ok(code
         .render::<qrcode::render::svg::Color>()

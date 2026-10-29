@@ -840,7 +840,8 @@ function renderSport() {
 // ---------- iPhone (share.rs) ----------
 
 type ShareDev = { fp: string; alias: string; model: string; kind: string; recent: boolean };
-type ShareState = { on: boolean; running: boolean; error: string; ip: string; port: number; alias: string; folder: string; devices: ShareDev[] };
+type SharePhone = { name: string; present: boolean; battery: number | null; seen: string | null };
+type ShareState = { on: boolean; running: boolean; error: string; ip: string; port: number; alias: string; folder: string; devices: ShareDev[]; phone: SharePhone | null };
 let share: ShareState | null = null;
 
 const ICON_PHONE = icon("phone");
@@ -918,7 +919,53 @@ function renderShare() {
     }
   });
   qr.append(qrHead, qrBtn, qrBox);
-  ways.append(ls, qr);
+
+  // Kurzbefehl (iphone.rs): Teilen-Menue und Zwischenablage ohne App, die Notch zeigt das iPhone als Karte
+  const ks = el("section", "s-card way wide");
+  const ksHead = el("div", "way-head");
+  ksHead.innerHTML = ICON_PHONE;
+  ksHead.append(el("b", "", "Kurzbefehl"), el("small", "faint", "Teilen-Menü, Zwischenablage, Verbindungsanzeige"));
+  const ph = share?.phone;
+  const phLine = el("div", "devs");
+  if (!ph) phLine.append(el("small", "faint", "Noch kein iPhone gekoppelt"));
+  else {
+    const where = ph.present ? "im WLAN" : `nicht im WLAN${ph.seen ? ` · zuletzt ${ph.seen}` : ""}`;
+    const p = el("span", "dev", [ph.name, where, ph.battery != null ? `${ph.battery} %` : ""].filter(Boolean).join(" · "));
+    p.classList.toggle("on", ph.present);
+    phLine.append(p);
+  }
+  const ksBox = el("div", "qr-box");
+  const ksRow = el("div", "input-row");
+  const ksBtn = el("button", "button secondary", ph ? "Anleitung zeigen (QR-Code)" : "Einrichten (QR-Code)");
+  ksBtn.addEventListener("click", async () => {
+    try {
+      const r = await invoke<{ url: string; svg: string }>("iphone_setup");
+      const img = new Image();
+      img.src = `data:image/svg+xml;utf8,${encodeURIComponent(r.svg)}`;
+      img.alt = "QR-Code für die iPhone-Kamera";
+      img.className = "qr";
+      img.title = r.url;
+      ksBox.replaceChildren(img, el("small", "faint", "Mit der iPhone-Kamera scannen: koppelt und zeigt die Anleitung"));
+      ksBtn.hidden = true;
+    } catch (e) {
+      ksBox.replaceChildren(el("small", "error", String(e)));
+    }
+  });
+  ksRow.append(ksBtn);
+  if (ph) {
+    const un = el("button", "button secondary", "Entkoppeln");
+    un.title = "Der Kurzbefehl auf dem iPhone geht danach nicht mehr (neu einrichten nötig)";
+    // zweiter Klick bestaetigt (kein Browser-Dialog im Einstellungsfenster)
+    un.addEventListener("click", () => {
+      if (un.dataset.sure) { invoke("iphone_unpair").catch(() => {}); return; }
+      un.dataset.sure = "1";
+      un.textContent = "Wirklich entkoppeln?";
+      setTimeout(() => { delete un.dataset.sure; un.textContent = "Entkoppeln"; }, 4000);
+    });
+    ksRow.append(un);
+  }
+  ks.append(ksHead, phLine, ksRow, ksBox);
+  ways.append(ks, ls, qr);
   rest.append(ways);
 
   // Empfangen
@@ -1286,11 +1333,11 @@ async function main() {
   // iPhone-Austausch: Zustand aus share.rs (laeuft, Adresse, Geraete in der Naehe)
   invoke<ShareState>("share_status").then((x) => { share = x; renderShare(); }).catch(() => {});
   await listen<ShareState>("share-state", (e) => {
-    const was = JSON.stringify(share?.devices) + share?.running + share?.alias + share?.folder;
+    const was = JSON.stringify([share?.devices, share?.phone]) + share?.running + share?.alias + share?.folder;
     share = e.payload;
     renderShareStatus();
     // Liste der Geraete neu, aber nicht beim Tippen in ein Feld
-    const now = JSON.stringify(share.devices) + share.running + share.alias + share.folder;
+    const now = JSON.stringify([share.devices, share.phone]) + share.running + share.alias + share.folder;
     if (now !== was && !(document.activeElement as HTMLElement | null)?.closest?.(".share-options input")) renderShare();
   });
 

@@ -646,7 +646,8 @@ function clockAct(): CAct[] {
 
 function currentPlan(): Plan {
   return plan({
-    acts: [...acts.filter((a) => !a.esports && !a.lol), ...clockAct()],
+    // iPhone-Karte (iphone.rs) ist eine Verbindungsanzeige fuer die aufgeklappte Notch, kein Platz in der kleinen
+    acts: [...acts.filter((a) => !a.esports && !a.lol && a.id !== "notch:iphone"), ...clockAct()],
     music: musicVisible(),
     s: settings,
     gate: pulseGate,
@@ -1091,7 +1092,7 @@ const deck = new Deck(cardsEl, {
 });
 
 /** Karten anderer Apps, Live-Sport und LoL bleiben weggeklickt; eigene Eintraege (Timer, Umwandeln, iPhone-Anfrage, Update) beendet x wie bisher */
-const keepsHidden = (id: string) => !id.startsWith("notch:") || id === "notch:sport";
+const keepsHidden = (id: string) => !id.startsWith("notch:") || id === "notch:sport" || id === "notch:iphone";
 const cardPresent = (id: string) => (id === "notch:sport" ? !!cardFocus() : acts.some((a) => a.id === id));
 
 function cardLabel(id: string) {
@@ -1350,7 +1351,8 @@ function renderActs() {
   // nur eine Puls-Zeile: die wichtigste (Garmin über Haze hat Vorrang vor Helio, siehe priority)
   const firstPulse = acts.find((a) => sourceOf(a) === "pulse");
   // weggeklickte Karten bleiben weg, auch wenn die App sie neu schickt
-  const list = acts.filter((a) => !a.esports && !a.lol && (sourceOf(a) !== "pulse" || a === firstPulse) && !cardHidden(a.id));
+  // "iPhone verbunden" ist nur fuer die kleine Notch, aufgeklappt steht die iPhone-Karte
+  const list = acts.filter((a) => !a.esports && !a.lol && a.id !== "notch:iphone:hallo" && (sourceOf(a) !== "pulse" || a === firstPulse) && !cardHidden(a.id));
   const sig = JSON.stringify(list) + dock;
   if (sig === actsSig) return;
   actsSig = sig;

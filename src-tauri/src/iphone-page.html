@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Kurzbefehl einrichten</title>
+<style>
+  :root { --bg: #000; --card: #1c1c1e; --line: #2c2c2e; --fg: #f5f5f7; --fg2: #8e8e93; --accent: #64d2ff; --ok: #30d158; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f2f2f7; --card: #fff; --line: #e5e5ea; --fg: #1c1c1e; --fg2: #6e6e73; --accent: #0a84ff; } }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font: 17px/1.45 -apple-system, system-ui, "Segoe UI", sans-serif; padding: max(20px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom)); -webkit-text-size-adjust: 100%; }
+  main { max-width: 560px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 12px; margin: 6px 0 18px; }
+  .pill { width: 54px; height: 22px; border-radius: 11px; background: #000; box-shadow: 0 0 0 1px var(--line); flex: none; }
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+  header small { display: block; color: var(--fg2); font-size: 14px; }
+  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg2); margin: 26px 4px 8px; }
+  .card { background: var(--card); border-radius: 16px; padding: 14px 16px; }
+  .ok { color: var(--ok); font-weight: 600; }
+  textarea { width: 100%; border: 0; border-radius: 10px; background: var(--line); color: var(--fg); font: 15px ui-monospace, Menlo, monospace; padding: 10px; resize: none; word-break: break-all; }
+  button { margin-top: 10px; width: 100%; height: 50px; border: 0; border-radius: 14px; background: var(--accent); color: #000; font: 600 17px -apple-system, system-ui, sans-serif; }
+  ol { padding-left: 22px; }
+  li { margin: 10px 0; }
+  li small, .hint { display: block; color: var(--fg2); font-size: 14px; }
+  b.a { background: var(--line); border-radius: 6px; padding: 1px 6px; font-weight: 600; white-space: nowrap; }
+  a.btn { display: flex; align-items: center; justify-content: center; height: 50px; border-radius: 14px; background: var(--accent); color: #000; font-weight: 600; text-decoration: none; margin-bottom: 4px; }
+  summary { font-weight: 600; cursor: pointer; }
+  code { font: 14px ui-monospace, Menlo, monospace; background: var(--line); border-radius: 6px; padding: 1px 5px; word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="pill" aria-hidden="true"></div>
+    <div><h1>Kurzbefehl „Notch“</h1><small>{{NAME}}</small></div>
+  </header>
+
+  <div class="card"><span class="ok">● Gekoppelt.</span> Dieses iPhone erscheint jetzt in der Notch.</div>
+
+  <h2>1 · Adresse kopieren</h2>
+  <div class="card">
+    <textarea id="base" rows="3" readonly>{{BASE}}</textarea>
+    <button id="copy" type="button">Adresse kopieren</button>
+    <span class="hint" id="copied"></span>
+  </div>
+
+  <h2>2 · Kurzbefehl hinzufügen</h2>
+  <div class="card">
+    <a class="btn" href="Notch.shortcut">Kurzbefehl „Notch“ laden</a>
+    <ol>
+      <li>Safari fragt nach dem Laden › <b>Laden</b>. Dann oben rechts den <b>Download-Pfeil</b> › <b>Notch.shortcut</b> antippen.</li>
+      <li>In Kurzbefehle <b>Kurzbefehl hinzufügen</b> › bei der Frage nach der Adresse die kopierte Adresse <b>einfügen</b>.</li>
+    </ol>
+    <span class="hint">Fertig: „Notch“ steht jetzt im Teilen-Menü.</span>
+  </div>
+
+  <details class="card" style="margin-top:12px">
+  <summary>Lieber selbst bauen?</summary>
+    <ol>
+      <li>App <b>Kurzbefehle</b> öffnen › <b>+</b> › oben als Namen <b>Notch</b> eintragen.</li>
+      <li><b class="a">Text</b> – die kopierte Adresse einfügen.</li>
+      <li><b class="a">Batteriestand abrufen</b></li>
+      <li><b class="a">Wenn</b> – <b>Kurzbefehleingabe</b> · <b>hat keinen Wert</b></li>
+      <li>Darin: <b class="a">Zwischenablage abrufen</b>, danach <b class="a">Inhalte von URL abrufen</b>:
+        <small>URL: <code>Text</code><code>/clip?akku=</code><code>Batteriestand</code> · Methode <b>POST</b> · Anforderungstext <b>Datei</b> = <b>Zwischenablage</b></small></li>
+      <li>Unter <b>Sonst</b>: <b class="a">Mit jedem wiederholen</b> (Kurzbefehleingabe). Darin:
+        <small><b class="a">Namen abrufen</b> (Wiederholungsobjekt) › <b class="a">URL codieren</b> (Name) ›
+        <b class="a">Inhalte von URL abrufen</b>: URL <code>Text</code><code>/senden?name=</code><code>URL-codierter Text</code><code>&amp;akku=</code><code>Batteriestand</code> · <b>POST</b> · <b>Datei</b> = <b>Wiederholungsobjekt</b></small></li>
+      <li>Unten <b>ⓘ</b> › <b>Im Share-Sheet anzeigen</b> an.</li>
+    </ol>
+    <span class="hint">Aktionen findest du über das Suchfeld unten. Englische Namen: Text, Get Battery Level, If, Get Clipboard, Get Contents of URL, Repeat with Each, Get Name, URL Encode.</span>
+  </details>
+
+  <h2>3 · Antippen statt Menü</h2>
+  <div class="card">
+    <ol>
+      <li><b>Einstellungen › Bedienungshilfen › Tippen › Auf Rückseite tippen › Doppeltippen › Notch</b>
+        <small>Zweimal hinten aufs iPhone tippen = Zwischenablage zum PC.</small></li>
+      <li>Optional, für den Akkustand in der Notch: <b>Kurzbefehle › Automation › +</b> › <b>WLAN</b> (dein WLAN) › <b>Sofort ausführen</b>, Aktionen:
+        <small><b class="a">Text</b> (Adresse) › <b class="a">Batteriestand abrufen</b> › <b class="a">Inhalte von URL abrufen</b>: <code>Text</code><code>/hallo?akku=</code><code>Batteriestand</code></small>
+        <small>Dieselbe Automation auch für <b>Ladegerät</b> „ist verbunden“ und „ist getrennt“.</small></li>
+    </ol>
+  </div>
+  <p class="hint" style="margin:18px 4px 0">Funktioniert nur im selben WLAN wie der PC. Ändert sich die Adresse des PCs, hier neu kopieren.</p>
+</main>
+<script>
+  const t = document.getElementById("base");
+  document.getElementById("copy").addEventListener("click", async () => {
+    let ok = false;
+    try { await navigator.clipboard.writeText(t.value); ok = true; } catch {}
+    if (!ok) { // ohne HTTPS gibt es navigator.clipboard nicht
+      t.focus(); t.setSelectionRange(0, t.value.length);
+      try { ok = document.execCommand("copy"); } catch {}
+    }
+    document.getElementById("copied").textContent = ok ? "Kopiert." : "Bitte Text oben gedrückt halten › Kopieren.";
+  });
+</script>
+</body>
+</html>

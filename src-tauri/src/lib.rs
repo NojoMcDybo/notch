@@ -3,6 +3,7 @@ mod audio;
 mod clipboard;
 mod convert;
 mod gamepad;
+mod iphone;
 mod jarvis;
 mod laya;
 mod lol;
@@ -585,7 +586,9 @@ pub fn run() {
             share::share_status,
             share::share_qr,
             share::share_offer,
-            share::share_send
+            share::share_send,
+            iphone::iphone_setup,
+            iphone::iphone_unpair
         ])
         .setup(|app| {
             shelf::load(app.handle());
@@ -645,6 +648,7 @@ pub fn run() {
             sport::spawn(app.handle().clone());
             thumb::spawn();
             share::spawn(app.handle().clone());
+            iphone::spawn(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
