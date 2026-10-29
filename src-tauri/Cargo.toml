@@ -1,6 +1,6 @@
 [package]
 name = "notch"
-version = "0.2.23"
+version = "0.2.24"
 description = "Notch - Dynamic-Island-artige Infoanzeige fuer Windows"
 authors = ["Nojo"]
 edition = "2021"
