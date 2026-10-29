@@ -809,13 +809,13 @@ pub(crate) fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-fn pct(s: &str) -> String {
+pub(crate) fn pct(s: &str) -> String {
     s.bytes()
         .map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
         .collect()
 }
 
-fn mime_of(name: &str) -> &'static str {
+pub(crate) fn mime_of(name: &str) -> &'static str {
     match name.rsplit_once('.').map(|x| x.1.to_ascii_lowercase()).as_deref() {
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("png") => "image/png",
@@ -1079,7 +1079,7 @@ fn status(app: &AppHandle) -> Value {
         "folder": folder,
         "devices": devices.iter().map(|d| json!({ "fp": d.fp, "alias": d.alias, "model": d.model, "kind": d.kind, "recent": d.seen.is_some_and(|s| s.elapsed() < Duration::from_secs(120)) })).collect::<Vec<_>>(),
         "offers": st.offers.iter().map(|o| json!({ "id": o.id, "name": o.name, "size": o.size })).collect::<Vec<_>>(),
-        "phone": crate::iphone::status_json(),
+        "phone": crate::iphone::status_json(app),
     })
 }
 

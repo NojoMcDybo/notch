@@ -751,7 +751,7 @@ function fillMid(clockAtEdge = false, free = false) {
 // ---------- iPhone-Austausch (share.rs) ----------
 
 type ShareDev = { fp: string; alias: string; model: string; recent: boolean };
-type ShareState = { on: boolean; running: boolean; error: string; ip: string; port: number; alias: string; devices: ShareDev[] };
+type ShareState = { on: boolean; running: boolean; error: string; ip: string; port: number; alias: string; devices: ShareDev[]; phone?: { name: string } | null };
 type ShareQr = { url: string; svg: string; minutes: number };
 let shareState: ShareState | null = null;
 /** QR-Code in der Ablage: Notch bleibt so lange offen (man greift ja zum iPhone) */
@@ -1728,6 +1728,11 @@ async function openMenu(x: number, y: number) {
     add("iPhone-Austausch einschalten …", () => { invoke("open_settings", { tab: "share" }).catch(() => {}); });
   } else {
     const files = items.filter((i) => i.kind !== "folder").map((i) => i.path);
+    // gekoppeltes iPhone (Kurzbefehl, iphone.rs): bereitlegen, das iPhone holt es ab
+    if (shareState.phone) {
+      const name = shareState.phone.name;
+      add(`📱 ${name}`, () => { invoke("iphone_offer", { paths: files }).catch((e) => shareError(String(e))); });
+    }
     for (const d of (shareState.devices ?? []).filter((x) => x.recent)) {
       add(`📱 ${d.alias}`, () => { invoke("share_send", { fp: d.fp, paths: files }).catch((e) => shareError(String(e))); });
     }

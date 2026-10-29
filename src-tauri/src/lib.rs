@@ -588,7 +588,10 @@ pub fn run() {
             share::share_offer,
             share::share_send,
             iphone::iphone_setup,
-            iphone::iphone_unpair
+            iphone::iphone_unpair,
+            iphone::iphone_offer,
+            iphone::iphone_push,
+            iphone::iphone_sendto
         ])
         .setup(|app| {
             shelf::load(app.handle());

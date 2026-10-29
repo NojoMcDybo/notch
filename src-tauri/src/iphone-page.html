@@ -82,19 +82,36 @@
         <small>Dieselbe Automation auch für <b>Ladegerät</b> „ist verbunden“ und „ist getrennt“.</small></li>
     </ol>
   </div>
+  <h2>4 · Vom PC aufs iPhone</h2>
+  <div class="card">
+    <p>Am PC: Ablage › Rechtsklick › <b>An iPhone senden</b>, im Explorer <b>Senden an › iPhone (Notch)</b> oder an der iPhone-Karte <b>Zwischenablage senden</b>. Abholen: Kurzbefehl <b>Notch</b> ohne Eingabe starten (hinten doppeltippen). Fotos landen in der Fotos-App, Text in der Zwischenablage.</p>
+    <div id="ntfy">
+      <p style="margin-top:12px"><b>Mitteilung, wenn etwas bereitliegt:</b> App <b>ntfy</b> laden › <b>+</b> › dieses Thema eintragen (Server ntfy.sh):</p>
+      <textarea id="topic" rows="1" readonly>{{NTFY}}</textarea>
+      <button id="copyTopic" type="button">Thema kopieren</button>
+      <span class="hint">Antippen der Mitteilung startet den Kurzbefehl und holt alles ab.</span>
+    </div>
+    <p class="hint" id="nontfy">Mitteilungen schaltest du in der Notch ein: Einstellungen › iPhone › „Mitteilung aufs iPhone“.</p>
+    <p style="margin-top:12px"><b>Antippen wie bei AirDrop (optional):</b> NFC-Aufkleber an den Schreibtisch, dann <b>Kurzbefehle › Automation › + › NFC</b> › Aufkleber scannen › <b>Sofort ausführen</b> › Aktion <b class="a">Kurzbefehl ausführen</b>: Notch.</p>
+  </div>
+
   <p class="hint" style="margin:18px 4px 0">Funktioniert nur im selben WLAN wie der PC. Ändert sich die Adresse des PCs, hier neu kopieren.</p>
 </main>
 <script>
-  const t = document.getElementById("base");
-  document.getElementById("copy").addEventListener("click", async () => {
+  async function copy(t, btn) {
     let ok = false;
     try { await navigator.clipboard.writeText(t.value); ok = true; } catch {}
     if (!ok) { // ohne HTTPS gibt es navigator.clipboard nicht
       t.focus(); t.setSelectionRange(0, t.value.length);
       try { ok = document.execCommand("copy"); } catch {}
     }
-    document.getElementById("copied").textContent = ok ? "Kopiert." : "Bitte Text oben gedrückt halten › Kopieren.";
-  });
+    btn.textContent = ok ? "Kopiert" : "Gedrückt halten › Kopieren";
+  }
+  document.getElementById("copy").addEventListener("click", (e) => copy(document.getElementById("base"), e.target));
+  document.getElementById("copyTopic").addEventListener("click", (e) => copy(document.getElementById("topic"), e.target));
+  const hasTopic = document.getElementById("topic").value.trim() !== "";
+  document.getElementById("ntfy").hidden = !hasTopic;
+  document.getElementById("nontfy").hidden = hasTopic;
 </script>
 </body>
 </html>

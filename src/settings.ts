@@ -840,7 +840,7 @@ function renderSport() {
 // ---------- iPhone (share.rs) ----------
 
 type ShareDev = { fp: string; alias: string; model: string; kind: string; recent: boolean };
-type SharePhone = { name: string; present: boolean; battery: number | null; seen: string | null };
+type SharePhone = { name: string; present: boolean; battery: number | null; seen: string | null; ntfy: string | null; sendto: boolean };
 type ShareState = { on: boolean; running: boolean; error: string; ip: string; port: number; alias: string; folder: string; devices: ShareDev[]; phone: SharePhone | null };
 let share: ShareState | null = null;
 
@@ -964,7 +964,20 @@ function renderShare() {
     });
     ksRow.append(un);
   }
-  ks.append(ksHead, phLine, ksRow, ksBox);
+  // PC -> iPhone: Mitteilung (ntfy) und Explorer-Eintrag, Zustand kommt aus iphone.rs
+  const ksOpts: HTMLElement[] = [];
+  if (ph) {
+    const push = optToggle("Mitteilung aufs iPhone (ntfy)", () => !!ph.ntfy, (v) => { invoke("iphone_push", { on: v }).catch(() => {}); });
+    push.querySelector("span")!.append(el("small", "", ph.ntfy
+      ? `Thema ${ph.ntfy} · in der ntfy-App abonnieren (steht auch auf der Einrichtungsseite)`
+      : "Meldet sich auf dem iPhone, wenn am PC etwas bereitliegt"));
+    const sendto = optToggle("Explorer: Senden an › iPhone", () => ph.sendto, (v) => {
+      invoke("iphone_sendto", { on: v }).catch((e) => ksBox.replaceChildren(el("small", "error", String(e))));
+    });
+    sendto.querySelector("span")!.append(el("small", "", "Rechtsklick auf eine Datei › Senden an › iPhone (Notch)"));
+    ksOpts.push(push, sendto);
+  }
+  ks.append(ksHead, phLine, ...ksOpts, ksRow, ksBox);
   ways.append(ks, ls, qr);
   rest.append(ways);
 

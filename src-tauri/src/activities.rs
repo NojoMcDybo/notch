@@ -379,6 +379,19 @@ pub fn spawn(app: AppHandle) {
                         Err(e) => Response::from_string(format!("ungueltiges JSON: {e}")).with_status_code(400),
                     }
                 }
+                (Method::Post, "/iphone") => {
+                    // {"paths": [...]} -> fuers iPhone bereitlegen (Explorer: Senden an › iPhone, iphone.rs)
+                    let mut body = String::new();
+                    let _ = req.as_reader().take(256 * 1024).read_to_string(&mut body);
+                    #[derive(Deserialize)]
+                    struct B {
+                        paths: Vec<String>,
+                    }
+                    match serde_json::from_str::<B>(&body).map_err(|e| e.to_string()).and_then(|b| crate::iphone::offer(&app, b.paths)) {
+                        Ok(()) => Response::from_string("{\"ok\":true}").with_header(json),
+                        Err(e) => Response::from_string(e).with_status_code(400),
+                    }
+                }
                 // Sport-Einstellungen fuer Arena (eigene Sport-App): lesen und schreiben, bereinigt
                 (Method::Get, "/sport/settings") => {
                     let v = crate::sport::sanitize_settings(&crate::settings_value("/sport").unwrap_or(serde_json::Value::Null));
@@ -462,6 +475,10 @@ pub fn activity_action(app: AppHandle, id: String, action: String) -> Result<(),
     }
     if id.starts_with("notch:share:") {
         crate::share::action(&app, &id, &action);
+        return Ok(());
+    }
+    if id.starts_with(crate::iphone::CARD_ID) {
+        crate::iphone::action(&app, &id, &action);
         return Ok(());
     }
     let Some(act) = get(&id) else { return Ok(()) };

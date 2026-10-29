@@ -1,7 +1,13 @@
-// Notch: Teilen-Menue und Zwischenablage an den PC
+// Notch: Teilen-Menue, Zwischenablage und Abholen vom PC
 // Quelle fuer src-tauri/src/Notch.shortcut. Neu erzeugen: Code in https://playground.cherrilang.org einfuegen,
 // Hammer (bauen), Teilen-Knopf › Sign Shortcut (HubSign von RoutineHub signiert) › Datei herunterladen.
-// Ohne Signatur nimmt iOS 15+ den Kurzbefehl nicht an. Erzeugt mit Cherri v2.3.0 am 29.10.2026.
+// Ohne Signatur nimmt iOS 15+ den Kurzbefehl nicht an. Erzeugt mit Cherri v2.3.0.
+//
+// Mit Eingabe (Teilen-Menue): jedes Objekt an /senden.
+// Ohne Eingabe (Rueckseite tippen, NFC, ntfy-Mitteilung): /abholen fragen (Klartext). "senden" = nichts
+// bereit, dann die eigene Zwischenablage an /clip. Sonst je Zeile eine Download-Adresse: /foto und /video in
+// die Fotos-App, anderes per Sichern-Dialog; danach /text in die Zwischenablage, falls nicht leer.
+// Kein JSON: verschachtelte Listen aus Woerterbuechern liefen in Kurzbefehlen still ins Leere.
 #define name Notch
 #define color lightblue
 #define glyph phone
@@ -10,6 +16,8 @@
 #include 'actions/web'
 #include 'actions/device'
 #include 'actions/sharing'
+#include 'actions/photos'
+#include 'actions/documents'
 
 #question adresse "Adresse aus der Notch (Einstellungen › iPhone › Kurzbefehl)" "http://"
 
@@ -20,13 +28,33 @@ const geraet = urlEncode(geraetName)
 @eingabe = ShortcutInput
 
 if !@eingabe {
-    @clip = getClipboard()
-    rawAction("is.workflow.actions.downloadurl", {
-        "WFURL": "{base}/clip?akku={akku}&geraet={geraet}",
-        "WFHTTPMethod": "POST",
-        "WFHTTPBodyType": "File",
-        "WFRequestVariable": "${@clip}"
-    })
+    @antwort = downloadURL("{base}/abholen?akku={akku}&geraet={geraet}")
+    const antwortText = "{@antwort}"
+    if antwortText == "senden" {
+        @clip = getClipboard()
+        rawAction("is.workflow.actions.downloadurl", {
+            "WFURL": "{base}/clip?akku={akku}&geraet={geraet}",
+            "WFHTTPMethod": "POST",
+            "WFHTTPBodyType": "File",
+            "WFRequestVariable": "${@clip}"
+        })
+    } else {
+        @adressen = getURLs(antwortText)
+        for adr in @adressen {
+            const adrText = "{@adr}"
+            @datei = downloadURL(adrText)
+            if adrText endsWith "/foto" || adrText endsWith "/video" {
+                savePhoto(@datei)
+            } else {
+                saveFilePrompt(@datei)
+            }
+        }
+        @textAntwort = downloadURL("{base}/text")
+        const text = "{@textAntwort}"
+        if text {
+            setClipboard(text)
+        }
+    }
 } else {
     for item in @eingabe {
         const name = getName(@item)

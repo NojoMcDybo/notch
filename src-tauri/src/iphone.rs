@@ -154,6 +154,7 @@ fn card(app: &AppHandle) {
         }
         a.color = Some(if l.present { "#64d2ff" } else { "#8e8e93" }.into());
         a.priority = 0;
+        a.actions = vec![share::btn("clip", "Zwischenablage senden", None)];
         a
     };
     let same_as_before = activities::get(CARD_ID)
@@ -335,8 +336,29 @@ fn receive(app: &AppHandle, req: &mut Request, q: &str, clip: bool) -> Response<
     file_in(app, req, head, &name, &ctype)
 }
 
+/// Protokoll der Kurzbefehl-Anfragen (`iphone-log.txt` im App-Ordner, ohne Schluessel), zur Fehlersuche
+fn log(app: &AppHandle, line: String) {
+    let Some(f) = data_file(app, "iphone-log.txt") else { return };
+    // klein halten: ab 200 KB von vorn
+    let keep = std::fs::metadata(&f).is_ok_and(|m| m.len() < 200 * 1024);
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let t = format!("{:02}:{:02}:{:02} UTC", secs / 3600 % 24, secs / 60 % 60, secs % 60);
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(keep).write(true).truncate(!keep).open(&f) {
+        use std::io::Write;
+        let _ = writeln!(file, "{t} {line}");
+    }
+}
+
 /// Alles unter /k/ (aus share.rs weitergereicht)
 pub fn handle(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpAddr) -> Response<std::io::Cursor<Vec<u8>>> {
+    let method = req.method().to_string();
+    let r = handle_inner(app, req, path, q, ip);
+    let sub = path.strip_prefix("/k/").and_then(|r| r.split_once('/')).map(|x| x.1).unwrap_or("?");
+    log(app, format!("{ip} {method} /{sub} -> {}", r.status_code().0));
+    r
+}
+
+fn handle_inner(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpAddr) -> Response<std::io::Cursor<Vec<u8>>> {
     let rest = path.strip_prefix("/k/").unwrap_or("");
     let (tok, sub) = rest.split_once('/').unwrap_or((rest, ""));
     if !same(tok, &token(app)) {
@@ -348,7 +370,11 @@ pub fn handle(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpAdd
             seen(app, ip, q); // QR-Code mit dem iPhone gescannt = gekoppelt
             let (ip_pc, port, _) = share::addr();
             let base = format!("http://{ip_pc}:{port}/k/{tok}");
-            Response::from_string(PAGE.replace("{{BASE}}", &share::html_escape(&base)).replace("{{NAME}}", &share::html_escape(&share::alias())))
+            let page = PAGE
+                .replace("{{BASE}}", &share::html_escape(&base))
+                .replace("{{NAME}}", &share::html_escape(&share::alias()))
+                .replace("{{NTFY}}", &ntfy_topic(app).unwrap_or_default());
+            Response::from_string(page)
                 .with_header(header("Content-Type", "text/html; charset=utf-8"))
                 .with_header(header("Cache-Control", "no-store"))
         }
@@ -360,6 +386,13 @@ pub fn handle(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpAdd
             seen(app, ip, q);
             json_resp(json!({ "ok": true, "pc": share::alias() }))
         }
+        (Method::Get, "abholen") => {
+            seen(app, ip, q);
+            fetch_list(app, tok)
+        }
+        (Method::Get, "text") => fetch_text(app),
+        // /datei/<id>/<art>: die Art steht nur fuer den Kurzbefehl in der Adresse
+        (Method::Get, s) if s.starts_with("datei/") => serve(app, s[6..].split('/').next().unwrap_or("")),
         (Method::Post, "senden" | "clip") => {
             seen(app, ip, q);
             receive(app, req, q, sub == "clip")
@@ -367,6 +400,291 @@ pub fn handle(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpAdd
         _ => plain(404, "nicht gefunden"),
     }
 }
+
+// ---------- PC -> iPhone ----------
+//
+// Dateien (Ablage, Explorer „Senden an“) und Text (Knopf an der iPhone-Karte) werden bereitgelegt. Der
+// Kurzbefehl ohne Eingabe fragt zuerst `/abholen`: liegt etwas bereit, holt er es (`/datei/<id>`, Fotos und
+// Videos in die Fotos-App, anderes per Sichern-Dialog, Text in die Zwischenablage), sonst schickt er wie
+// bisher seine Zwischenablage. Auf Wunsch weckt eine ntfy-Mitteilung das iPhone (nur „2 Fotos bereit“, nie
+// Inhalte oder Namen); antippen startet den Kurzbefehl.
+
+const OUT_ID: &str = "notch:iphone:out";
+/// so lange liegt Bereitgelegtes fuers iPhone bereit
+const OUT_FOR: Duration = Duration::from_secs(60 * 60);
+const NTFY: &str = "https://ntfy.sh";
+
+struct Out {
+    id: String,
+    path: std::path::PathBuf,
+    name: String,
+    art: &'static str,
+}
+
+#[derive(Default)]
+struct Outbox {
+    files: Vec<Out>,
+    text: Option<String>,
+    since: Option<Instant>,
+    /// schon abgeholt (fuer „Auf dem iPhone · 2 Fotos“)
+    fetched: Vec<&'static str>,
+    text_fetched: bool,
+}
+
+static OUTBOX: LazyLock<Mutex<Outbox>> = LazyLock::new(Default::default);
+
+fn outbox() -> std::sync::MutexGuard<'static, Outbox> {
+    let mut o = OUTBOX.lock().unwrap();
+    if o.since.is_some_and(|s| s.elapsed() > OUT_FOR) {
+        *o = Outbox::default();
+    }
+    o
+}
+
+/// „2 Fotos und Text“
+fn waiting(o: &Outbox) -> String {
+    let kinds: Vec<&str> = o.files.iter().map(|f| f.art).collect();
+    let mut parts = Vec::new();
+    if !kinds.is_empty() {
+        parts.push(count_text(&kinds));
+    }
+    if o.text.is_some() {
+        parts.push("Text".to_string());
+    }
+    parts.join(" und ")
+}
+
+fn out_activity(app: &AppHandle) {
+    let (what, done) = {
+        let mut o = outbox();
+        if o.files.is_empty() && o.text.is_none() {
+            let mut done = Vec::new();
+            if !o.fetched.is_empty() {
+                done.push(count_text(&std::mem::take(&mut o.fetched)));
+            }
+            if std::mem::take(&mut o.text_fetched) {
+                done.push("Text in der Zwischenablage".to_string());
+            }
+            (String::new(), done)
+        } else {
+            (waiting(&o), Vec::new())
+        }
+    };
+    if what.is_empty() {
+        if done.is_empty() {
+            activities::remove(app, OUT_ID);
+        } else {
+            let mut a = share::act(OUT_ID, "Auf dem iPhone".into(), done.join(" · "));
+            a.ttl = Some(6);
+            activities::upsert(app, a);
+        }
+        return;
+    }
+    let mut a = share::act(OUT_ID, format!("Für iPhone bereit · {what}"), "Auf dem iPhone die Mitteilung antippen oder hinten doppeltippen".into());
+    a.actions = vec![share::btn("cancel", "Zurücknehmen", Some("close"))];
+    a.ttl = Some(OUT_FOR.as_secs());
+    activities::upsert(app, a);
+}
+
+fn ntfy_topic(app: &AppHandle) -> Option<String> {
+    let t = std::fs::read_to_string(data_file(app, "iphone-ntfy.txt")?).ok()?;
+    let t = t.trim().to_string();
+    (!t.is_empty() && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')).then_some(t)
+}
+
+/// Mitteilung aufs iPhone (ntfy.sh): nur was wartet, nie Namen oder Inhalte
+fn push(app: &AppHandle) {
+    let Some(topic) = ntfy_topic(app) else { return };
+    let what = waiting(&outbox());
+    if what.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let r = ureq::post(&format!("{NTFY}/{topic}"))
+            .header("Title", "Vom PC")
+            .header("Click", "shortcuts://run-shortcut?name=Notch")
+            .header("Tags", "inbox_tray")
+            .send(format!("{what} bereit – antippen zum Abholen"));
+        if let Err(e) = r {
+            eprintln!("[notch] ntfy: {e}");
+        }
+    });
+}
+
+/// Dateien fuers iPhone bereitlegen (Ablage, Explorer, loopback `/iphone`)
+pub fn offer(app: &AppHandle, paths: Vec<String>) -> Result<(), String> {
+    load_phone(app);
+    if LIVE.lock().unwrap().phone.is_none() {
+        return Err("Kein iPhone gekoppelt (Einstellungen › iPhone › Kurzbefehl).".into());
+    }
+    let files: Vec<Out> = paths
+        .iter()
+        .filter_map(|p| {
+            let path = std::path::PathBuf::from(p);
+            std::fs::metadata(&path).ok().filter(|m| m.is_file())?;
+            let name = path.file_name()?.to_string_lossy().to_string();
+            Some(Out { id: share::random_hex(8), art: share::kind_of(&name, ""), name, path })
+        })
+        .collect();
+    if files.is_empty() {
+        return Err("Nur Dateien lassen sich senden (keine Ordner).".into());
+    }
+    {
+        let mut o = outbox();
+        o.files.extend(files);
+        o.since = Some(Instant::now());
+    }
+    out_activity(app);
+    push(app);
+    Ok(())
+}
+
+fn offer_text(app: &AppHandle, text: String) {
+    {
+        let mut o = outbox();
+        o.text = Some(text);
+        o.since = Some(Instant::now());
+    }
+    out_activity(app);
+    push(app);
+}
+
+/// Knoepfe an der iPhone-Karte und an „Für iPhone bereit“
+pub fn action(app: &AppHandle, id: &str, action: &str) {
+    match (id, action) {
+        (CARD_ID, "clip") => match arboard::Clipboard::new().and_then(|mut c| c.get_text()) {
+            Ok(t) if !t.trim().is_empty() => offer_text(app, t),
+            _ => {
+                let mut a = share::act(OUT_ID, "Nichts zu senden".into(), "In der Zwischenablage liegt kein Text".into());
+                a.ttl = Some(4);
+                activities::upsert(app, a);
+            }
+        },
+        (OUT_ID, "cancel") => {
+            *OUTBOX.lock().unwrap() = Outbox::default();
+            activities::remove(app, OUT_ID);
+        }
+        _ => {
+            if action == "dismiss" || action == "close" {
+                activities::remove(app, id);
+            }
+        }
+    }
+}
+
+/// Was liegt bereit? Klartext statt JSON (Kurzbefehle werten verschachteltes JSON unzuverlaessig aus):
+/// "senden" = nichts da, der Kurzbefehl schickt seine Zwischenablage; sonst "abholen" und je Datei eine
+/// Zeile mit ihrer Adresse, die auf /foto, /video oder /datei endet (danach entscheidet der Kurzbefehl).
+fn fetch_list(app: &AppHandle, tok: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    let (ip, port, _) = share::addr();
+    let body = {
+        let o = outbox();
+        if o.files.is_empty() && o.text.is_none() {
+            "senden".to_string()
+        } else {
+            let mut lines = vec!["abholen".to_string()];
+            for f in &o.files {
+                lines.push(format!("http://{ip}:{port}/k/{tok}/datei/{}/{}", f.id, f.art.to_lowercase()));
+            }
+            lines.join("\n")
+        }
+    };
+    log(app, format!("  -> {} · {} Dateien", body.lines().next().unwrap_or(""), body.lines().count() - 1));
+    Response::from_string(body).with_header(header("Content-Type", "text/plain; charset=utf-8"))
+}
+
+/// Bereitgelegter Text (leer = keiner); einmal abgeholt ist er weg
+fn fetch_text(app: &AppHandle) -> Response<std::io::Cursor<Vec<u8>>> {
+    let text = {
+        let mut o = outbox();
+        let t = o.text.take();
+        o.text_fetched |= t.is_some();
+        t.unwrap_or_default()
+    };
+    out_activity(app);
+    Response::from_string(text).with_header(header("Content-Type", "text/plain; charset=utf-8"))
+}
+
+/// Eine bereitgelegte Datei ausliefern; sie verschwindet damit aus der Ablage fuers iPhone
+fn serve(app: &AppHandle, id: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    let found = {
+        let mut o = outbox();
+        let i = o.files.iter().position(|f| f.id == id);
+        i.map(|i| {
+            let f = o.files.remove(i);
+            o.fetched.push(f.art);
+            f
+        })
+    };
+    let Some(f) = found else { return plain(404, "nicht mehr da") };
+    let Ok(bytes) = std::fs::read(&f.path) else { return plain(404, "Datei fehlt") };
+    out_activity(app);
+    let disp = format!("attachment; filename*=UTF-8''{}", share::pct(&f.name));
+    Response::from_data(bytes)
+        .with_header(header("Content-Type", share::mime_of(&f.name)))
+        .with_header(header("Content-Disposition", &disp))
+}
+
+// ---------- Explorer: Senden an › iPhone ----------
+
+const SENDTO_LNK: &str = "iPhone (Notch).lnk";
+
+fn sendto_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("APPDATA").map(|a| std::path::PathBuf::from(a).join(r"Microsoft\Windows\SendTo"))
+}
+
+fn sendto_on() -> bool {
+    sendto_dir().is_some_and(|d| d.join(SENDTO_LNK).exists())
+}
+
+/// Verknuepfung in „Senden an“: startet PowerShell unsichtbar mit einem kleinen Skript, das die Pfade an
+/// `127.0.0.1:47800/iphone` schickt (die Notch hat keinen Einzelinstanz-Start mit Argumenten).
+fn sendto_set(app: &AppHandle, on: bool) -> Result<(), String> {
+    let dir = sendto_dir().ok_or("Ordner „Senden an“ nicht gefunden")?;
+    let lnk = dir.join(SENDTO_LNK);
+    if !on {
+        let _ = std::fs::remove_file(&lnk);
+        return Ok(());
+    }
+    let script = data_file(app, "an-iphone.ps1").ok_or("App-Ordner fehlt")?;
+    std::fs::write(&script, SENDTO_PS1).map_err(|e| e.to_string())?;
+    let ps = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
+        .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    let args = format!("-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{}\"", script.display());
+    let icon = std::env::current_exe().map_err(|e| e.to_string())?;
+    // COM in einem eigenen Faden (der aufrufende kann schon anders initialisiert sein)
+    std::thread::spawn(move || -> Result<(), String> {
+        use windows::core::{Interface, HSTRING};
+        use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+        use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWMINNOACTIVE;
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
+            link.SetPath(&HSTRING::from(ps.as_os_str())).map_err(|e| e.to_string())?;
+            link.SetArguments(&HSTRING::from(args)).map_err(|e| e.to_string())?;
+            link.SetShowCmd(SW_SHOWMINNOACTIVE).map_err(|e| e.to_string())?;
+            link.SetIconLocation(&HSTRING::from(icon.as_os_str()), 0).map_err(|e| e.to_string())?;
+            link.SetDescription(&HSTRING::from("Fürs iPhone bereitlegen (Notch)")).map_err(|e| e.to_string())?;
+            let file: IPersistFile = link.cast().map_err(|e| e.to_string())?;
+            file.Save(&HSTRING::from(lnk.as_os_str()), true).map_err(|e| e.to_string())
+        }
+    })
+    .join()
+    .map_err(|_| "Verknüpfung konnte nicht angelegt werden".to_string())?
+}
+
+/// Skript hinter „Senden an › iPhone“ (nur ASCII: PowerShell 5.1 liest Dateien ohne BOM als ANSI)
+const SENDTO_PS1: &str = r#"# Notch: Explorer "Senden an > iPhone" legt die Dateien fuers iPhone bereit
+$body = ConvertTo-Json @{ paths = @($args) } -Compress
+try {
+  Invoke-RestMethod -Uri 'http://127.0.0.1:47800/iphone' -Method Post -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+} catch {
+  Add-Type -AssemblyName PresentationFramework
+  $msg = if ($_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { 'Notch laeuft nicht.' }
+  [System.Windows.MessageBox]::Show($msg, 'Notch') | Out-Null
+}
+"#;
 
 // ---------- Im WLAN? ----------
 
@@ -428,7 +746,7 @@ pub fn spawn(app: AppHandle) {
 // ---------- Einstellungen ----------
 
 /// fuer share::status (Einstellungen › iPhone)
-pub fn status_json() -> Value {
+pub fn status_json(app: &AppHandle) -> Value {
     let l = LIVE.lock().unwrap();
     match &l.phone {
         Some(p) => json!({
@@ -436,9 +754,40 @@ pub fn status_json() -> Value {
             "present": l.present,
             "battery": l.battery.filter(|(_, at)| at.elapsed() < BATTERY_FOR).map(|b| b.0),
             "seen": l.seen.map(ago),
+            "ntfy": ntfy_topic(app),
+            "sendto": sendto_on(),
         }),
         None => Value::Null,
     }
+}
+
+/// Ablage › An iPhone senden › <iPhone>
+#[tauri::command]
+pub fn iphone_offer(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
+    offer(&app, paths)
+}
+
+/// Mitteilungen ueber ntfy an/aus; an = neues zufaelliges Thema (wer es kennt, liest nur „2 Fotos bereit“)
+#[tauri::command]
+pub fn iphone_push(app: AppHandle, on: bool) -> Result<(), String> {
+    let f = data_file(&app, "iphone-ntfy.txt").ok_or("App-Ordner fehlt")?;
+    if on {
+        if ntfy_topic(&app).is_none() {
+            std::fs::write(&f, format!("notch-{}", share::random_hex(12))).map_err(|e| e.to_string())?;
+        }
+    } else {
+        let _ = std::fs::remove_file(&f);
+    }
+    share::status_event(&app);
+    Ok(())
+}
+
+/// Explorer › Senden an › iPhone an/aus
+#[tauri::command]
+pub fn iphone_sendto(app: AppHandle, on: bool) -> Result<(), String> {
+    let r = sendto_set(&app, on);
+    share::status_event(&app);
+    r
 }
 
 /// QR-Code zur Einrichtungsseite (dort steht die Adresse fuer den Kurzbefehl und die Anleitung)
@@ -480,6 +829,17 @@ mod tests {
         assert!(looks_like_text(b"notiz.txt", "text/plain", "", true)); // Zwischenablage ist immer Text
         assert!(!looks_like_text(b"%PDF-1.7", "application/pdf", "", true));
         assert!(!looks_like_text(&vec![b'a'; TEXT_MAX + 1], "text/plain", "Text", false));
+    }
+
+    #[test]
+    fn wartet_text() {
+        let out = |art| Out { id: String::new(), path: Default::default(), name: String::new(), art };
+        let mut o = Outbox { files: vec![out("Foto"), out("Foto"), out("Datei")], ..Default::default() };
+        assert_eq!(waiting(&o), "2 Fotos und 1 Datei");
+        o.text = Some("x".into());
+        assert_eq!(waiting(&o), "2 Fotos und 1 Datei und Text");
+        o.files.clear();
+        assert_eq!(waiting(&o), "Text");
     }
 
     #[test]
