@@ -9,8 +9,8 @@
 // die Fotos-App, anderes per Sichern-Dialog; danach /text in die Zwischenablage, falls nicht leer.
 // Kein JSON: verschachtelte Listen aus Woerterbuechern liefen in Kurzbefehlen still ins Leere.
 #define name Notch
-#define color lightblue
-#define glyph phone
+#define color gray
+#define glyph pc
 #define from sharesheet
 
 #include 'actions/web'

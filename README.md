@@ -46,7 +46,7 @@ Exklusives Vollbild (manche Spiele) lässt kein Fenster darüber zu; dort bleibt
 
 ## Aussehen der Einstellungen
 
-Das Einstellungsfenster spricht dieselbe Designsprache wie Folio, Haze und Helio (Quelle `D:\Dev\nojo-design`, Kopie unter `src/nojo/`): Folio-Grau, Fensterknöpfe als Glaspille, **Liquid Glass** wie in Folio (die Reiter schweben über dem Inhalt, der darunter durchscrollt; ihr Rand bricht ihn), Segmente als Glasrinne mit gleitender Perle, Karten statt Rahmen, Schalter leuchten, wenn sie an sind. Statt einer Bildlaufleiste zeigt eine dünne **Lichtleiste** am rechten Rand, wo man ist (leuchtet beim Scrollen kurz auf, lässt sich ziehen). Die Notch selbst bleibt schwarz. Alle Symbole (Notch und Einstellungen) kommen aus der gemeinsamen Bibliothek (`src/nojo/nojo-icons.ts`, Quelle `nojo-design/assets/icons.mjs`); `index.html` enthält nur Platzhalter `<svg data-icon="…">`.
+Das Einstellungsfenster ist aufgebaut wie die iPad-Einstellungen (Querformat, 1060 × 720): schwarzer Grund, links eine Seitenleiste mit **Suche** (findet Bereiche auch über Stichwörter, Enter öffnet), einer „Notch“-Zeile mit Version und den Bereichen als farbige Quadrate; rechts eine große Kopfkarte je Bereich, darunter die Einstellungen (`SECTIONS` in `src/settings.ts`). Der Inhalt ist auf 90 % verkleinert (CSS `zoom` nur auf dem Inhalt, die Fensterknöpfe bleiben 1:1), Schalter grün wie bei Apple, Quellen der Rangliste in ihrer Farbe. Bausteine aus der gemeinsamen Designsprache (Quelle `D:\Dev\nojo-design`, Kopie unter `src/nojo/`): Fensterknöpfe als Glaspille, Segmente als Glasrinne mit gleitender Perle. Statt einer Bildlaufleiste zeigt eine dünne **Lichtleiste** am rechten Rand, wo man ist (leuchtet beim Scrollen kurz auf, lässt sich ziehen). Die Notch selbst bleibt schwarz. Alle Symbole (Notch und Einstellungen) kommen aus der gemeinsamen Bibliothek (`src/nojo/nojo-icons.ts`, Quelle `nojo-design/assets/icons.mjs`); `index.html` enthält nur Platzhalter `<svg data-icon="…">`.
 
 ## Andocken: oben, links, rechts
 
@@ -371,7 +371,7 @@ Einstellungen › Anzeige › Musik › **Notch reagiert auf Musik**: *Aus* (Sta
 
 ## Updates
 
-Notch prüft 20 s nach dem Start und danach alle 6 h, ob es auf GitHub eine neue Version gibt (Tray › **Nach Updates suchen** prüft sofort). Gibt es eine, erscheint in der Notch „Update verfügbar“ mit **Installieren** / **Später**; installiert wird nur nach Klick und nur, wenn das Update mit dem Schlüssel aus `tauri.conf.json` (`plugins.updater.pubkey`) signiert ist.
+Notch prüft 20 s nach dem Start und danach alle 6 h, ob es auf GitHub eine neue Version gibt (Tray oder Einstellungen › App › **Nach Updates suchen** prüft sofort). **Mit Windows starten** (Einstellungen › App) trägt die laufende `notch.exe` unter `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` ein (`src-tauri/src/autostart.rs`, ohne Adminrechte). Gibt es eine, erscheint in der Notch „Update verfügbar“ mit **Installieren** / **Später**; installiert wird nur nach Klick und nur, wenn das Update mit dem Schlüssel aus `tauri.conf.json` (`plugins.updater.pubkey`) signiert ist.
 
 Neue Version veröffentlichen: Version in `package.json`, `src-tauri/Cargo.toml` und `src-tauri/tauri.conf.json` anheben, committen, Tag `v<version>` pushen. Der Workflow `.github/workflows/release.yml` baut, signiert (Secret `TAURI_SIGNING_PRIVATE_KEY`) und lädt Installer und `latest.json` ins Release. Der private Schlüssel liegt lokal in `%USERPROFILE%\.tauri\nojo-updater.key` und gehört nie ins Repo.
 

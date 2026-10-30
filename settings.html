@@ -12,23 +12,28 @@
   <body class="n-window">
     <!-- Gemeinsame Designsprache (src/nojo). Keine Windows-Titelleiste: der Kopf ist die Zieh-Fläche,
          Fensterknöpfe als Glaspille oben rechts (settings.ts). -->
+    <!-- Aufbau wie die iPad-Einstellungen: links Seitenleiste (Suche, Notch, Bereiche), rechts der Bereich
+         mit grosser Kopfkarte. Die Bereiche baut settings.ts (SECTIONS) in .side-nav. -->
     <section class="settings-panel" aria-label="Einstellungen">
-      <div class="panel-head" data-tauri-drag-region>
-        <div data-tauri-drag-region>
-          <div class="eyebrow" data-tauri-drag-region>DEINE NOTCH</div>
-          <h2 data-tauri-drag-region>Einstellungen</h2>
-        </div>
-      </div>
+      <aside class="side" data-tauri-drag-region>
+        <label class="side-search">
+          <span class="side-search-ico" aria-hidden="true"></span>
+          <input class="side-q" type="text" placeholder="Suchen" aria-label="Einstellungen durchsuchen" spellcheck="false" autocomplete="off" />
+        </label>
+        <button class="side-me" data-tab="app" type="button">
+          <span class="side-me-pic" aria-hidden="true"><i></i></span>
+          <span><b>Notch</b><small class="side-version">Version, Updates und mehr</small></span>
+        </button>
+        <nav class="side-nav" role="tablist" aria-orientation="vertical" aria-label="Bereiche"></nav>
+        <p class="side-none" hidden>Keine Treffer</p>
+      </aside>
 
       <div class="panel-body">
-        <!-- Reiter schweben als Liquid Glass ueber dem Inhalt (der darunter durchscrollt) -->
-        <nav class="settings-tabs n-seg n-liquid panel" role="tablist">
-          <button role="tab" data-tab="display">Anzeige</button>
-          <button role="tab" data-tab="dock">Andocken</button>
-          <button role="tab" data-tab="sport">Sport</button>
-          <button role="tab" data-tab="share">iPhone</button>
-          <button role="tab" data-tab="app">App</button>
-        </nav>
+        <header class="pane-hero" data-tauri-drag-region>
+          <span class="hero-ico" aria-hidden="true"></span>
+          <h2 class="hero-title" data-tauri-drag-region></h2>
+          <p class="hero-desc" data-tauri-drag-region></p>
+        </header>
         <!-- Anzeige: kleine Notch + Rangliste -->
         <div class="pane" data-pane="display">
           <div class="notch-preview stage" data-dock="top">
@@ -94,7 +99,13 @@
               <div class="eyebrow">NOTCH</div>
               <h3 class="app-version">Version</h3>
             </div>
+            <button class="button secondary check-updates" type="button">Nach Updates suchen</button>
           </div>
+          <label class="toggle-row">
+            <span>Mit Windows starten<small>Notch startet nach dem Anmelden von selbst</small></span>
+            <input type="checkbox" class="autostart" role="switch" />
+            <span class="toggle"></span>
+          </label>
           <!-- Tastenkuerzel: Tastatur und Controller selbst belegen (settings.ts -> renderShortcuts) -->
           <div class="shortcut-options"></div>
           <!-- Sprachassistent: OpenAI Realtime (mini Standard) oder Claude (settings.ts -> voice) -->

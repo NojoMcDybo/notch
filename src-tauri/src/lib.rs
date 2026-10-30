@@ -1,5 +1,6 @@
 mod activities;
 mod audio;
+mod autostart;
 mod clipboard;
 mod convert;
 mod gamepad;
@@ -260,6 +261,12 @@ async fn open_settings(app: AppHandle, tab: Option<String>) -> Result<(), String
     show_settings(&app, tab.as_deref()).map_err(|e| e.to_string())
 }
 
+/// Einstellungen › App › „Nach Updates suchen“ (wie im Tray: Ergebnis erscheint in der Notch)
+#[tauri::command]
+async fn check_updates(app: AppHandle) {
+    update::check(&app, true).await;
+}
+
 /// `tab`: Reiter, der vorn sein soll (z. B. "app" fuer den OpenAI-Schluessel)
 pub(crate) fn show_settings(app: &AppHandle, tab: Option<&str>) -> tauri::Result<()> {
     let tab = tab.filter(|t| t.chars().all(|c| c.is_ascii_alphanumeric()));
@@ -280,8 +287,9 @@ pub(crate) fn show_settings(app: &AppHandle, tab: Option<&str>) -> tauri::Result
     // Umgebung ab (alle Fenster teilen sich einen Datenordner)
     let w = tauri::WebviewWindowBuilder::new(app, "settings", tauri::WebviewUrl::App(url.into()))
         .title("Notch – Einstellungen")
-        .inner_size(560.0, 780.0)
-        .min_inner_size(460.0, 560.0)
+        // Querformat wie die iPad-Einstellungen: Seitenleiste links, Bereich rechts
+        .inner_size(1060.0, 720.0)
+        .min_inner_size(760.0, 520.0)
         .center()
         .resizable(true)
         .maximizable(false)
@@ -507,6 +515,9 @@ pub fn run() {
             cards_get,
             cards_set,
             open_settings,
+            check_updates,
+            autostart::autostart_get,
+            autostart::autostart_set,
             voice::voice_ready,
             voice::voice_setup,
             voice::voice_token,

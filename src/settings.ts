@@ -377,6 +377,8 @@ function rowEl(id: SourceId, i: number) {
   grip.setAttribute("aria-label", `${nameOf(id)} verschieben, Platz ${i + 1} von ${n}`);
   const icoBox = el("span", "ico");
   icoBox.append(svg(GLYPH[id]), el("span", "num", String(i + 1)));
+  // farbiges Quadrat wie in den Apple-Einstellungen (Folio ist weiss -> eigenes Lila)
+  icoBox.style.background = id === "folio" ? "#5e5ce6" : SOURCES[id].color;
   const txt = el("div", "txt");
   txt.append(el("b", "", nameOf(id)), el("small", "st", ""));
   const tags = el("div", "tags");
@@ -536,11 +538,86 @@ function syncSegs() {
   q(".demo").hidden = mode !== "demo";
 }
 
-// ---------- Reiter (wie Haze: Unterstrich unter dem aktiven) ----------
+// ---------- Seitenleiste wie in den iPad-Einstellungen ----------
+
+/** Bereiche: Symbol im farbigen Quadrat, Kopfkarte rechts, Suchwoerter fuer das Suchfeld. Leere Zeile = neue Gruppe. */
+const SECTIONS: { tab: string; label: string; icon: IconName; color: string; desc: string; words: string; group: number }[] = [
+  { tab: "display", label: "Anzeige", icon: "widget", color: "#5e5ce6", group: 0,
+    desc: "Was die kleine Notch zeigt: Rangliste der Quellen, wie viele gleichzeitig, Vorschau zum Ausprobieren.",
+    words: "kleine notch rangliste quellen musik puls blutzucker timer folio spielzeit vorschau reagiert" },
+  { tab: "dock", label: "Andocken", icon: "move", color: "#ff9f0a", group: 0,
+    desc: "An welcher Bildschirmkante die Notch sitzt und wie sie sich bei Vollbild-Programmen verhält.",
+    words: "kante oben links rechts vollbild ausblenden am rand nur anzeigen" },
+  { tab: "sport", label: "Sport", icon: "ball", color: "#30d158", group: 1,
+    desc: "Live-Spielstände in der Notch: Wettbewerbe, Lieblingsteams und wann sie bei Toren aufklappt.",
+    words: "fussball fußball live spielstand teams wappen liga bundesliga tor meldungen arena nba nfl" },
+  { tab: "share", label: "iPhone", icon: "phone", color: "#0a84ff", group: 1,
+    desc: "NotchDrop: Fotos, Dateien und Zwischenablage zwischen iPhone und PC austauschen, über dein WLAN.",
+    words: "iphone notchdrop kurzbefehl localsend qr airdrop teilen ntfy mitteilung explorer senden an empfangen ordner zwischenablage" },
+  { tab: "app", label: "App", icon: "settings", color: "#ff375f", group: 2,
+    desc: "Version, Tastenkürzel, Controller, Sprachassistent und verbundene Dienste.",
+    words: "version update tastenkürzel tastatur controller sprachassistent jarvis openai claude schlüssel spotify mikrofon" },
+];
+
+/** farbiges Quadrat mit weissem Symbol (wie die Einstellungen-App) */
+function tile(color: string, svgHtml: string, cls = "tile") {
+  const t = el("span", cls);
+  t.style.background = color;
+  t.innerHTML = svgHtml;
+  return t;
+}
+
+/** Bildschirm (Desktop-PC): Symbol des Kurzbefehls, wie auf dem iPhone (Glyphe "pc" auf Grau) */
+const ICON_PC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/></svg>';
+
+function buildSide() {
+  const nav = q(".side-nav");
+  let group = -1;
+  let box: HTMLElement | null = null;
+  for (const sec of SECTIONS) {
+    if (sec.group !== group) {
+      group = sec.group;
+      box = el("div", "side-group");
+      nav.append(box);
+    }
+    const b = el("button", "side-row");
+    b.type = "button";
+    b.setAttribute("role", "tab");
+    b.dataset.tab = sec.tab;
+    b.append(tile(sec.color, icon(sec.icon)), el("span", "", sec.label));
+    box!.append(b);
+  }
+  q(".side-search-ico").innerHTML = icon("search");
+  // Suche: Bereiche nach Namen und Stichwoertern filtern, Enter oeffnet den ersten Treffer
+  const input = q<HTMLInputElement>(".side-q");
+  const filter = () => {
+    const words = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    nav.querySelectorAll<HTMLElement>(".side-row").forEach((r) => {
+      const sec = SECTIONS.find((x) => x.tab === r.dataset.tab)!;
+      const hay = `${sec.label} ${sec.words}`.toLowerCase();
+      r.hidden = !words.every((w) => hay.includes(w));
+      if (!r.hidden) shown++;
+    });
+    nav.querySelectorAll<HTMLElement>(".side-group").forEach((g) => { g.hidden = !g.querySelector(".side-row:not([hidden])"); });
+    q(".side-none").hidden = shown > 0;
+  };
+  input.addEventListener("input", filter);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") nav.querySelector<HTMLButtonElement>(".side-row:not([hidden])")?.click();
+    if (e.key === "Escape" && input.value) { e.stopPropagation(); input.value = ""; filter(); }
+  });
+}
 
 function setTab(t: string) {
   document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
   document.querySelectorAll<HTMLElement>("[data-pane]").forEach((p) => { p.hidden = p.dataset.pane !== t; });
+  const sec = SECTIONS.find((x) => x.tab === t);
+  if (sec) {
+    q(".hero-ico").replaceChildren(tile(sec.color, icon(sec.icon), "tile big"));
+    q(".hero-title").textContent = sec.label;
+    q(".hero-desc").textContent = sec.desc;
+  }
   q(".panel-body").scrollTop = 0;
   try { localStorage.setItem("settings-tab", t); } catch { /* egal */ }
 }
@@ -886,7 +963,7 @@ function renderShare() {
   const ways = el("div", "ways");
   const ls = el("section", "s-card way");
   const lsHead = el("div", "way-head");
-  lsHead.innerHTML = ICON_PHONE;
+  lsHead.append(tile("#30d158", ICON_PHONE));
   lsHead.append(el("b", "", "LocalSend"));
   const devs = el("div", "devs");
   const near = (share?.devices ?? []).filter((d) => d.recent);
@@ -900,7 +977,7 @@ function renderShare() {
 
   const qr = el("section", "s-card way");
   const qrHead = el("div", "way-head");
-  qrHead.innerHTML = ICON_QR;
+  qrHead.append(tile("#0a84ff", ICON_QR));
   qrHead.append(el("b", "", "Ohne App"));
   const qrBox = el("div", "qr-box");
   const qrBtn = el("button", "button secondary", "QR-Code zeigen");
@@ -923,7 +1000,7 @@ function renderShare() {
   // Kurzbefehl (iphone.rs): Teilen-Menue und Zwischenablage ohne App, die Notch zeigt das iPhone als Karte
   const ks = el("section", "s-card way wide");
   const ksHead = el("div", "way-head");
-  ksHead.innerHTML = ICON_PHONE;
+  ksHead.append(tile("#8e8e93", ICON_PC));
   ksHead.append(el("b", "", "Kurzbefehl"), el("small", "faint", "Teilen-Menü, Zwischenablage, Verbindungsanzeige"));
   const ph = share?.phone;
   const phLine = el("div", "devs");
@@ -1026,22 +1103,24 @@ function renderShare() {
   recv.append(nameField, folderField, trustField);
   rest.append(recv);
 
-  // Anleitung (darf erklaeren)
-  const how = el("details", "settings-group");
-  how.open = !s.share.trusted.length && !near.length;
-  how.append(el("summary", "", "So geht’s"));
-  const body = el("div", "group-body howto");
-  const steps = [
-    "LocalSend aus dem App Store laden – kostenlos, ohne Konto. iPhone und PC im selben WLAN; fragt Windows nach dem Netzwerk, „Private Netzwerke“ erlauben.",
-    `iPhone → PC: Teilen › LocalSend › „${share?.alias ?? "Notch"}“. Die Notch fragt: Annehmen, Ablehnen oder Immer annehmen. Text und Links zeigt sie zum Kopieren.`,
-    "PC → iPhone: LocalSend auf dem iPhone offen lassen, in der Ablage der Notch Rechtsklick auf eine Datei › An iPhone senden.",
-    "Ohne App: QR-Code scannen – Safari öffnet eine Seite zum Hoch- und Herunterladen.",
+  // NotchDrop in Kurzform: je Schritt ein farbiges Symbol und eine Zeile (wie eine Liste in den Apple-Einstellungen)
+  rest.append(el("h3", "drop-title", "NotchDrop"));
+  const drop = el("div", "drop-list");
+  const steps: [string, string, string, string][] = [
+    ["#0a84ff", icon("qr"), "Einrichten", "QR-Code oben scannen › Kurzbefehl laden › Adresse einfügen"],
+    ["#30d158", icon("share"), "iPhone → PC", "Teilen › Notch"],
+    ["#ff9f0a", icon("phone"), "Zwischenablage & Abholen", "Hinten 2× aufs iPhone tippen"],
+    ["#5e5ce6", icon("tray"), "PC → iPhone", "Ablage › Rechtsklick › An iPhone senden"],
+    ["#ff375f", icon("folder"), "Aus dem Explorer", "Rechtsklick › Senden an › iPhone (Notch)"],
   ];
-  const ol = el("ol", "steps");
-  for (const t of steps) ol.append(el("li", "", t));
-  body.append(ol, el("p", "fine tight", "Echtes AirDrop braucht Apples eigenes Funkprotokoll, das Windows nicht kann. Die Übertragung ist unverschlüsselt und fürs Heim-WLAN gedacht."));
-  how.append(body);
-  rest.append(how);
+  for (const [color, svgHtml, title, how] of steps) {
+    const row = el("div", "drop-row");
+    const t = el("span", "drop-txt");
+    t.append(el("b", "", title), el("small", "", how));
+    row.append(tile(color, svgHtml), t);
+    drop.append(row);
+  }
+  rest.append(drop);
 
   parts.push(rest);
   box.replaceChildren(...parts);
@@ -1327,7 +1406,8 @@ async function main() {
     announce("Auf Standard zurückgesetzt");
   });
 
-  // Reiter
+  // Seitenleiste
+  buildSide();
   document.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab!)));
   let startTab = "display";
   try { startTab = localStorage.getItem("settings-tab") || "display"; } catch { /* egal */ }
@@ -1361,7 +1441,22 @@ async function main() {
     b.addEventListener("click", () => { dock = b.dataset.dock!; syncSegs(); invoke("dock_set", { dock }).catch(() => {}); }));
 
   // App
-  getVersion().then((v) => { q(".app-version").textContent = `Version ${v}`; }).catch(() => {});
+  // Autostart (autostart.rs, Windows-Startliste) und Updates (update.rs, Ergebnis zeigt die Notch)
+  const auto = q<HTMLInputElement>(".autostart");
+  invoke<boolean>("autostart_get").then((v) => { auto.checked = v; }).catch(() => {});
+  auto.addEventListener("change", () => {
+    invoke("autostart_set", { on: auto.checked }).catch((e) => { auto.checked = !auto.checked; announce(String(e)); });
+  });
+  const upd = q<HTMLButtonElement>(".check-updates");
+  upd.addEventListener("click", () => {
+    upd.disabled = true;
+    upd.textContent = "Suche …";
+    invoke("check_updates").finally(() => { upd.disabled = false; upd.textContent = "Nach Updates suchen"; });
+  });
+  getVersion().then((v) => {
+    q(".app-version").textContent = `Version ${v}`;
+    q(".side-version").textContent = `Version ${v} · Updates und mehr`;
+  }).catch(() => {});
   voiceLabel = snap?.voice_key ?? "";
   await listen<string>("voice-key", (e) => { voiceLabel = e.payload; if (!capture) renderShortcuts(); });
   await listen<PadButton[]>("pad-buttons", (e) => onPadButtons(e.payload));

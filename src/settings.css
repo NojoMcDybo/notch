@@ -31,15 +31,46 @@ code { font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; color
 .kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 6px; background: var(--pill); font-size: 11px; color: var(--text); vertical-align: 1px; }
 
 /* ---------- Fenster: Kopf zum Ziehen, Fensterknoepfe als Glaspille (nojo-ui.ts) ---------- */
-.settings-panel { height: 100%; display: flex; flex-direction: column; background: var(--bg); }
-.panel-head { display: flex; align-items: center; justify-content: space-between; padding: 22px 120px 16px 30px; cursor: default; }
-.panel-head h2 { font-size: 28px; margin-top: 6px; font-family: var(--n-font-display); font-weight: 650; letter-spacing: -0.6px; }
+/* Aufbau wie die iPad-Einstellungen (Querformat): schwarzer Grund, links eine abgesetzte Seitenleiste mit
+   Suche, „Profil“ und Bereichen in farbigen Quadraten, rechts der Bereich mit grosser Kopfkarte. */
+body.n-window { --bg: #000; --side: #1c1c1e; --side-sel: rgba(255, 255, 255, 0.1); --apple-blue: #0a84ff; }
+/* compact.css (Notch-Vorschau) hat eine allgemeine .sm-Regel; die Fensterknoepfe heissen auch .sm */
+.n-wc .n-ico.sm { display: inline-grid; padding: 0; }
+/* zoom nur auf dem Inhalt (wirkt wie eine hoehere Aufloesung); die Fensterknoepfe bleiben 1:1, sonst sitzen
+   ihre Zeichen auf halben Pixeln schief */
+.settings-panel { height: 100%; zoom: 0.9; display: grid; grid-template-columns: minmax(250px, 300px) 1fr; background: var(--bg); }
 .notch-preview { margin-top: 2px; }
 
-/* Reiter: Liquid Glass, schwebt oben im Inhalt; was darunter durchscrollt, bricht sich an der Kante */
-.settings-tabs { position: sticky; top: 8px; z-index: 20; margin: 0 -6px 18px; }
-.settings-tabs button { padding: 8px 4px; font-size: 12px; }
-.panel-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 30px 40px; }
+.side { margin: 14px 0 14px 14px; padding: 18px 12px; border-radius: 26px; background: var(--side); display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 0; }
+.side-search { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border-radius: 12px; background: rgba(118, 118, 128, 0.24); color: var(--muted); cursor: text; margin-bottom: 14px; }
+.side-search-ico svg { width: 17px; height: 17px; }
+.side-q { flex: 1; min-width: 0; border: 0; background: none; color: var(--text); font-size: 15px; outline: none; }
+.side-q::placeholder { color: var(--muted); }
+.side-search:focus-within { box-shadow: 0 0 0 2px var(--apple-blue); }
+.side-me { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 14px; text-align: left; margin-bottom: 14px; }
+.side-me b { display: block; font-size: 17px; font-weight: 650; }
+.side-me small { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.35; margin-top: 2px; }
+.side-me-pic { flex: none; width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle at 50% 30%, #3a3a3e, #121214); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.side-me-pic i { width: 30px; height: 11px; border-radius: 6px; background: #000; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18); }
+.side-group { display: flex; flex-direction: column; gap: 2px; margin-bottom: 18px; }
+.side-row { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 10px; border-radius: 12px; font-size: 15.5px; text-align: left; color: var(--text); }
+.side-row:hover, .side-me:hover { background: rgba(255, 255, 255, 0.05); }
+.side-row[aria-selected="true"] { background: var(--side-sel); }
+.side-row[aria-selected="true"] > span:last-child { color: var(--apple-blue); }
+.side-row:active, .side-me:active { transform: none; }
+.side-none { color: var(--muted); font-size: 13px; padding: 4px 12px; }
+.tile { flex: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #fff; }
+.tile svg { width: 18px; height: 18px; }
+.tile.big { width: 76px; height: 76px; border-radius: 19px; }
+.tile.big svg { width: 44px; height: 44px; }
+
+/* Bereich rechts: grosse Kopfkarte (Symbol, Titel, Satz), darunter die Einstellungen */
+.panel-body { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 74px 36px 40px; }
+.panel-body > .pane, .pane-hero { max-width: 880px; margin-left: auto; margin-right: auto; }
+.pane-hero { background: var(--side); border-radius: 26px; padding: 24px 26px 22px; margin-bottom: 22px; cursor: default; }
+.pane-hero h2 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; margin: 16px 0 8px; font-family: var(--n-font-display); }
+.pane-hero p { color: var(--muted); font-size: 15px; line-height: 1.5; }
+@media (max-width: 760px) { .settings-panel { grid-template-columns: 220px 1fr; } .panel-body { padding-left: 22px; padding-right: 22px; } }
 .panel-body h3 { margin: 4px 0 10px; }
 .panel-body h3.sub { font-size: 15px; margin-top: 22px; }
 .panel-body .muted { font-size: 13px; margin-bottom: 20px; }
@@ -63,11 +94,12 @@ select.text-input option { background: var(--n-surface-2); }
 /* Schalter: aus = Rinne, an = Licht */
 .toggle-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 0; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text); cursor: pointer; }
 .toggle-row small { display: block; font-size: 11px; color: var(--muted); line-height: 1.5; margin-top: 5px; }
-.toggle-row input, .vis input { position: absolute; right: 0; opacity: 0; width: 42px; height: 25px; margin: 0; cursor: pointer; }
-.toggle { display: block; position: relative; flex-shrink: 0; width: 40px; height: 24px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); box-shadow: inset 0 0 0 1px var(--n-line); transition: background 0.25s var(--n-ease), box-shadow 0.25s var(--n-ease); }
-.toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--n-dim); transition: left 0.38s var(--n-spring), background 0.25s; }
-input:checked + .toggle { background: rgba(255, 255, 255, 0.86); box-shadow: 0 0 12px rgba(255, 255, 255, 0.22); }
-input:checked + .toggle::after { left: 19px; background: var(--n-bg); }
+.toggle-row input, .vis input { position: absolute; right: 0; opacity: 0; width: 51px; height: 31px; margin: 0; cursor: pointer; }
+/* Schalter wie bei Apple: grau aus, gruen an, weisser Knopf */
+.toggle { display: block; position: relative; flex-shrink: 0; width: 51px; height: 31px; border-radius: 999px; background: rgba(120, 120, 128, 0.32); transition: background 0.25s var(--n-ease); }
+.toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16); transition: left 0.38s var(--n-spring); }
+input:checked + .toggle { background: #30d158; }
+input:checked + .toggle::after { left: 22px; }
 input:focus-visible + .toggle { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 /* Segmente: wie .n-seg (Glasrinne, gleitende Perle aus nojo-ui.ts) */
@@ -148,7 +180,8 @@ input[type="range"] { margin: 0; accent-color: #f5f5f7; }
 .grip:hover { opacity: 1; background: var(--pill); }
 .rank.sorting .grip { cursor: grabbing; }
 .grip svg { width: 14px; height: 14px; fill: currentColor; }
-.ico { position: relative; width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--pill); color: var(--muted); }
+.ico { position: relative; width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--pill); color: #fff; }
+.row.off .ico { filter: saturate(0.25) brightness(0.7); }
 .ico svg { width: 18px; height: 18px; fill: currentColor; }
 .num { position: absolute; right: -5px; bottom: -5px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; display: grid; place-items: center; background: var(--card); border: 1px solid var(--border); color: var(--muted); font: 600 10px var(--n-font); }
 .txt { min-width: 0; }
@@ -269,7 +302,8 @@ input[type="range"] { margin: 0; accent-color: #f5f5f7; }
 .ways { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; align-items: start; }
 .ways .s-card { margin: 0; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
 .way-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
-.way-head svg { width: 18px; height: 18px; color: var(--muted); }
+.way-head .tile { width: 26px; height: 26px; border-radius: 7px; }
+.way-head .tile svg { width: 15px; height: 15px; }
 .devs { display: flex; flex-wrap: wrap; gap: 6px; }
 .dev { padding: 6px 12px; border-radius: 999px; font-size: 12px; background: rgba(255, 255, 255, 0.08); color: var(--text); }
 .dev.on { box-shadow: inset 0 0 0 1px rgba(100, 210, 255, 0.55); }
@@ -288,3 +322,13 @@ input[type="range"] { margin: 0; accent-color: #f5f5f7; }
 .howto ol.steps { margin: 12px 0 8px 18px; padding: 0; display: grid; gap: 10px; font-size: 12px; line-height: 1.6; color: var(--text); }
 @media (max-width: 520px) { .ways { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .live-dot::before, .qr-box img.qr { animation: none; } }
+
+/* NotchDrop-Kurzanleitung: gruppierte Liste wie in den Apple-Einstellungen */
+.drop-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 26px 4px 8px; }
+.drop-list { background: var(--side); border-radius: 18px; overflow: hidden; }
+.drop-row { display: flex; align-items: center; gap: 14px; padding: 12px 16px; }
+.drop-row { position: relative; }
+.drop-row + .drop-row::before { content: ""; position: absolute; top: 0; left: 62px; right: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.drop-row .tile { width: 32px; height: 32px; }
+.drop-txt b { display: block; font-size: 14.5px; font-weight: 600; color: var(--text); }
+.drop-txt small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }

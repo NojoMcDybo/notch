@@ -4,114 +4,131 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
-<title>Kurzbefehl einrichten</title>
+<title>NotchDrop</title>
+<!-- Aufbau wie die iOS-Einstellungen: gruppierte Listen, je Zeile ein farbiges Symbol und eine kurze Anweisung -->
 <style>
-  :root { --bg: #000; --card: #1c1c1e; --line: #2c2c2e; --fg: #f5f5f7; --fg2: #8e8e93; --accent: #64d2ff; --ok: #30d158; }
-  @media (prefers-color-scheme: light) { :root { --bg: #f2f2f7; --card: #fff; --line: #e5e5ea; --fg: #1c1c1e; --fg2: #6e6e73; --accent: #0a84ff; } }
+  :root { --bg: #000; --card: #1c1c1e; --line: rgba(84, 84, 88, 0.6); --fg: #fff; --fg2: #8e8e93; --blue: #0a84ff; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f2f2f7; --card: #fff; --line: rgba(60, 60, 67, 0.29); --fg: #000; --fg2: #8a8a8e; --blue: #007aff; } }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--fg); font: 17px/1.45 -apple-system, system-ui, "Segoe UI", sans-serif; padding: max(20px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom)); -webkit-text-size-adjust: 100%; }
+  body { background: var(--bg); color: var(--fg); font: 17px/1.3 -apple-system, system-ui, sans-serif; padding: max(16px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom)); -webkit-text-size-adjust: 100%; }
   main { max-width: 560px; margin: 0 auto; }
-  header { display: flex; align-items: center; gap: 12px; margin: 6px 0 18px; }
-  .pill { width: 54px; height: 22px; border-radius: 11px; background: #000; box-shadow: 0 0 0 1px var(--line); flex: none; }
-  h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
-  header small { display: block; color: var(--fg2); font-size: 14px; }
-  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg2); margin: 26px 4px 8px; }
-  .card { background: var(--card); border-radius: 16px; padding: 14px 16px; }
-  .ok { color: var(--ok); font-weight: 600; }
-  textarea { width: 100%; border: 0; border-radius: 10px; background: var(--line); color: var(--fg); font: 15px ui-monospace, Menlo, monospace; padding: 10px; resize: none; word-break: break-all; }
-  button { margin-top: 10px; width: 100%; height: 50px; border: 0; border-radius: 14px; background: var(--accent); color: #000; font: 600 17px -apple-system, system-ui, sans-serif; }
-  ol { padding-left: 22px; }
-  li { margin: 10px 0; }
-  li small, .hint { display: block; color: var(--fg2); font-size: 14px; }
-  b.a { background: var(--line); border-radius: 6px; padding: 1px 6px; font-weight: 600; white-space: nowrap; }
-  a.btn { display: flex; align-items: center; justify-content: center; height: 50px; border-radius: 14px; background: var(--accent); color: #000; font-weight: 600; text-decoration: none; margin-bottom: 4px; }
-  summary { font-weight: 600; cursor: pointer; }
-  code { font: 14px ui-monospace, Menlo, monospace; background: var(--line); border-radius: 6px; padding: 1px 5px; word-break: break-all; }
+  .hero { background: var(--card); border-radius: 22px; padding: 22px 20px 20px; text-align: center; margin: 8px 0 26px; }
+  .hero .tile { width: 64px; height: 64px; border-radius: 15px; margin: 0 auto 12px; }
+  .hero .tile svg { width: 38px; height: 38px; }
+  h1 { font-size: 24px; font-weight: 700; }
+  .hero p { color: var(--fg2); font-size: 15px; margin-top: 4px; }
+  .ok { color: #30d158; font-weight: 600; }
+  h2 { font-size: 13px; font-weight: 400; text-transform: uppercase; color: var(--fg2); margin: 0 16px 7px; }
+  .list { background: var(--card); border-radius: 12px; overflow: hidden; margin-bottom: 30px; }
+  .row { position: relative; display: flex; align-items: center; gap: 14px; min-height: 58px; padding: 9px 16px; color: inherit; text-decoration: none; width: 100%; border: 0; background: none; font: inherit; text-align: left; }
+  .row + .row::before { content: ""; position: absolute; top: 0; left: 60px; right: 0; border-top: 0.5px solid var(--line); }
+  button.row:active, a.row:active { background: rgba(127, 127, 127, 0.18); }
+  .tile { flex: none; width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; color: #fff; }
+  .tile svg { width: 19px; height: 19px; }
+  .txt { flex: 1; min-width: 0; }
+  .txt b { display: block; font-weight: 400; }
+  .txt small { display: block; color: var(--fg2); font-size: 13px; margin-top: 1px; overflow-wrap: anywhere; }
+  .go { color: var(--blue); font-size: 15px; flex: none; }
+  .chev { color: var(--fg2); font-size: 20px; flex: none; }
+  details.list summary { list-style: none; cursor: pointer; }
+  details.list summary::-webkit-details-marker { display: none; }
+  details ol { padding: 4px 16px 14px 34px; font-size: 14px; color: var(--fg2); }
+  details li { margin: 8px 0; }
+  details li b { color: var(--fg); font-weight: 600; }
+  code { font: 13px ui-monospace, Menlo, monospace; background: rgba(127, 127, 127, 0.2); border-radius: 5px; padding: 0 4px; }
+  .foot { color: var(--fg2); font-size: 13px; text-align: center; margin-top: -14px; }
+  /* unsichtbar, aber auf dem Bildschirm: iOS kopiert nur aus sichtbar platzierten Feldern */
+  textarea { position: fixed; bottom: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 </style>
 </head>
 <body>
 <main>
-  <header>
-    <div class="pill" aria-hidden="true"></div>
-    <div><h1>Kurzbefehl „Notch“</h1><small>{{NAME}}</small></div>
-  </header>
+  <section class="hero">
+    <span class="tile" style="background:#8e8e93"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/></svg></span>
+    <h1>NotchDrop</h1>
+    <p><span class="ok">● Gekoppelt</span> mit {{NAME}}</p>
+  </section>
 
-  <div class="card"><span class="ok">● Gekoppelt.</span> Dieses iPhone erscheint jetzt in der Notch.</div>
-
-  <h2>1 · Adresse kopieren</h2>
-  <div class="card">
-    <textarea id="base" rows="3" readonly>{{BASE}}</textarea>
-    <button id="copy" type="button">Adresse kopieren</button>
-    <span class="hint" id="copied"></span>
+  <h2>Einrichten</h2>
+  <div class="list">
+    <button class="row" id="copy" type="button">
+      <span class="tile" style="background:#0a84ff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg></span>
+      <span class="txt"><b>1 · Adresse kopieren</b><small id="addr">{{BASE}}</small></span>
+      <span class="go" id="copied">Kopieren</span>
+    </button>
+    <a class="row" href="Notch.shortcut">
+      <span class="tile" style="background:#8e8e93"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/></svg></span>
+      <span class="txt"><b>2 · Kurzbefehl laden</b><small>Hinzufügen › Adresse einfügen</small></span>
+      <span class="chev">›</span>
+    </a>
   </div>
 
-  <h2>2 · Kurzbefehl hinzufügen</h2>
-  <div class="card">
-    <a class="btn" href="Notch.shortcut">Kurzbefehl „Notch“ laden</a>
-    <ol>
-      <li>Safari fragt nach dem Laden › <b>Laden</b>. Dann oben rechts den <b>Download-Pfeil</b> › <b>Notch.shortcut</b> antippen.</li>
-      <li>In Kurzbefehle <b>Kurzbefehl hinzufügen</b> › bei der Frage nach der Adresse die kopierte Adresse <b>einfügen</b>.</li>
-    </ol>
-    <span class="hint">Fertig: „Notch“ steht jetzt im Teilen-Menü.</span>
+  <h2>Benutzen</h2>
+  <div class="list">
+    <div class="row">
+      <span class="tile" style="background:#30d158"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M8 7l4-4 4 4"/><path d="M7 10H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-1"/></svg></span>
+      <span class="txt"><b>Zum PC</b><small>Teilen › Notch</small></span>
+    </div>
+    <div class="row">
+      <span class="tile" style="background:#ff9f0a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><circle cx="12" cy="9" r="1.2" fill="currentColor"/><circle cx="12" cy="13" r="1.2" fill="currentColor"/></svg></span>
+      <span class="txt"><b>Hinten 2× tippen</b><small>Holt vom PC – sonst Zwischenablage zum PC</small></span>
+    </div>
+    <div class="row">
+      <span class="tile" style="background:#8e8e93"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></span>
+      <span class="txt"><b>Doppeltippen einschalten</b><small>Bedienungshilfen › Tippen › Auf Rückseite tippen › Doppeltippen › Notch</small></span>
+    </div>
   </div>
 
-  <details class="card" style="margin-top:12px">
-  <summary>Lieber selbst bauen?</summary>
+  <div id="ntfy">
+    <h2>Mitteilung vom PC</h2>
+    <div class="list">
+      <button class="row" id="copyTopic" type="button">
+        <span class="tile" style="background:#ff3b30"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></span>
+        <span class="txt"><b>App ntfy › + › Thema</b><small id="topicShow">{{NTFY}}</small></span>
+        <span class="go" id="topicCopied">Kopieren</span>
+      </button>
+    </div>
+  </div>
+
+  <h2>Optional</h2>
+  <div class="list">
+    <div class="row">
+      <span class="tile" style="background:#5e5ce6"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a8 8 0 0 1 0 8M9.5 6a12 12 0 0 1 0 12M13 4a16 16 0 0 1 0 16"/></svg></span>
+      <span class="txt"><b>NFC-Aufkleber</b><small>Kurzbefehle › Automation › NFC › Sofort ausführen › Notch</small></span>
+    </div>
+  </div>
+
+  <details class="list">
+    <summary class="row">
+      <span class="tile" style="background:#636366"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 0 5.4-5.4l-2.3 2.3-2.4-.6-.6-2.4z"/></svg></span>
+      <span class="txt"><b>Lieber selbst bauen</b><small>Kurzbefehl Schritt für Schritt</small></span>
+      <span class="chev">›</span>
+    </summary>
     <ol>
-      <li>App <b>Kurzbefehle</b> öffnen › <b>+</b> › oben als Namen <b>Notch</b> eintragen.</li>
-      <li><b class="a">Text</b> – die kopierte Adresse einfügen.</li>
-      <li><b class="a">Batteriestand abrufen</b></li>
-      <li><b class="a">Wenn</b> – <b>Kurzbefehleingabe</b> · <b>hat keinen Wert</b></li>
-      <li>Darin: <b class="a">Zwischenablage abrufen</b>, danach <b class="a">Inhalte von URL abrufen</b>:
-        <small>URL: <code>Text</code><code>/clip?akku=</code><code>Batteriestand</code> · Methode <b>POST</b> · Anforderungstext <b>Datei</b> = <b>Zwischenablage</b></small></li>
-      <li>Unter <b>Sonst</b>: <b class="a">Mit jedem wiederholen</b> (Kurzbefehleingabe). Darin:
-        <small><b class="a">Namen abrufen</b> (Wiederholungsobjekt) › <b class="a">URL codieren</b> (Name) ›
-        <b class="a">Inhalte von URL abrufen</b>: URL <code>Text</code><code>/senden?name=</code><code>URL-codierter Text</code><code>&amp;akku=</code><code>Batteriestand</code> · <b>POST</b> · <b>Datei</b> = <b>Wiederholungsobjekt</b></small></li>
-      <li>Unten <b>ⓘ</b> › <b>Im Share-Sheet anzeigen</b> an.</li>
+      <li><b>Text</b>: Adresse · <b>Batteriestand abrufen</b></li>
+      <li><b>Wenn</b> Kurzbefehleingabe <b>hat keinen Wert</b>: <b>Zwischenablage abrufen</b> › <b>Inhalte von URL abrufen</b> <code>Text/clip</code> · POST · Datei = Zwischenablage</li>
+      <li><b>Sonst</b>: <b>Mit jedem wiederholen</b> › <b>Namen abrufen</b> › <b>URL codieren</b> › <b>Inhalte von URL abrufen</b> <code>Text/senden?name=…</code> · POST · Datei = Wiederholungsobjekt</li>
+      <li>ⓘ › <b>Im Share-Sheet anzeigen</b></li>
     </ol>
-    <span class="hint">Aktionen findest du über das Suchfeld unten. Englische Namen: Text, Get Battery Level, If, Get Clipboard, Get Contents of URL, Repeat with Each, Get Name, URL Encode.</span>
   </details>
 
-  <h2>3 · Antippen statt Menü</h2>
-  <div class="card">
-    <ol>
-      <li><b>Einstellungen › Bedienungshilfen › Tippen › Auf Rückseite tippen › Doppeltippen › Notch</b>
-        <small>Zweimal hinten aufs iPhone tippen = Zwischenablage zum PC.</small></li>
-      <li>Optional, für den Akkustand in der Notch: <b>Kurzbefehle › Automation › +</b> › <b>WLAN</b> (dein WLAN) › <b>Sofort ausführen</b>, Aktionen:
-        <small><b class="a">Text</b> (Adresse) › <b class="a">Batteriestand abrufen</b> › <b class="a">Inhalte von URL abrufen</b>: <code>Text</code><code>/hallo?akku=</code><code>Batteriestand</code></small>
-        <small>Dieselbe Automation auch für <b>Ladegerät</b> „ist verbunden“ und „ist getrennt“.</small></li>
-    </ol>
-  </div>
-  <h2>4 · Vom PC aufs iPhone</h2>
-  <div class="card">
-    <p>Am PC: Ablage › Rechtsklick › <b>An iPhone senden</b>, im Explorer <b>Senden an › iPhone (Notch)</b> oder an der iPhone-Karte <b>Zwischenablage senden</b>. Abholen: Kurzbefehl <b>Notch</b> ohne Eingabe starten (hinten doppeltippen). Fotos landen in der Fotos-App, Text in der Zwischenablage.</p>
-    <div id="ntfy">
-      <p style="margin-top:12px"><b>Mitteilung, wenn etwas bereitliegt:</b> App <b>ntfy</b> laden › <b>+</b> › dieses Thema eintragen (Server ntfy.sh):</p>
-      <textarea id="topic" rows="1" readonly>{{NTFY}}</textarea>
-      <button id="copyTopic" type="button">Thema kopieren</button>
-      <span class="hint">Antippen der Mitteilung startet den Kurzbefehl und holt alles ab.</span>
-    </div>
-    <p class="hint" id="nontfy">Mitteilungen schaltest du in der Notch ein: Einstellungen › iPhone › „Mitteilung aufs iPhone“.</p>
-    <p style="margin-top:12px"><b>Antippen wie bei AirDrop (optional):</b> NFC-Aufkleber an den Schreibtisch, dann <b>Kurzbefehle › Automation › + › NFC</b> › Aufkleber scannen › <b>Sofort ausführen</b> › Aktion <b class="a">Kurzbefehl ausführen</b>: Notch.</p>
-  </div>
-
-  <p class="hint" style="margin:18px 4px 0">Funktioniert nur im selben WLAN wie der PC. Ändert sich die Adresse des PCs, hier neu kopieren.</p>
+  <p class="foot">Nur im selben WLAN wie der PC.</p>
+  <textarea id="base" readonly>{{BASE}}</textarea>
+  <textarea id="topic" readonly>{{NTFY}}</textarea>
 </main>
 <script>
-  async function copy(t, btn) {
+  async function copy(t, label) {
     let ok = false;
     try { await navigator.clipboard.writeText(t.value); ok = true; } catch {}
     if (!ok) { // ohne HTTPS gibt es navigator.clipboard nicht
       t.focus(); t.setSelectionRange(0, t.value.length);
       try { ok = document.execCommand("copy"); } catch {}
     }
-    btn.textContent = ok ? "Kopiert" : "Gedrückt halten › Kopieren";
+    label.textContent = ok ? "Kopiert ✓" : "Gedrückt halten";
   }
-  document.getElementById("copy").addEventListener("click", (e) => copy(document.getElementById("base"), e.target));
-  document.getElementById("copyTopic").addEventListener("click", (e) => copy(document.getElementById("topic"), e.target));
-  const hasTopic = document.getElementById("topic").value.trim() !== "";
-  document.getElementById("ntfy").hidden = !hasTopic;
-  document.getElementById("nontfy").hidden = hasTopic;
+  document.getElementById("copy").addEventListener("click", () => copy(document.getElementById("base"), document.getElementById("copied")));
+  document.getElementById("copyTopic").addEventListener("click", () => copy(document.getElementById("topic"), document.getElementById("topicCopied")));
+  document.getElementById("ntfy").hidden = document.getElementById("topic").value.trim() === "";
 </script>
 </body>
 </html>
