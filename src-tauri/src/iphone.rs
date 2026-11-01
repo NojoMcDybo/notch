@@ -349,6 +349,14 @@ fn log(app: &AppHandle, line: String) {
     }
 }
 
+/// Einrichtungsseite befuellen (alle Platzhalter; der Test prueft, dass keiner uebrig bleibt)
+fn render_page(base: &str, host_base: &str, name: &str, ntfy: &str) -> String {
+    PAGE.replace("{{BASE}}", &share::html_escape(base))
+        .replace("{{HOSTBASE}}", &share::html_escape(host_base))
+        .replace("{{NAME}}", &share::html_escape(name))
+        .replace("{{NTFY}}", &share::html_escape(ntfy))
+}
+
 /// Alles unter /k/ (aus share.rs weitergereicht)
 pub fn handle(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpAddr) -> Response<Box<dyn Read + Send>> {
     let method = req.method().to_string();
@@ -372,17 +380,13 @@ fn handle_inner(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpA
     match (req.method(), sub) {
         (Method::Get, "") => {
             seen(app, ip, q); // QR-Code mit dem iPhone gescannt = gekoppelt
+            ntfy_default(app);
             let (ip_pc, port, _) = share::addr();
-            // Rechnername statt IP: iOS findet <PC>.local per Bonjour, und der Kurzbefehl ueberlebt eine neue IP
+            // Rechnername (<PC>.local, Bonjour) uebersteht eine neue IP, klappt aber nicht in jedem Netz: die Seite
+            // probiert ihn auf dem iPhone aus und nimmt sonst die IP (iphone-page.html)
             let host = std::env::var("COMPUTERNAME").ok().filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
-            let base = match host {
-                Some(h) => format!("http://{h}.local:{port}/k/{tok}"),
-                None => format!("http://{ip_pc}:{port}/k/{tok}"),
-            };
-            let page = PAGE
-                .replace("{{BASE}}", &share::html_escape(&base))
-                .replace("{{NAME}}", &share::html_escape(&share::alias()))
-                .replace("{{NTFY}}", &ntfy_topic(app).unwrap_or_default());
+            let host_base = host.map(|h| format!("http://{h}.local:{port}/k/{tok}")).unwrap_or_default();
+            let page = render_page(&format!("http://{ip_pc}:{port}/k/{tok}"), &host_base, &share::alias(), &ntfy_topic(app).unwrap_or_default());
             Response::from_string(page)
                 .with_header(header("Content-Type", "text/html; charset=utf-8"))
                 .with_header(header("Cache-Control", "no-store"))
@@ -498,6 +502,15 @@ fn ntfy_topic(app: &AppHandle) -> Option<String> {
     let t = std::fs::read_to_string(data_file(app, "iphone-ntfy.txt")?).ok()?;
     let t = t.trim().to_string();
     (!t.is_empty() && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')).then_some(t)
+}
+
+/// Mitteilungen sind beim Einrichten an, solange niemand sie ausgeschaltet hat (aus = leere Datei)
+fn ntfy_default(app: &AppHandle) {
+    if let Some(f) = data_file(app, "iphone-ntfy.txt").filter(|f| !f.exists()) {
+        if std::fs::write(&f, format!("notch-{}", share::random_hex(12))).is_ok() {
+            share::status_event(app);
+        }
+    }
 }
 
 /// Mitteilung aufs iPhone (ntfy.sh): nur was wartet, nie Namen oder Inhalte
@@ -786,7 +799,8 @@ pub fn iphone_push(app: AppHandle, on: bool) -> Result<(), String> {
             std::fs::write(&f, format!("notch-{}", share::random_hex(12))).map_err(|e| e.to_string())?;
         }
     } else {
-        let _ = std::fs::remove_file(&f);
+        // leer statt loeschen: so weiss ntfy_default, dass es bewusst aus ist
+        std::fs::write(&f, "").map_err(|e| e.to_string())?;
     }
     share::status_event(&app);
     Ok(())
@@ -850,6 +864,15 @@ mod tests {
         assert_eq!(waiting(&o), "2 Fotos und 1 Datei und Text");
         o.files.clear();
         assert_eq!(waiting(&o), "Text");
+    }
+
+    #[test]
+    fn einrichtungsseite_vollstaendig() {
+        let p = render_page("http://192.168.2.5:53317/k/abc", "http://PC.local:53317/k/abc", "Notch · PC", "notch-123");
+        assert!(!p.contains("{{"), "Platzhalter uebrig: {}", &p[p.find("{{").unwrap()..][..30]);
+        assert!(p.contains("http://192.168.2.5:53317/k/abc") && p.contains("http://PC.local:53317/k/abc") && p.contains("notch-123"));
+        // ohne Rechnername und ohne Mitteilung bleibt nichts Ungefuelltes stehen
+        assert!(!render_page("http://1.2.3.4:53317/k/x", "", "N", "").contains("{{"));
     }
 
     #[test]

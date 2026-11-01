@@ -114,6 +114,7 @@
 
   <p class="foot">Nur im selben WLAN wie der PC.</p>
   <textarea id="base" readonly>{{BASE}}</textarea>
+  <textarea id="hostbase" readonly>{{HOSTBASE}}</textarea>
   <textarea id="topic" readonly>{{NTFY}}</textarea>
 </main>
 <script>
@@ -128,7 +129,23 @@
   }
   document.getElementById("copy").addEventListener("click", () => copy(document.getElementById("base"), document.getElementById("copied")));
   document.getElementById("copyTopic").addEventListener("click", () => copy(document.getElementById("topic"), document.getElementById("topicCopied")));
-  document.getElementById("ntfy").hidden = document.getElementById("topic").value.trim() === "";
+  // Adresse: erst die IP (geht immer, solange sie gleich bleibt); findet dieses Geraet den PC-Namen (<PC>.local),
+  // den nehmen, der uebersteht eine neue IP. Antwortet er nicht in 2,5 s, bleibt es bei der IP.
+  const base = document.getElementById("base"), addr = document.getElementById("addr");
+  const useAddr = (a) => { base.value = a; addr.textContent = a; };
+  useAddr(base.value.trim());
+  const host = document.getElementById("hostbase").value.trim();
+  if (host) {
+    const stop = new AbortController();
+    setTimeout(() => stop.abort(), 2500);
+    fetch(host + "/hallo", { mode: "no-cors", cache: "no-store", signal: stop.signal }).then(() => useAddr(host)).catch(() => {});
+  }
+  // ntfy: Schritt immer zeigen; ist es in der Notch ausgeschaltet, steht dort, wo man es einschaltet
+  if (document.getElementById("topic").value.trim() === "") {
+    document.getElementById("topicShow").textContent = "Aus – in der Notch: Einstellungen › iPhone › Mitteilung";
+    document.getElementById("topicCopied").hidden = true;
+    document.getElementById("copyTopic").disabled = true;
+  }
 </script>
 </body>
 </html>
