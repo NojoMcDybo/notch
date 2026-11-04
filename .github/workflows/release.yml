@@ -70,7 +70,7 @@ jobs:
   # Ad-hoc signiert (ohne Apple-Entwicklerkonto): macOS fragt beim ersten Start einmal nach.
   macos:
     needs: installer
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
