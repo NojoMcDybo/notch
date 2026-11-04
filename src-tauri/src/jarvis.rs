@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
+#[cfg(windows)]
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+#[cfg(windows)]
 use windows::Win32::UI::Shell::{
     BHID_EnumItems, FOLDERID_AppsFolder, IEnumShellItems, IShellItem, SHGetKnownFolderItem, KF_FLAG_DEFAULT,
     SIGDN, SIGDN_NORMALDISPLAY, SIGDN_PARENTRELATIVEPARSING,
@@ -114,7 +116,28 @@ fn vdf_values(text: &str, key: &str) -> Vec<String> {
         .collect()
 }
 
+/// Mac: alle Apps in /Applications, ~/Applications und /System/Applications (eine Ebene Unterordner, z. B. Utilities)
+#[cfg(not(windows))]
+fn load_catalog() -> Vec<App> {
+    fn walk(dir: &std::path::Path, depth: u8, out: &mut Vec<App>) {
+        for p in std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()) {
+            match (p.extension().is_some_and(|x| x == "app"), p.file_stem()) {
+                (true, Some(name)) => out.push(app(&name.to_string_lossy(), &p.to_string_lossy())),
+                (false, _) if depth > 0 && p.is_dir() => walk(&p, depth - 1, out),
+                _ => {}
+            }
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut out = Vec::new();
+    for root in ["/Applications".to_string(), format!("{home}/Applications"), "/System/Applications".into()] {
+        walk(std::path::Path::new(&root), 1, &mut out);
+    }
+    out
+}
+
 /// Alle Eintraege von shell:AppsFolder (eigener Faden mit STA, wie der Explorer)
+#[cfg(windows)]
 fn load_catalog() -> Vec<App> {
     std::thread::spawn(|| unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -141,6 +164,7 @@ fn load_catalog() -> Vec<App> {
     .unwrap_or_default()
 }
 
+#[cfg(windows)]
 unsafe fn text(it: &IShellItem, sigdn: SIGDN) -> Option<String> {
     let p = it.GetDisplayName(sigdn).ok()?;
     let s = p.to_string().ok();
@@ -373,9 +397,16 @@ pub fn open_app(handle: &AppHandle, name: &str) -> Result<Done, String> {
             // Riot-Launcher statt --launch-product=league_of_legends)
             handle.opener().open_path(lnk.to_string_lossy(), None::<&str>).map_err(|e| format!("Start fehlgeschlagen: {e}"))?;
         } else {
-            std::process::Command::new("explorer.exe")
-                .arg(format!("shell:AppsFolder\\{}", a.id))
-                .spawn()
+            // Mac: id ist der Pfad der .app; `open` startet sie oder holt sie nach vorn
+            #[cfg(not(windows))]
+            let mut c = std::process::Command::new("open");
+            #[cfg(not(windows))]
+            c.arg(&a.id);
+            #[cfg(windows)]
+            let mut c = std::process::Command::new("explorer.exe");
+            #[cfg(windows)]
+            c.arg(format!("shell:AppsFolder\\{}", a.id));
+            c.spawn()
                 .map_err(|e| format!("Start fehlgeschlagen: {e}"))?;
         }
         *LAST.lock().unwrap() = Some(Launch { id: a.id.clone(), name: a.name.clone(), exe, at: Instant::now() });

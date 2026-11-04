@@ -1,0 +1,35 @@
+# Mac-App zum Ausprobieren, ohne Release: laeuft bei jedem Push auf den Zweig "macos",
+# sonst Actions > Mac-Testbuild > Run workflow. Die .dmg liegt danach unten auf der Seite des Laufs
+# unter "Artifacts". Installierte Apps merken davon nichts.
+name: Mac-Testbuild
+on:
+  push:
+    branches: [macos]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci --include=dev
+      - name: Tests (Mac)
+        working-directory: src-tauri
+        run: cargo test --lib
+      # ohne Update-Signatur: die Testversion bietet sich nicht als Update an
+      - run: npx tauri build --target universal-apple-darwin --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Notch-Mac
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg

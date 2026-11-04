@@ -1168,6 +1168,13 @@ pub fn sanitize_settings(v: &Value) -> Value {
 }
 
 /// Ist Arena installiert? (meldet das Schema arena:// bei Windows an) — dann bietet die Notch „In Arena“ an
+#[cfg(not(windows))]
+#[tauri::command]
+pub fn arena_installed() -> bool {
+    false
+}
+
+#[cfg(windows)]
 #[tauri::command]
 pub fn arena_installed() -> bool {
     use windows::core::w;

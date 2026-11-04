@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- macOS: wird von Tauri in die Info.plist der App eingemischt -->
+<plist version="1.0">
+<dict>
+  <!-- kein Dock-Symbol, nur Menueleiste (wie unter Windows nur im Infobereich) -->
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Notch zeigt, was in Spotify und Musik läuft, und steuert die Wiedergabe.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Notch hört nur zu, solange du den Sprachassistenten aktiv benutzt.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Notch tauscht über NotchDrop Dateien mit deinem iPhone im WLAN aus.</string>
+</dict>
+</plist>

@@ -17,21 +17,11 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use windows::core::w;
-use windows::Win32::Foundation::{HANDLE, HGLOBAL, HWND};
-use windows::Win32::System::DataExchange::{
-    CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, IsClipboardFormatAvailable,
-    OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
-};
-use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
-use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
+
+use crate::clipboard_sys as sys;
 
 const MAX: usize = 5;
 const MAX_TEXT: usize = 20_000;
-const CF_UNICODETEXT: u32 = 13;
-const CF_HDROP: u32 = 15;
-const CF_DIB: u32 = 8;
-const CF_DIBV5: u32 = 17;
 
 #[derive(Serialize, Clone)]
 pub struct Clip {
@@ -65,104 +55,6 @@ fn hash<T: Hash>(t: &T) -> u64 {
     let mut h = DefaultHasher::new();
     t.hash(&mut h);
     h.finish()
-}
-
-fn owner() -> Option<HWND> {
-    let h = crate::HWND.load(Ordering::Relaxed);
-    (h != 0).then(|| HWND(h as *mut _))
-}
-
-/// Zwischenablage oeffnen (andere Programme halten sie manchmal kurz fest) und beim Verlassen schliessen.
-struct Open;
-impl Open {
-    fn new(owner: Option<HWND>) -> Option<Self> {
-        for _ in 0..8 {
-            if unsafe { OpenClipboard(owner) }.is_ok() {
-                return Some(Open);
-            }
-            std::thread::sleep(Duration::from_millis(40));
-        }
-        None
-    }
-}
-impl Drop for Open {
-    fn drop(&mut self) {
-        let _ = unsafe { CloseClipboard() };
-    }
-}
-
-fn available(fmt: u32) -> bool {
-    unsafe { IsClipboardFormatAvailable(fmt) }.is_ok()
-}
-
-/// Passwortmanager & Co. markieren ihre Inhalte als "nicht in den Verlauf".
-fn excluded() -> bool {
-    unsafe {
-        let ex = RegisterClipboardFormatW(w!("ExcludeClipboardContentFromMonitorProcessing"));
-        let ign = RegisterClipboardFormatW(w!("Clipboard Viewer Ignore"));
-        if available(ex) || available(ign) {
-            return true;
-        }
-        let can = RegisterClipboardFormatW(w!("CanIncludeInClipboardHistory"));
-        if available(can) {
-            if let Ok(h) = GetClipboardData(can) {
-                let g = HGLOBAL(h.0);
-                let p = GlobalLock(g) as *const u32;
-                if !p.is_null() {
-                    let v = *p;
-                    let _ = GlobalUnlock(g);
-                    if v == 0 {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
-    }
-}
-
-fn read_text() -> Option<String> {
-    if !available(CF_UNICODETEXT) {
-        return None;
-    }
-    unsafe {
-        let h = GetClipboardData(CF_UNICODETEXT).ok()?;
-        let g = HGLOBAL(h.0);
-        let p = GlobalLock(g) as *const u16;
-        if p.is_null() {
-            return None;
-        }
-        let n = GlobalSize(g) / 2;
-        let s = std::slice::from_raw_parts(p, n);
-        let end = s.iter().position(|&c| c == 0).unwrap_or(n);
-        let t = String::from_utf16_lossy(&s[..end]);
-        let _ = GlobalUnlock(g);
-        Some(t)
-    }
-}
-
-fn read_files() -> Option<Vec<String>> {
-    if !available(CF_HDROP) {
-        return None;
-    }
-    unsafe {
-        let h = GetClipboardData(CF_HDROP).ok()?;
-        let drop = HDROP(h.0);
-        let n = DragQueryFileW(drop, u32::MAX, None);
-        let mut v = Vec::new();
-        for i in 0..n {
-            let len = DragQueryFileW(drop, i, None) as usize;
-            let mut buf = vec![0u16; len + 1];
-            DragQueryFileW(drop, i, Some(&mut buf));
-            v.push(String::from_utf16_lossy(&buf[..len]));
-        }
-        Some(v)
-    }
-}
-
-fn has_image() -> bool {
-    let png = unsafe { RegisterClipboardFormatW(w!("PNG")) };
-    available(CF_DIB) || available(CF_DIBV5) || available(png)
 }
 
 fn now_ms() -> u64 {
@@ -211,16 +103,7 @@ fn add(app: &AppHandle, c: Clip) {
 
 fn capture(app: &AppHandle, dir: &Path) {
     // Erst nur lesen, was drin ist; Bilder holt arboard danach (eigenes Oeffnen)
-    let (files, text, image) = {
-        let Some(_open) = Open::new(None) else { return };
-        if excluded() {
-            return;
-        }
-        let files = read_files().filter(|f| !f.is_empty());
-        let text = if files.is_none() { read_text().filter(|t| !t.trim().is_empty()) } else { None };
-        let image = files.is_none() && text.is_none() && has_image();
-        (files, text, image)
-    };
+    let Some((files, text, image)) = sys::peek() else { return };
 
     if let Some(files) = files {
         let key = hash(&("files", &files));
@@ -266,13 +149,13 @@ pub fn spawn(app: AppHandle) {
     let _ = std::fs::create_dir_all(&dir);
     *DIR.lock().unwrap() = Some(dir.clone());
     std::thread::spawn(move || {
-        let mut seq = 0u32; // 0 = beim Start den aktuellen Inhalt einmal uebernehmen
+        let mut seq = 0; // 0 = beim Start den aktuellen Inhalt einmal uebernehmen
         loop {
-            let s = unsafe { GetClipboardSequenceNumber() };
+            let s = sys::seq();
             if s != seq {
                 // Programme legen mehrere Formate nacheinander ab — kurz warten
                 std::thread::sleep(Duration::from_millis(120));
-                seq = unsafe { GetClipboardSequenceNumber() };
+                seq = sys::seq();
                 capture(&app, &dir);
             }
             std::thread::sleep(Duration::from_millis(300));
@@ -281,53 +164,6 @@ pub fn spawn(app: AppHandle) {
 }
 
 // ---------- Zurueck in die Zwischenablage ----------
-
-fn put(fmt: u32, bytes: &[u8]) -> bool {
-    unsafe {
-        let Ok(g) = GlobalAlloc(GMEM_MOVEABLE, bytes.len()) else { return false };
-        let p = GlobalLock(g) as *mut u8;
-        if p.is_null() {
-            return false;
-        }
-        std::ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len());
-        let _ = GlobalUnlock(g);
-        // Bei Erfolg gehoert der Speicher jetzt Windows
-        SetClipboardData(fmt, Some(HANDLE(g.0))).is_ok()
-    }
-}
-
-fn utf16z(s: &str) -> Vec<u8> {
-    s.encode_utf16().chain(std::iter::once(0)).flat_map(|c| c.to_le_bytes()).collect()
-}
-
-fn set_text(t: &str) -> Result<(), String> {
-    let _open = Open::new(owner()).ok_or("Zwischenablage belegt")?;
-    unsafe { EmptyClipboard() }.map_err(|e| e.to_string())?;
-    if put(CF_UNICODETEXT, &utf16z(t)) { Ok(()) } else { Err("Text konnte nicht kopiert werden".into()) }
-}
-
-fn set_files(files: &[String]) -> Result<(), String> {
-    // DROPFILES: pFiles=20, pt=(0,0), fNC=0, fWide=1, danach die Pfade (UTF-16, je 0-terminiert, am Ende 0)
-    let mut b: Vec<u8> = Vec::new();
-    b.extend_from_slice(&20u32.to_le_bytes());
-    b.extend_from_slice(&0i32.to_le_bytes());
-    b.extend_from_slice(&0i32.to_le_bytes());
-    b.extend_from_slice(&0i32.to_le_bytes());
-    b.extend_from_slice(&1i32.to_le_bytes());
-    for f in files {
-        b.extend(utf16z(f));
-    }
-    b.extend_from_slice(&0u16.to_le_bytes());
-    let _open = Open::new(owner()).ok_or("Zwischenablage belegt")?;
-    unsafe { EmptyClipboard() }.map_err(|e| e.to_string())?;
-    if !put(CF_HDROP, &b) {
-        return Err("Dateien konnten nicht kopiert werden".into());
-    }
-    // Einfuegen soll kopieren, nicht verschieben
-    let effect = unsafe { RegisterClipboardFormatW(w!("Preferred DropEffect")) };
-    put(effect, &1u32.to_le_bytes());
-    Ok(())
-}
 
 fn set_image(path: &str) -> Result<(), String> {
     let img = image::open(path).map_err(|e| e.to_string())?.to_rgba8();
@@ -351,8 +187,8 @@ pub fn clip_list() -> Vec<Clip> {
 pub async fn clip_copy(id: u64) -> Result<(), String> {
     let c = find(id).ok_or("nicht mehr da")?;
     tauri::async_runtime::spawn_blocking(move || match c.kind.as_str() {
-        "text" => set_text(c.text.as_deref().unwrap_or("")),
-        "files" => set_files(&c.files),
+        "text" => sys::set_text(c.text.as_deref().unwrap_or("")),
+        "files" => sys::set_files(&c.files),
         "image" => set_image(c.path.as_deref().unwrap_or("")),
         _ => Ok(()),
     })

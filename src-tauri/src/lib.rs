@@ -1,7 +1,12 @@
 mod activities;
+#[cfg_attr(target_os = "macos", path = "mac/audio.rs")]
 mod audio;
+#[cfg_attr(target_os = "macos", path = "mac/autostart.rs")]
 mod autostart;
 mod clipboard;
+#[cfg_attr(windows, path = "clipboard_win.rs")]
+#[cfg_attr(target_os = "macos", path = "mac/clipboard.rs")]
+mod clipboard_sys;
 mod convert;
 mod gamepad;
 mod iphone;
@@ -9,13 +14,18 @@ mod jarvis;
 mod laya;
 mod lol;
 mod memory;
+#[cfg_attr(target_os = "macos", path = "mac/screen.rs")]
 mod screen;
 mod spotify;
+#[cfg_attr(target_os = "macos", path = "mac/media.rs")]
 mod media;
+// Musikstil kommt aus dem Systemton (spectrum.rs) — den gibt es nur unter Windows
+#[cfg_attr(not(windows), allow(dead_code))]
 mod music_style;
 mod open;
 mod share;
 mod shelf;
+#[cfg_attr(target_os = "macos", path = "mac/spectrum.rs")]
 mod spectrum;
 mod sport;
 mod shortcuts;
@@ -23,6 +33,7 @@ mod thumb;
 mod timer;
 mod update;
 mod voice;
+#[cfg_attr(target_os = "macos", path = "mac/win.rs")]
 mod win;
 
 use std::path::PathBuf;
@@ -124,10 +135,13 @@ static FOCUS_HOLD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 /// Die App pollt /events und macht Restore/Show/Activate selbst (klappt auch aus Tray/minimiert).
 #[tauri::command]
 fn activity_focus_app(id: String) {
-    use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
-    let pid = activities::get(&id).and_then(|a| a.pid).unwrap_or(u32::MAX); // MAX = ASFW_ANY
-    unsafe {
-        let _ = AllowSetForegroundWindow(pid);
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+        let pid = activities::get(&id).and_then(|a| a.pid).unwrap_or(u32::MAX); // MAX = ASFW_ANY
+        unsafe {
+            let _ = AllowSetForegroundWindow(pid);
+        }
     }
     FOCUS_HOLD.store(activities::now_ms() + 1200, Ordering::Relaxed);
     activities::push_event(&id, "open");
@@ -141,6 +155,16 @@ fn keyboard(on: bool) {
     if on && h != 0 && win::foreground() != h {
         win::set_foreground(h);
     }
+}
+
+/// Cursor in physischen Bildschirmpixeln (wie Fensterpositionen)
+#[cfg(windows)]
+fn pointer(_app: &AppHandle) -> Option<(i32, i32)> {
+    win::cursor()
+}
+#[cfg(not(windows))]
+fn pointer(app: &AppHandle) -> Option<(i32, i32)> {
+    app.cursor_position().ok().map(|p| (p.x.round() as i32, p.y.round() as i32))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -334,7 +358,7 @@ fn dock_drag_start(app: AppHandle) {
         let _ = app.emit("dock-preview", Some(edge.clone()));
         loop {
             std::thread::sleep(Duration::from_millis(16));
-            if let Some((cx, _)) = win::cursor() {
+            if let Some((cx, _)) = pointer(&app) {
                 let rel = (cx - mx) as f64 / mw.max(1) as f64;
                 let e = if rel < 0.22 { "left" } else if rel > 0.78 { "right" } else { "top" };
                 if e != edge {
@@ -430,7 +454,7 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
             tick = tick.wrapping_add(1);
 
             let (wx, wy, s) = (geo.wx, geo.wy, geo.scale);
-            let cursor = win::cursor();
+            let cursor = pointer(w.app_handle());
             // Vollbild: Maus an die Kante, wo die Notch sitzt -> ausfahren; weg davon -> wieder rein
             let at_edge = fs_prev
                 && cursor.is_some_and(|(cx, cy)| {
@@ -478,6 +502,8 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
             if (inside || on_bubble) != click_prev {
                 click_prev = inside || on_bubble;
                 win::enforce(hwnd, !click_prev);
+                #[cfg(not(windows))]
+                let _ = w.set_ignore_cursor_events(!click_prev);
             }
             if inside != inside_prev {
                 inside_prev = inside;
@@ -487,6 +513,26 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
             std::thread::sleep(Duration::from_millis(16));
         }
     });
+}
+
+/// macOS: kein Dock-Symbol, Fenster ueber der Menueleiste (sonst laege die Notch darunter), auf allen
+/// Schreibtischen und neben Vollbild-Apps, durchklickbar bis die Maus auf der Notch ist.
+#[cfg(target_os = "macos")]
+fn mac_overlay(app: &mut tauri::App, w: &WebviewWindow) {
+    use objc2::runtime::AnyObject;
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    let _ = w.set_ignore_cursor_events(true);
+    if let Ok(ns) = w.ns_window() {
+        let ns = ns as *mut AnyObject;
+        // NSStatusWindowLevel (25) liegt ueber der Menueleiste (24)
+        const LEVEL: isize = 25;
+        // CanJoinAllSpaces | Stationary | IgnoresCycle | FullScreenAuxiliary
+        const BEHAVIOR: usize = 1 | 16 | 64 | 256;
+        unsafe {
+            let _: () = objc2::msg_send![ns, setLevel: LEVEL];
+            let _: () = objc2::msg_send![ns, setCollectionBehavior: BEHAVIOR];
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -609,10 +655,16 @@ pub fn run() {
             load_config(app.handle());
             let w = app.get_webview_window("notch").expect("Fenster 'notch' fehlt");
             place(&w, None);
+            #[cfg(windows)]
             let hwnd = w.hwnd().map(|h| h.0 as isize).unwrap_or(0);
+            #[cfg(not(windows))]
+            let hwnd = 0;
             win::enforce(hwnd, true);
             win::show_noactivate(hwnd);
+            #[cfg(windows)]
             let _ = w.with_webview(|wv| voice::allow_microphone(wv.controller()));
+            #[cfg(target_os = "macos")]
+            mac_overlay(app, &w);
             // Tastenkuerzel des Sprachassistenten: eigenes aus den Einstellungen, sonst das erste freie
             shortcuts::init(app.handle());
 

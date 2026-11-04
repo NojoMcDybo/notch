@@ -114,12 +114,22 @@ static STOP: AtomicBool = AtomicBool::new(false);
 
 // ---------- Hilfen ----------
 
-/// Zufall aus dem Betriebssystem (BCryptGenRandom), als Hex
-pub fn random_hex(bytes: usize) -> String {
+/// Zufall aus dem Betriebssystem (Windows: BCryptGenRandom, Mac: /dev/urandom). false = keiner bekommen.
+#[cfg(windows)]
+pub fn os_random(b: &mut [u8]) -> bool {
     use windows::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG};
+    unsafe { BCryptGenRandom(None, b, BCRYPT_USE_SYSTEM_PREFERRED_RNG) }.is_ok()
+}
+#[cfg(not(windows))]
+pub fn os_random(b: &mut [u8]) -> bool {
+    use std::io::Read;
+    std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(b)).is_ok()
+}
+
+/// Zufall aus dem Betriebssystem, als Hex
+pub fn random_hex(bytes: usize) -> String {
     let mut b = vec![0u8; bytes];
-    let ok = unsafe { BCryptGenRandom(None, &mut b, BCRYPT_USE_SYSTEM_PREFERRED_RNG) }.is_ok();
-    if !ok {
+    if !os_random(&mut b) {
         // nie erwartet; dann wenigstens nicht vorhersagbar fuer andere Prozesse
         use std::hash::{BuildHasher, Hasher};
         for chunk in b.chunks_mut(8) {
@@ -275,13 +285,28 @@ pub(crate) fn enabled() -> bool {
     crate::settings_value("/share/on").and_then(|v| v.as_bool()).unwrap_or(false)
 }
 
+/// Rechnername, unter dem der PC im WLAN per Bonjour erreichbar ist (<Name>.local)
+pub(crate) fn computer_name() -> Option<String> {
+    #[cfg(windows)]
+    let n = std::env::var("COMPUTERNAME").ok();
+    #[cfg(not(windows))]
+    let n = std::process::Command::new("scutil")
+        .args(["--get", "LocalHostName"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    n.filter(|n| !n.is_empty())
+}
+
 pub(crate) fn alias() -> String {
     let n = crate::settings_value("/share/name").and_then(|v| v.as_str().map(|s| s.trim().to_string())).unwrap_or_default();
     if !n.is_empty() {
         return n.chars().take(40).collect();
     }
-    let pc = std::env::var("COMPUTERNAME").unwrap_or_default();
-    if pc.is_empty() { "Notch".into() } else { format!("Notch · {pc}") }
+    match computer_name() {
+        Some(pc) => format!("Notch · {pc}"),
+        None => "Notch".into(),
+    }
 }
 
 fn trusted(fp: &str) -> bool {

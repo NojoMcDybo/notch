@@ -1052,7 +1052,8 @@ function renderShare() {
       invoke("iphone_sendto", { on: v }).catch((e) => ksBox.replaceChildren(el("small", "error", String(e))));
     });
     sendto.querySelector("span")!.append(el("small", "", "Rechtsklick auf eine Datei › Senden an › iPhone (Notch)"));
-    ksOpts.push(push, sendto);
+    // „Senden an“ gibt es nur im Windows-Explorer
+    ksOpts.push(...(navigator.userAgent.includes("Mac") ? [push] : [push, sendto]));
   }
   ks.append(ksHead, phLine, ...ksOpts, ksRow, ksBox);
   ways.append(ks, ls, qr);
@@ -1112,7 +1113,7 @@ function renderShare() {
     ["#ff9f0a", icon("phone"), "Zwischenablage & Abholen", "Hinten 2× aufs iPhone tippen"],
     ["#5e5ce6", icon("tray"), "PC → iPhone", "Ablage › Rechtsklick › An iPhone senden"],
     ["#ff375f", icon("folder"), "Aus dem Explorer", "Rechtsklick › Senden an › iPhone (Notch)"],
-  ];
+  ].filter((s) => !(navigator.userAgent.includes("Mac") && s[2] === "Aus dem Explorer")) as [string, string, string, string][];
   for (const [color, svgHtml, title, how] of steps) {
     const row = el("div", "drop-row");
     const t = el("span", "drop-txt");

@@ -1,6 +1,6 @@
 //! Duenne Win32-Helfer: Cursor, Vollbild-Erkennung, Overlay-Fensterstil, Apps nach vorn holen.
 
-use std::os::windows::process::CommandExt;
+pub use std::os::windows::process::CommandExt;
 use std::process::Command;
 
 use windows::core::{BOOL, PWSTR};

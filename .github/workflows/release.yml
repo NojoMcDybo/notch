@@ -1,4 +1,4 @@
-# Baut den Windows-Installer und haengt ihn an ein GitHub Release.
+# Baut den Windows-Installer und die Mac-App (.dmg, Intel + Apple Silicon) und haengt beides an ein GitHub Release.
 # Ausloeser: Tag v<version> pushen (muss zur Version in tauri.conf.json passen),
 # oder manuell unter Actions > Release > Run workflow (baut die aktuelle Version).
 name: Release
@@ -11,6 +11,8 @@ permissions:
 jobs:
   installer:
     runs-on: windows-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     defaults:
       run:
         shell: pwsh
@@ -60,6 +62,46 @@ jobs:
           } | ConvertTo-Json -Depth 5 | Set-Content latest.json
           gh release view $env:TAG *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:TAG --target $env:GITHUB_SHA --title "Notch $version" --notes "Windows-Installer (x64, NSIS). Ab 0.1.2 meldet Notch neue Versionen selbst.`n`nSHA-256: ``$hash``"
+            gh release create $env:TAG --target $env:GITHUB_SHA --title "Notch $version" --notes "Windows: Notch_…-setup.exe (x64). Mac: Notch_…_universal.dmg (Intel und Apple Silicon, ab macOS 11; beim ersten Start Systemeinstellungen › Datenschutz & Sicherheit › Dennoch öffnen). Notch meldet neue Versionen selbst.`n`nSHA-256 Windows: ``$hash``"
           }
           gh release upload $env:TAG $exe.FullName latest.json --clobber
+
+  # Mac: laeuft nach Windows, weil dieser Job das Release und latest.json anlegt; ergaenzt dort die Mac-Eintraege.
+  # Ad-hoc signiert (ohne Apple-Entwicklerkonto): macOS fragt beim ersten Start einmal nach.
+  macos:
+    needs: installer
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci --include=dev
+      - run: npx tauri build --target universal-apple-darwin --bundles app,dmg
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+      - name: DMG und Update hochladen, latest.json um macOS ergaenzen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.installer.outputs.tag }}
+        run: |
+          set -euo pipefail
+          b=src-tauri/target/universal-apple-darwin/release/bundle
+          dmg=$(ls "$b"/dmg/*.dmg | head -1)
+          tgz=$(ls "$b"/macos/*.app.tar.gz | head -1)
+          # eindeutiger Name im Release (sonst hiesse es nur Notch.app.tar.gz)
+          upd="Notch_${TAG#v}_universal.app.tar.gz"
+          cp "$tgz" "$upd"
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$upd"
+          gh release download "$TAG" -p latest.json -O latest.json --clobber
+          jq --arg s "$(cat "$tgz.sig")" --arg u "$url"             '.platforms["darwin-aarch64"] = {signature: $s, url: $u} | .platforms["darwin-x86_64"] = {signature: $s, url: $u}'             latest.json > latest.new && mv latest.new latest.json
+          gh release upload "$TAG" "$dmg" "$upd" latest.json --clobber
+          echo "SHA-256 Mac: $(shasum -a 256 "$dmg")"

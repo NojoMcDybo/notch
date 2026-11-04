@@ -11,10 +11,13 @@
 //! und "voice-ptt" (true/false) an die Notch. Beim Aufnehmen im Einstellungsfenster (pad_capture) loest
 //! nichts aus; stattdessen geht "pad-buttons" (gedrueckte Tasten) ans Fenster.
 
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
+#[cfg(windows)]
 use windows::Win32::UI::Input::XboxController::{XInputGetState, XINPUT_STATE};
 
 const SHOW_FOR: Duration = Duration::from_secs(10);
@@ -245,6 +248,11 @@ impl TalkGate {
     }
 }
 
+/// shortcut: Controller gibt es vorerst nur unter Windows (XInput); auf dem Mac waere GameController.framework der Weg.
+#[cfg(not(windows))]
+pub fn spawn(_app: AppHandle) {}
+
+#[cfg(windows)]
 pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
         let mut toggle = Toggle::new();

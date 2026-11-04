@@ -4,7 +4,6 @@
 
 use std::fs::File;
 use std::io::BufWriter;
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,7 +17,7 @@ use tauri::AppHandle;
 
 use crate::activities::{self, Action, Activity};
 use crate::shelf::kind_of;
-use crate::win::CREATE_NO_WINDOW;
+use crate::win::{CommandExt, CREATE_NO_WINDOW};
 
 #[derive(Serialize, Clone)]
 pub struct Target {
@@ -48,7 +47,10 @@ fn find_ffmpeg() -> Option<PathBuf> {
         }
     }
     dirs.push(PathBuf::from(r"C:\Program Files\WinGet\Links"));
-    dirs.into_iter().map(|d| d.join("ffmpeg.exe")).find(|p| p.exists())
+    // Mac: aus dem Finder gestartet fehlt Homebrew im PATH
+    dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+    let exe = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+    dirs.into_iter().map(|d| d.join(exe)).find(|p| p.exists())
 }
 
 /// Einmal gefunden, bleibt es gemerkt; solange nicht gefunden, wird bei Bedarf neu gesucht.

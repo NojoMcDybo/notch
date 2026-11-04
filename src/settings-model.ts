@@ -10,7 +10,7 @@ export const SOURCE_IDS: SourceId[] = ["glucose", "music", "timer", "clock", "pu
 
 export const SOURCES: Record<SourceId, { name: string; from: string; color: string }> = {
   glucose: { name: "Blutzucker", from: "Haze", color: "#ff7971" },
-  music: { name: "Musik", from: "Windows-Medien", color: "#30d158" },
+  music: { name: "Musik", from: "Medien des Systems", color: "#30d158" },
   timer: { name: "Timer", from: "Notch", color: "#ffb340" },
   clock: { name: "Spielzeit", from: "Live-Sport (Spiel in der Mitte)", color: "#ff453a" },
   pulse: { name: "Puls", from: "Garmin über Haze, sonst Helio", color: "#ff5a6e" },

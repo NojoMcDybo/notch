@@ -384,7 +384,7 @@ fn handle_inner(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpA
             let (ip_pc, port, _) = share::addr();
             // Rechnername (<PC>.local, Bonjour) uebersteht eine neue IP, klappt aber nicht in jedem Netz: die Seite
             // probiert ihn auf dem iPhone aus und nimmt sonst die IP (iphone-page.html)
-            let host = std::env::var("COMPUTERNAME").ok().filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
+            let host = share::computer_name().filter(|n| n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
             let host_base = host.map(|h| format!("http://{h}.local:{port}/k/{tok}")).unwrap_or_default();
             let page = render_page(&format!("http://{ip_pc}:{port}/k/{tok}"), &host_base, &share::alias(), &ntfy_topic(app).unwrap_or_default());
             Response::from_string(page)
@@ -662,6 +662,12 @@ fn sendto_on() -> bool {
 
 /// Verknuepfung in „Senden an“: startet PowerShell unsichtbar mit einem kleinen Skript, das die Pfade an
 /// `127.0.0.1:47800/iphone` schickt (die Notch hat keinen Einzelinstanz-Start mit Argumenten).
+#[cfg(not(windows))]
+fn sendto_set(_app: &AppHandle, on: bool) -> Result<(), String> {
+    if on { Err("„Senden an“ gibt es nur unter Windows.".into()) } else { Ok(()) }
+}
+
+#[cfg(windows)]
 fn sendto_set(app: &AppHandle, on: bool) -> Result<(), String> {
     let dir = sendto_dir().ok_or("Ordner „Senden an“ nicht gefunden")?;
     let lnk = dir.join(SENDTO_LNK);
@@ -698,6 +704,7 @@ fn sendto_set(app: &AppHandle, on: bool) -> Result<(), String> {
 }
 
 /// Skript hinter „Senden an › iPhone“ (nur ASCII: PowerShell 5.1 liest Dateien ohne BOM als ANSI)
+#[cfg(windows)]
 const SENDTO_PS1: &str = r#"# Notch: Explorer "Senden an > iPhone" legt die Dateien fuers iPhone bereit
 $body = ConvertTo-Json @{ paths = @($args) } -Compress
 try {
@@ -711,7 +718,27 @@ try {
 
 // ---------- Im WLAN? ----------
 
+/// Mac: einmal anpingen (das iPhone antwortet oft nicht, loest aber ARP aus), dann den ARP-Eintrag lesen.
+/// shortcut: macOS behaelt Eintraege ~20 min; ohne Adminrechte laesst er sich nicht verwerfen, die Abmeldung kommt daher spaeter.
+#[cfg(not(windows))]
+fn arp_ok(ip: Ipv4Addr) -> bool {
+    use std::process::Command;
+    let ip = ip.to_string();
+    let _ = Command::new("ping").args(["-c", "1", "-t", "1", &ip]).output();
+    Command::new("arp")
+        .args(["-n", &ip])
+        .output()
+        .is_ok_and(|o| arp_resolved(&String::from_utf8_lossy(&o.stdout)))
+}
+
+/// "? (192.168.1.5) at 1a:2b:3c:4d:5e:6f on en0 ifscope [ethernet]" vs. "… at (incomplete) on en0 …"
+#[cfg(not(windows))]
+fn arp_resolved(line: &str) -> bool {
+    line.split(" at ").nth(1).and_then(|r| r.split_whitespace().next()).is_some_and(|mac| mac.contains(':'))
+}
+
 /// Adresse per ARP neu aufloesen (vorhandener Eintrag wird verworfen). true = das Geraet hat geantwortet.
+#[cfg(windows)]
 fn arp_ok(ip: Ipv4Addr) -> bool {
     use windows::Win32::NetworkManagement::IpHelper::{GetBestInterface, ResolveIpNetEntry2, MIB_IPNET_ROW2};
     use windows::Win32::Networking::WinSock::{AF_INET, IN_ADDR, IN_ADDR_0};
@@ -888,6 +915,14 @@ mod tests {
         assert!(!has_ext("Text"));
         assert!(!has_ext("Version 2.0 der Seite"));
         assert_eq!(ext_for("image/jpeg; charset=binary"), ".jpg");
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn arp_zeile_mac() {
+        assert!(super::arp_resolved("? (192.168.1.5) at 1a:2b:3c:4d:5e:6f on en0 ifscope [ethernet]"));
+        assert!(!super::arp_resolved("? (192.168.1.5) at (incomplete) on en0 ifscope [ethernet]"));
+        assert!(!super::arp_resolved("192.168.1.5 (192.168.1.5) -- no entry"));
     }
 
     #[test]

@@ -12,8 +12,18 @@ use std::time::{Duration, Instant};
 
 use base64::Engine;
 use tauri::AppHandle;
-use windows::core::w;
-use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC};
+
+/// Systemton „Timer fertig“
+fn chime() {
+    #[cfg(windows)]
+    unsafe {
+        use windows::core::w;
+        use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC};
+        let _ = PlaySoundW(w!("SystemAsterisk"), None, SND_ALIAS | SND_ASYNC);
+    }
+    #[cfg(not(windows))]
+    let _ = std::process::Command::new("afplay").arg("/System/Library/Sounds/Glass.aiff").spawn();
+}
 
 use crate::activities::{self, Action, Activity};
 
@@ -224,9 +234,7 @@ pub fn spawn(app: AppHandle) {
             }
             t.done = true;
             publish(&app, t, true);
-            unsafe {
-                let _ = PlaySoundW(w!("SystemAsterisk"), None, SND_ALIAS | SND_ASYNC);
-            }
+            chime();
         } else if l.ceil() as i64 != t.shown {
             t.shown = l.ceil() as i64;
             publish(&app, t, false);

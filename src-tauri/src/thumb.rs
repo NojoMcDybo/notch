@@ -6,18 +6,24 @@
 //! solange sich die Datei nicht aendert.
 
 use std::collections::HashMap;
+#[cfg(windows)]
 use std::io::Cursor;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{LazyLock, Mutex, OnceLock};
 
 use base64::Engine;
+#[cfg(windows)]
 use windows::core::HSTRING;
+#[cfg(windows)]
 use windows::Win32::Foundation::SIZE;
+#[cfg(windows)]
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
     DIB_RGB_COLORS, HGDIOBJ,
 };
+#[cfg(windows)]
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+#[cfg(windows)]
 use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_RESIZETOFIT};
 
 type Job = (String, u32, Sender<Option<String>>);
@@ -39,6 +45,7 @@ pub fn spawn() {
     let (tx, rx) = channel::<Job>();
     let _ = TX.set(Mutex::new(tx));
     std::thread::spawn(move || {
+        #[cfg(windows)]
         unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
@@ -48,7 +55,27 @@ pub fn spawn() {
     });
 }
 
+/// Mac: Quick-Look-Vorschau (dieselbe wie im Finder) ueber qlmanage als PNG-data:-URL
+#[cfg(not(windows))]
+fn render(path: &str, size: u32) -> Option<String> {
+    let dir = std::env::temp_dir().join(format!("notch-thumb-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).ok()?;
+    let ok = std::process::Command::new("qlmanage")
+        .args(["-t", "-s", &size.to_string(), "-o"])
+        .arg(&dir)
+        .arg(path)
+        .output()
+        .is_ok_and(|o| o.status.success());
+    // qlmanage schreibt <Dateiname>.png in den Ordner
+    let png = std::fs::read_dir(&dir).ok()?.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|e| e == "png"));
+    let bytes = png.filter(|_| ok).and_then(|p| std::fs::read(p).ok());
+    let _ = std::fs::remove_dir_all(&dir);
+    Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes?)))
+}
+
 /// Shell-Vorschau als PNG-data:-URL (None, wenn die Datei fehlt oder Windows nichts liefert)
+#[cfg(windows)]
 fn render(path: &str, size: u32) -> Option<String> {
     let rgba = unsafe { shell_bitmap(path, size)? };
     let (w, h, px) = rgba;
@@ -58,6 +85,7 @@ fn render(path: &str, size: u32) -> Option<String> {
     Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(out.into_inner())))
 }
 
+#[cfg(windows)]
 unsafe fn shell_bitmap(path: &str, size: u32) -> Option<(u32, u32, Vec<u8>)> {
     let item: IShellItemImageFactory = SHCreateItemFromParsingName(&HSTRING::from(path), None).ok()?;
     let hbm = item.GetImage(SIZE { cx: size as i32, cy: size as i32 }, SIIGBF_RESIZETOFIT).ok()?;
@@ -136,7 +164,7 @@ pub async fn thumb(path: String, size: Option<u32>) -> Option<String> {
     Some(url)
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod tests {
     /// Echte Dateien auf diesem PC: `cargo test --lib thumb -- --ignored` mit NOTCH_THUMB_TEST=<Pfad;Pfad>
     #[test]

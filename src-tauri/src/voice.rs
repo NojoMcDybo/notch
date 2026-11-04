@@ -11,8 +11,11 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
+#[cfg(windows)]
 use windows::core::w;
+#[cfg(windows)]
 use windows::Win32::Foundation::{LocalFree, HLOCAL};
+#[cfg(windows)]
 use windows::Win32::Security::Cryptography::{
     CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
 };
@@ -31,6 +34,49 @@ pub(crate) fn data_file(app: &AppHandle, name: &str) -> Option<PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join(name))
 }
 
+/// Mac-Gegenstueck zu DPAPI: AES-256-GCM, der Schluessel dazu liegt im Schluesselbund (nur dieses Benutzerkonto).
+/// Dateiformat: 12 Byte Nonce + Geheimtext mit Tag. Gleiche Dateien und Aufrufer wie unter Windows.
+#[cfg(not(windows))]
+pub(crate) fn dpapi(data: &[u8], protect: bool) -> Result<Vec<u8>, String> {
+    use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, NONCE_LEN};
+    use security_framework::passwords::{get_generic_password, set_generic_password};
+    const SERVICE: &str = "de.nojo.notch";
+    const ACCOUNT: &str = "Dateischluessel";
+    let raw = match get_generic_password(SERVICE, ACCOUNT) {
+        Ok(k) if k.len() == 32 => k,
+        _ if protect => {
+            let mut k = vec![0u8; 32];
+            if !crate::share::os_random(&mut k) {
+                return Err("kein Zufall vom System".into());
+            }
+            set_generic_password(SERVICE, ACCOUNT, &k).map_err(|e| format!("Schlüsselbund: {e}"))?;
+            k
+        }
+        _ => return Err("Schlüssel fehlt im Schlüsselbund".into()),
+    };
+    let key = LessSafeKey::new(UnboundKey::new(&AES_256_GCM, &raw).map_err(|_| "Schlüssel ungültig")?);
+    if protect {
+        let mut nonce = [0u8; NONCE_LEN];
+        if !crate::share::os_random(&mut nonce) {
+            return Err("kein Zufall vom System".into());
+        }
+        let mut buf = data.to_vec();
+        key.seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::empty(), &mut buf)
+            .map_err(|_| "verschlüsseln fehlgeschlagen")?;
+        Ok([nonce.as_slice(), &buf].concat())
+    } else {
+        if data.len() < NONCE_LEN {
+            return Err("Datei beschädigt".into());
+        }
+        let (n, c) = data.split_at(NONCE_LEN);
+        let nonce = Nonce::try_assume_unique_for_key(n).map_err(|_| "Datei beschädigt")?;
+        let mut buf = c.to_vec();
+        let plain = key.open_in_place(nonce, Aad::empty(), &mut buf).map_err(|_| "entschlüsseln fehlgeschlagen")?;
+        Ok(plain.to_vec())
+    }
+}
+
+#[cfg(windows)]
 pub(crate) fn dpapi(data: &[u8], protect: bool) -> Result<Vec<u8>, String> {
     unsafe {
         let input = CRYPT_INTEGER_BLOB { cbData: data.len() as u32, pbData: data.as_ptr() as *mut u8 };
@@ -400,6 +446,7 @@ pub async fn voice_tts(app: AppHandle, text: String) -> Result<String, String> {
 /// Mikrofon fuer die Notch ohne Rueckfrage erlauben. WebView2 wuerde sonst ein eigenes
 /// Erlaubnis-Popup zeigen — in einem randlosen Overlay-Fenster waere das kaum bedienbar.
 /// Andere Rechte (Kamera, Standort …) bleiben unangetastet.
+#[cfg(windows)]
 pub fn allow_microphone(controller: webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
@@ -424,10 +471,12 @@ pub fn allow_microphone(controller: webview2_com::Microsoft::Web::WebView2::Win3
 
 #[cfg(test)]
 mod tests {
-    use super::{dpapi, hint};
+    use super::hint;
 
     #[test]
+    #[cfg(windows)] // Mac: braeuchte den echten Schluesselbund
     fn dpapi_hin_und_zurueck() {
+        use super::dpapi;
         let enc = dpapi(b"sk-test-1234567890abcd", true).unwrap();
         assert!(!enc.windows(4).any(|w| w == b"sk-t"), "darf nicht im Klartext stehen");
         assert_eq!(dpapi(&enc, false).unwrap(), b"sk-test-1234567890abcd");

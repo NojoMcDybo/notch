@@ -40,9 +40,7 @@ fn b64url(b: &[u8]) -> String {
 
 fn random(n: usize) -> String {
     let mut buf = vec![0u8; n];
-    unsafe {
-        let _ = windows::Win32::Security::Cryptography::BCryptGenRandom(None, &mut buf, windows::Win32::Security::Cryptography::BCRYPT_USE_SYSTEM_PREFERRED_RNG);
-    }
+    crate::share::os_random(&mut buf);
     b64url(&buf)
 }
 

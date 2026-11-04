@@ -1,6 +1,6 @@
 # Notch
 
-Dynamic-Island-artige Infoanzeige für Windows, bündig an der oberen Bildschirmkante.
+Dynamic-Island-artige Infoanzeige für Windows und macOS, bündig an der oberen Bildschirmkante.
 Tauri v2 + Rust + Vanilla-TS.
 
 ## Starten
@@ -374,6 +374,16 @@ Einstellungen › Anzeige › Musik › **Notch reagiert auf Musik**: *Aus* (Sta
 Notch prüft 20 s nach dem Start und danach alle 6 h, ob es auf GitHub eine neue Version gibt (Tray oder Einstellungen › App › **Nach Updates suchen** prüft sofort). **Mit Windows starten** (Einstellungen › App) trägt die laufende `notch.exe` unter `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` ein (`src-tauri/src/autostart.rs`, ohne Adminrechte). Gibt es eine, erscheint in der Notch „Update verfügbar“ mit **Installieren** / **Später**; installiert wird nur nach Klick und nur, wenn das Update mit dem Schlüssel aus `tauri.conf.json` (`plugins.updater.pubkey`) signiert ist.
 
 Neue Version veröffentlichen: Version in `package.json`, `src-tauri/Cargo.toml` und `src-tauri/tauri.conf.json` anheben, committen, Tag `v<version>` pushen. Der Workflow `.github/workflows/release.yml` baut, signiert (Secret `TAURI_SIGNING_PRIVATE_KEY`) und lädt Installer und `latest.json` ins Release. Der private Schlüssel liegt lokal in `%USERPROFILE%\.tauri\nojo-updater.key` und gehört nie ins Repo.
+
+## macOS
+
+Die Mac-App (`Notch_<version>_universal.dmg`, Intel und Apple Silicon, ab macOS 11) entsteht im selben Release wie der Windows-Installer (Job `macos` in `release.yml`) und aktualisiert sich genauso selbst. Zum Ausprobieren ohne Release: Zweig `macos` pushen; `.github/workflows/mac-test.yml` legt die `.dmg` unter Actions › Mac-Testbuild › Artifacts ab.
+
+- **Installieren:** `.dmg` öffnen, Notch in „Programme“ ziehen. Die App ist nur ad hoc signiert (kein Apple-Entwicklerkonto): beim ersten Start meldet macOS, dass es sie nicht prüfen kann → Systemeinstellungen › Datenschutz & Sicherheit › **Dennoch öffnen**. Danach startet sie normal.
+- **Läuft auf dem Mac:** Notch oben mittig über der Menüleiste (kein Dock-Symbol, Menüleisten-Symbol statt Infobereich), Andocken, Musik aus **Spotify** und **Musik** (AppleScript; beim ersten Mal fragt macOS je Player nach der Erlaubnis), Lautstärke, Zwischenablage-Verlauf (respektiert die Passwortmanager-Kennzeichen von nspasteboard.org), Ablage mit Quick-Look-Vorschauen, Konvertieren (ffmpeg aus Homebrew), Timer, Live-Sport, Live Activities, NotchDrop (Rechnername aus `scutil`), Einstellungen, Beim Anmelden starten (LaunchAgent `~/Library/LaunchAgents/de.nojo.notch.plist`), Updates. Schlüssel (OpenAI, Claude, Spotify) liegen AES-verschlüsselt im App-Ordner, der Dateischlüssel im Schlüsselbund.
+- **Nur unter Windows:** Bildschirm lesen/bedienen (Jarvis M3/M4), Controller, Frequenzbalken und Pegel aus dem Systemton, Ausblenden im Vollbild, „Senden an › iPhone“, Browser-Medien (YouTube usw.).
+- **Code:** gleiche Module wie unter Windows; was das Betriebssystem braucht, liegt in `src-tauri/src/mac/` (über `#[cfg_attr(target_os = "macos", path = …)]` in `lib.rs` eingebunden) oder als `#[cfg(windows)]`-Zweig im Modul. Fensterebene über der Menüleiste und Durchklicken: `mac_overlay` in `lib.rs`. Prüfen unter Windows ohne Mac: `rustup target add aarch64-apple-darwin`, dann `cargo check --target aarch64-apple-darwin` (für die C-Teile einiger Abhängigkeiten `CC_aarch64_apple_darwin`/`AR_aarch64_apple_darwin` auf ein Platzhalter-Skript setzen, das nur die Ausgabedatei anlegt).
+- Nach jedem Update fragt macOS einmal, ob Notch auf den Schlüsselbund zugreifen und (bei NotchDrop) eingehende Verbindungen annehmen darf — das kommt von der Ad-hoc-Signatur.
 
 ## Aufbau
 
