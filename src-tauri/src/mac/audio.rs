@@ -1,10 +1,9 @@
 //! Lautstaerke auf dem Mac: Systemlautstaerke des aktuellen Ausgabegeraets per AppleScript
-//! (`output volume`, ohne Erlaubnisabfrage). Einen Pegelmesser fuer den Equalizer gibt es auf dem Mac nicht —
-//! Systemton mitzuhoeren braucht dort die Bildschirmaufnahme-Freigabe.
+//! (`output volume`, ohne Erlaubnisabfrage). Den Pegel fuer den Equalizer liest ein Core-Audio-Tap (mac/loopback.rs).
 
 use serde::Serialize;
 use std::process::Command;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 #[derive(Serialize)]
 pub struct Volume {
@@ -36,7 +35,53 @@ fn read() -> Result<Volume, String> {
     Ok(Volume { level, muted, device: "Mac".into(), follows_player: false })
 }
 
-pub fn spawn_meter(_app: AppHandle) {}
+/// Pegel der Musik ("level", ~30x pro Sekunde) aus dem Systemton — wie unter Windows nur, solange etwas spielt
+/// und kein Vollbild vorne ist. Ohne macOS 14.6 bleibt die Notch bei ihrer ruhigen Animation.
+pub fn spawn_meter(app: AppHandle) {
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
+    if !crate::mac::loopback::supported() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut cap: Option<crate::mac::loopback::Loopback> = None;
+        let mut tried: Option<Instant> = None;
+        let mut buf = Vec::new();
+        let mut silent = 0u32;
+        let mut checked = Instant::now();
+        loop {
+            let playing = crate::media::last().is_some_and(|m| m.playing);
+            if !playing || crate::FULLSCREEN.load(Ordering::Relaxed) {
+                cap = None;
+                std::thread::sleep(Duration::from_millis(250));
+                continue;
+            }
+            // Ausgang gewechselt (Kopfhoerer, AirPlay): neu oeffnen; Fehlschlaege hoechstens alle 5 s versuchen
+            if checked.elapsed() > Duration::from_secs(3) {
+                checked = Instant::now();
+                let name = crate::mac::loopback::output_name();
+                if cap.as_ref().is_some_and(|c| Some(&c.device) != name.as_ref()) {
+                    cap = None;
+                }
+            }
+            if cap.is_none() && tried.is_none_or(|t| t.elapsed() > Duration::from_secs(5)) {
+                tried = Some(Instant::now());
+                cap = crate::mac::loopback::Loopback::open().map_err(|e| eprintln!("[notch] Pegel: {e}")).ok();
+            }
+            buf.clear();
+            if let Some(c) = &cap {
+                let _ = c.read(&mut buf);
+            }
+            let peak = buf.iter().fold(0.0f32, |m, v| m.max(v.abs())).min(1.0);
+            // Stille nicht dauernd schicken
+            silent = if peak < 0.001 { silent + 1 } else { 0 };
+            if silent < 3 {
+                let _ = app.emit("level", (peak * 1000.0).round() / 1000.0);
+            }
+            std::thread::sleep(Duration::from_millis(33));
+        }
+    });
+}
 
 #[tauri::command]
 pub async fn volume_get() -> Result<Volume, String> {

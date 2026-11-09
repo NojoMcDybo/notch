@@ -68,8 +68,11 @@ fn safe_part(s: &str) -> bool {
 fn load_games() -> Vec<App> {
     let mut out = Vec::new();
     // Epic: ein JSON je installiertem Spiel
-    let data = std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into());
-    for e in std::fs::read_dir(format!(r"{data}\Epic\EpicGamesLauncher\Data\Manifests")).into_iter().flatten().flatten() {
+    #[cfg(windows)]
+    let manifests = std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into()) + r"\Epic\EpicGamesLauncher\Data\Manifests";
+    #[cfg(not(windows))]
+    let manifests = std::env::var("HOME").unwrap_or_default() + "/Library/Application Support/Epic/EpicGamesLauncher/Data/Manifests";
+    for e in std::fs::read_dir(manifests).into_iter().flatten().flatten() {
         let Some(v) = std::fs::read_to_string(e.path()).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { continue };
         let f = |k: &str| v[k].as_str().unwrap_or("").to_string();
         let (ns, item, id) = (f("CatalogNamespace"), f("CatalogItemId"), f("AppName"));
@@ -83,14 +86,17 @@ fn load_games() -> Vec<App> {
     }
     // Steam: appmanifest_<id>.acf in jeder Bibliothek (libraryfolders.vdf).
     // shortcut: nur der Standard-Installationsort von Steam; liegt Steam woanders, die Registry (SteamPath) lesen.
+    #[cfg(windows)]
     let steam = std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into()) + r"\Steam";
-    let libs = std::fs::read_to_string(format!(r"{steam}\steamapps\libraryfolders.vdf")).unwrap_or_default();
+    #[cfg(not(windows))]
+    let steam = std::env::var("HOME").unwrap_or_default() + "/Library/Application Support/Steam";
+    let libs = std::fs::read_to_string(std::path::Path::new(&steam).join("steamapps").join("libraryfolders.vdf")).unwrap_or_default();
     let mut dirs: Vec<String> = vdf_values(&libs, "path").into_iter().map(|p| p.replace(r"\\", r"\")).collect();
     if dirs.is_empty() {
         dirs.push(steam);
     }
     for d in dirs {
-        for e in std::fs::read_dir(format!(r"{d}\steamapps")).into_iter().flatten().flatten() {
+        for e in std::fs::read_dir(std::path::Path::new(&d).join("steamapps")).into_iter().flatten().flatten() {
             let n = e.file_name().to_string_lossy().into_owned();
             if !(n.starts_with("appmanifest_") && n.ends_with(".acf")) {
                 continue;
@@ -305,6 +311,10 @@ pub fn find<'a>(query: &str, apps: &'a [App]) -> Vec<(u32, &'a App)> {
 /// Programmname aus dem Parsing-Namen: "…\Notepad++\notepad++.exe" -> "notepad++.exe", "x!Spotify" -> "spotify.exe"
 fn exe_of(id: &str) -> Option<String> {
     let l = id.to_lowercase();
+    // Mac: Katalog-id ist der Pfad der .app -> App-Name (win::focus_exe vergleicht damit)
+    if let Some(app) = l.strip_suffix(".app") {
+        return app.rsplit('/').next().map(String::from);
+    }
     if l.ends_with(".exe") {
         return l.rsplit(['\\', '/']).next().map(String::from);
     }
@@ -444,6 +454,18 @@ fn start_menu_lnk(name: &str) -> Option<std::path::PathBuf> {
 /// Epic-Launcher starten und die Spiel-Adresse schicken, sobald er laeuft (im Hintergrund, die Antwort kommt sofort).
 /// shortcut: Standard-Installationsort des Launchers; liegt er woanders, den Pfad aus der Registry lesen
 /// (HKCR\com.epicgames.launcher\shell\open\command).
+#[cfg(not(windows))]
+fn epic_then(handle: AppHandle, uri: String) -> Result<(), String> {
+    std::process::Command::new("open").args(["-a", "Epic Games Launcher"]).spawn().map_err(|e| format!("Epic-Launcher startet nicht: {e}"))?;
+    // shortcut: feste Wartezeit statt Prozess-Abfrage (der Prozessname des Mac-Launchers ist nicht verlaesslich)
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(15));
+        let _ = handle.opener().open_url(&uri, None::<&str>);
+    });
+    Ok(())
+}
+
+#[cfg(windows)]
 fn epic_then(handle: AppHandle, uri: String) -> Result<(), String> {
     let pf = std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into());
     let exe = format!(r"{pf}\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe");

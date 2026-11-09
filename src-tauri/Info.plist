@@ -12,5 +12,26 @@
   <string>Notch hört nur zu, solange du den Sprachassistenten aktiv benutzt.</string>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Notch tauscht über NotchDrop Dateien mit deinem iPhone im WLAN aus.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Notch hört den Systemton mit, damit die Notch im Takt der Musik zuckt. Nichts wird aufgenommen oder gesendet.</string>
+  <!-- Finder: Rechtsklick › Dienste › Fürs iPhone bereitlegen (mac/service.rs) -->
+  <key>NSServices</key>
+  <array>
+    <dict>
+      <key>NSMenuItem</key>
+      <dict>
+        <key>default</key>
+        <string>Fürs iPhone bereitlegen (Notch)</string>
+      </dict>
+      <key>NSMessage</key>
+      <string>sendToIphone</string>
+      <key>NSRequiredContext</key>
+      <dict/>
+      <key>NSSendFileTypes</key>
+      <array>
+        <string>public.item</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>

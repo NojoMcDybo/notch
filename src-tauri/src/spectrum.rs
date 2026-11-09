@@ -1,6 +1,6 @@
-//! Musik-Reaktion: greift per WASAPI-Loopback genau den Ausgang ab, auf dem der Player spielt
-//! (z. B. "Sonar - Media"; sonst den Windows-Standardausgang), analysiert ihn (music_style.rs)
-//! und schickt ~30x pro Sekunde "spectrum" an die Notch.
+//! Musik-Reaktion: greift den Ton ab, analysiert ihn (music_style.rs) und schickt ~30x pro Sekunde "spectrum"
+//! an die Notch. Windows: WASAPI-Loopback genau auf dem Ausgang, auf dem der Player spielt (z. B. "Sonar - Media";
+//! sonst der Standardausgang). Mac: Core-Audio-Tap auf den Standardausgang (mac/loopback.rs, ab macOS 14.6).
 //!
 //! Laeuft nur, wenn die Einstellung an ist, Musik spielt und kein Vollbild-Programm vorne ist —
 //! sonst ist der Abgriff komplett geschlossen und der Faden schlaeft.
@@ -9,10 +9,12 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
+#[cfg(windows)]
 use windows::Win32::Media::Audio::{
     eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDevice, AUDCLNT_BUFFERFLAGS_SILENT,
     AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, WAVEFORMATEX,
 };
+#[cfg(windows)]
 use windows::Win32::System::Com::{CoTaskMemFree, CLSCTX_ALL};
 
 use crate::music_style::{classify, weights, Analyzer, Style, StyleTracker, BANDS};
@@ -45,6 +47,10 @@ struct Payload {
     w: [u8; 3],
 }
 
+#[cfg(target_os = "macos")]
+use crate::mac::loopback::Loopback as Capture;
+
+#[cfg(windows)]
 struct Capture {
     _client: IAudioClient,
     cap: IAudioCaptureClient,
@@ -54,6 +60,7 @@ struct Capture {
     device: String,
 }
 
+#[cfg(windows)]
 impl Capture {
     fn open(dev: &IMMDevice) -> windows::core::Result<Self> {
         unsafe {
@@ -112,15 +119,38 @@ impl Capture {
     }
 }
 
-/// Ausgang des Players, sonst Standardausgang.
-fn target_device() -> Option<IMMDevice> {
+/// Ausgang des Players, sonst Standardausgang: (Name, Geraet)
+#[cfg(windows)]
+fn target() -> Option<(String, IMMDevice)> {
     let en = crate::audio::enumerator().ok()?;
-    crate::audio::player_exe()
+    let dev = crate::audio::player_exe()
         .and_then(|exe| crate::audio::player_device(&en, &exe))
-        .or_else(|| unsafe { en.GetDefaultAudioEndpoint(eRender, eConsole).ok() })
+        .or_else(|| unsafe { en.GetDefaultAudioEndpoint(eRender, eConsole).ok() })?;
+    Some((crate::audio::device_name(&dev), dev))
+}
+
+#[cfg(windows)]
+fn open(dev: &IMMDevice) -> Result<Capture, String> {
+    Capture::open(dev).map_err(|e| e.to_string())
+}
+
+/// Mac: immer der Standardausgang (der Tap hoert alles, was dort spielt)
+#[cfg(target_os = "macos")]
+fn target() -> Option<(String, ())> {
+    crate::mac::loopback::output_name().map(|n| (n, ()))
+}
+
+#[cfg(target_os = "macos")]
+fn open(_: &()) -> Result<Capture, String> {
+    Capture::open()
 }
 
 pub fn spawn(app: AppHandle) {
+    // Mac vor 14.6: kein Tap moeglich, gar nicht erst versuchen
+    #[cfg(target_os = "macos")]
+    if !crate::mac::loopback::supported() {
+        return;
+    }
     std::thread::spawn(move || {
         let mut cap: Option<Capture> = None;
         let mut analyzer: Option<Analyzer> = None;
@@ -156,10 +186,9 @@ pub fn spawn(app: AppHandle) {
             }
             if cap.is_none() || last_device.elapsed() > DEVICE_EVERY {
                 last_device = Instant::now();
-                if let Some(dev) = target_device() {
-                    let name = crate::audio::device_name(&dev);
+                if let Some((name, dev)) = target() {
                     if cap.as_ref().is_none_or(|c| c.device != name) {
-                        cap = Capture::open(&dev).map_err(|e| eprintln!("[notch] Musik-Reaktion: {name}: {e}")).ok();
+                        cap = open(&dev).map_err(|e| eprintln!("[notch] Musik-Reaktion: {name}: {e}")).ok();
                         if let Some(c) = &cap {
                             if analyzer.as_ref().is_none_or(|a| a.rate() != c.rate as f32) {
                                 analyzer = Some(Analyzer::new(c.rate));

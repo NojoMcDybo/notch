@@ -23,7 +23,7 @@ pub fn label(acc: &str) -> String {
             "ctrl" | "control" | "commandorcontrol" => "Strg".to_string(),
             "alt" | "option" => "Alt".to_string(),
             "shift" => "Umschalt".to_string(),
-            "super" | "meta" | "win" | "cmd" => "Win".to_string(),
+            "super" | "meta" | "win" | "cmd" => if cfg!(target_os = "macos") { "Cmd" } else { "Win" }.to_string(),
             "space" => "Leertaste".to_string(),
             "arrowup" => "↑".to_string(),
             "arrowdown" => "↓".to_string(),

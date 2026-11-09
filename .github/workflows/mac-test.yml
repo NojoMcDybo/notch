@@ -29,6 +29,12 @@ jobs:
         run: cargo test --lib
       # ohne Update-Signatur: die Testversion bietet sich nicht als Update an
       - run: npx tauri build --target universal-apple-darwin --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      # CoreAudio muss schwach gelinkt sein (build.rs), sonst startet die App vor macOS 14.2 nicht
+      - name: Schwach gelinkt pruefen
+        run: |
+          bin=$(ls src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app/Contents/MacOS/* | head -1)
+          nm -m -arch arm64 "$bin" | grep AudioHardwareCreateProcessTap
+          nm -m -arch arm64 "$bin" | grep AudioHardwareCreateProcessTap | grep -q weak
       - uses: actions/upload-artifact@v4
         with:
           name: Notch-Mac

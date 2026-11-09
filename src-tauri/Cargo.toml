@@ -67,11 +67,19 @@ features = [
   "Graphics_Imaging",
 ]
 
-# macOS: Fensterebene ueber der Menueleiste, Zwischenablage, Schluesselbund (alles schon ueber Tauri im Lockfile)
+# macOS: Fensterebene, Zwischenablage, Schluesselbund, Fenster/Tasten (CoreGraphics), Bedienungshilfen (AX),
+# Controller, Texterkennung (Vision), Systemton (cpal)
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray", "NSURL"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem", "NSEvent"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray", "NSURL", "NSDictionary", "NSValue", "NSProcessInfo", "NSError", "NSEnumerator", "NSObject"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSPasteboard", "NSPasteboardItem", "NSEvent", "NSRunningApplication", "NSWorkspace", "NSApplication", "NSResponder"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray", "CFDictionary", "CFString", "CFNumber", "CFBase", "CFCGTypes", "CFURL"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGWindow", "CGEvent", "CGEventTypes", "CGDirectDisplay", "CGRemoteOperation", "CGEventSource"] }
+objc2-application-services = { version = "0.3", default-features = false, features = ["std", "libc", "AXUIElement", "AXError", "AXAttributeConstants", "AXActionConstants", "AXRoleConstants", "HIServices", "AXValue"] }
+objc2-game-controller = { version = "0.3", default-features = false, features = ["std", "GCController", "GCExtendedGamepad", "GCControllerButtonInput", "GCControllerDirectionPad", "GCControllerElement", "GCPhysicalInputProfile", "GCControllerAxisInput"] }
+objc2-vision = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "VNRequest", "VNRecognizeTextRequest", "VNRequestHandler", "VNObservation", "VNTypes"] }
+# Systemton abgreifen (Musik-Reaktion, Pegel): Loopback ueber Core-Audio-Tap, ab macOS 14.6
+cpal = "0.18"
 security-framework = "3"
 ring = "0.17"
 

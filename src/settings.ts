@@ -1052,8 +1052,11 @@ function renderShare() {
       invoke("iphone_sendto", { on: v }).catch((e) => ksBox.replaceChildren(el("small", "error", String(e))));
     });
     sendto.querySelector("span")!.append(el("small", "", "Rechtsklick auf eine Datei › Senden an › iPhone (Notch)"));
-    // „Senden an“ gibt es nur im Windows-Explorer
-    ksOpts.push(...(navigator.userAgent.includes("Mac") ? [push] : [push, sendto]));
+    // Mac: kein Schalter — der Finder-Dienst steht in der App selbst (Info.plist), nur ein Hinweis
+    const finder = el("div", "toggle-row");
+    finder.append(el("span", "", "Finder: Fürs iPhone bereitlegen"));
+    finder.querySelector("span")!.append(el("small", "", "Rechtsklick auf eine Datei › Dienste › Fürs iPhone bereitlegen (Notch)"));
+    ksOpts.push(...(navigator.userAgent.includes("Mac") ? [push, finder] : [push, sendto]));
   }
   ks.append(ksHead, phLine, ...ksOpts, ksRow, ksBox);
   ways.append(ks, ls, qr);
@@ -1112,8 +1115,10 @@ function renderShare() {
     ["#30d158", icon("share"), "iPhone → PC", "Teilen › Notch"],
     ["#ff9f0a", icon("phone"), "Zwischenablage & Abholen", "Hinten 2× aufs iPhone tippen"],
     ["#5e5ce6", icon("tray"), "PC → iPhone", "Ablage › Rechtsklick › An iPhone senden"],
-    ["#ff375f", icon("folder"), "Aus dem Explorer", "Rechtsklick › Senden an › iPhone (Notch)"],
-  ].filter((s) => !(navigator.userAgent.includes("Mac") && s[2] === "Aus dem Explorer")) as [string, string, string, string][];
+    navigator.userAgent.includes("Mac")
+      ? ["#ff375f", icon("folder"), "Aus dem Finder", "Rechtsklick › Dienste › Fürs iPhone bereitlegen (Notch)"]
+      : ["#ff375f", icon("folder"), "Aus dem Explorer", "Rechtsklick › Senden an › iPhone (Notch)"],
+  ];
   for (const [color, svgHtml, title, how] of steps) {
     const row = el("div", "drop-row");
     const t = el("span", "drop-txt");
@@ -1328,7 +1333,7 @@ function renderShortcuts() {
   const msg = el("p", "fine tight sc-msg" + (shortcutMsg?.error ? " error" : ""), shortcutMsg?.text ?? "");
   msg.setAttribute("role", "status");
   parts.push(msg);
-  parts.push(el("p", "fine", "Controller: mindestens zwei Tasten gleichzeitig (Xbox und alles, was sich als solcher meldet – GameSir, Steam Input). Das Spiel sieht dieselben Tasten; wer das nicht will, legt die Kombination z. B. in Steam Input auf Tasten, die das Spiel nicht nutzt. Tastatur: mit Strg, Alt oder Win – F13 bis F24 gehen auch allein."));
+  parts.push(el("p", "fine", `Controller: mindestens zwei Tasten gleichzeitig (Xbox und alles, was sich als solcher meldet – GameSir, Steam Input). Das Spiel sieht dieselben Tasten; wer das nicht will, legt die Kombination z. B. in Steam Input auf Tasten, die das Spiel nicht nutzt. Tastatur: mit Strg, Alt oder ${navigator.userAgent.includes("Mac") ? "Cmd" : "Win"} – F13 bis F24 gehen auch allein.`));
   box.replaceChildren(...parts);
 }
 

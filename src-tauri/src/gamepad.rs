@@ -1,5 +1,5 @@
-//! Controller-Kuerzel (XInput — funktioniert auch, waehrend ein Spiel vorne ist; Xbox-Controller und
-//! alles, was sich als solcher meldet: GameSir, Steam Input …). RB = R1, RT = R2, rechter Stick = R3.
+//! Controller-Kuerzel (Windows: XInput, Mac: GameController — funktioniert auch, waehrend ein Spiel vorne ist;
+//! Xbox-/PlayStation-Controller und alles, was sich als solcher meldet). RB = R1, RT = R2, rechter Stick = R3.
 //!
 //! Die Kombinationen sind einstellbar (Einstellungen › App › Controller, settings "/shortcuts/pad"); Standard:
 //!   Steuerkreuz links + RB   Notch klein heraus   } nur im Vollbild mit "Im Vollbild: Am Rand";
@@ -10,8 +10,6 @@
 //! Schickt "pad" ("off" | "compact" | "expanded"), "voice-arm" (ms bis zum Zuhoeren, 0 = abgebrochen)
 //! und "voice-ptt" (true/false) an die Notch. Beim Aufnehmen im Einstellungsfenster (pad_capture) loest
 //! nichts aus; stattdessen geht "pad-buttons" (gedrueckte Tasten) ans Fenster.
-
-#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -248,17 +246,83 @@ impl TalkGate {
     }
 }
 
-/// shortcut: Controller gibt es vorerst nur unter Windows (XInput); auf dem Mac waere GameController.framework der Weg.
-#[cfg(not(windows))]
-pub fn spawn(_app: AppHandle) {}
+/// Zustand aller verbundenen Controller: (Tasten wie XInput-Bits, LT 0..255, RT 0..255)
+#[cfg(windows)]
+struct Pads {
+    connected: [bool; 4],
+    last_scan: Option<Instant>,
+}
 
 #[cfg(windows)]
+impl Pads {
+    fn new() -> Self {
+        Self { connected: [false; 4], last_scan: None }
+    }
+    fn poll(&mut self) -> Vec<(u16, u8, u8)> {
+        // nicht verbundene Plaetze nur alle 2 s abfragen (XInput ist dort langsam)
+        let scan = self.last_scan.is_none_or(|t| t.elapsed() > Duration::from_secs(2));
+        if scan {
+            self.last_scan = Some(Instant::now());
+        }
+        let mut out = Vec::new();
+        for (i, c) in self.connected.iter_mut().enumerate() {
+            if !*c && !scan {
+                continue;
+            }
+            let mut st = XINPUT_STATE::default();
+            *c = unsafe { XInputGetState(i as u32, &mut st) } == 0;
+            if *c {
+                out.push((st.Gamepad.wButtons.0, st.Gamepad.bLeftTrigger, st.Gamepad.bRightTrigger));
+            }
+        }
+        out
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct Pads;
+
+#[cfg(target_os = "macos")]
+impl Pads {
+    fn new() -> Self {
+        Pads
+    }
+    /// Alle Controller mit Standard-Belegung, in XInput-Bits uebersetzt (Menue = Start, Optionen = Back)
+    fn poll(&mut self) -> Vec<(u16, u8, u8)> {
+        use objc2_game_controller::{GCController, GCControllerButtonInput};
+        let on = |b: &GCControllerButtonInput, bit: u16| if unsafe { b.isPressed() } { bit } else { 0 };
+        let level = |b: &GCControllerButtonInput| (unsafe { b.value() }.clamp(0.0, 1.0) * 255.0) as u8;
+        let mut out = Vec::new();
+        for c in unsafe { GCController::controllers() }.iter() {
+            let Some(g) = (unsafe { c.extendedGamepad() }) else { continue };
+            unsafe {
+                let d = g.dpad();
+                let mut b = on(&d.up(), 0x0001) | on(&d.down(), 0x0002) | on(&d.left(), 0x0004) | on(&d.right(), 0x0008);
+                b |= on(&g.buttonMenu(), 0x0010) | on(&g.leftShoulder(), 0x0100) | on(&g.rightShoulder(), 0x0200);
+                b |= on(&g.buttonA(), 0x1000) | on(&g.buttonB(), 0x2000) | on(&g.buttonX(), 0x4000) | on(&g.buttonY(), 0x8000);
+                for (x, bit) in [(g.buttonOptions(), 0x0020), (g.leftThumbstickButton(), 0x0040), (g.rightThumbstickButton(), 0x0080)] {
+                    if let Some(x) = x {
+                        b |= on(&x, bit);
+                    }
+                }
+                out.push((b, level(&g.leftTrigger()), level(&g.rightTrigger())));
+            }
+        }
+        out
+    }
+}
+
+/// Mac: Controller-Eingaben auch bekommen, waehrend eine andere App (das Spiel) vorne ist. Auf dem Hauptfaden aufrufen.
+#[cfg(target_os = "macos")]
+pub fn mac_background() {
+    unsafe { objc2_game_controller::GCController::setShouldMonitorBackgroundEvents(true) };
+}
+
 pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
         let mut toggle = Toggle::new();
         let mut talk = TalkGate::new();
-        let mut connected = [false; 4];
-        let mut last_scan: Option<Instant> = None;
+        let mut pads = Pads::new();
         let mut cfg = pad_cfg();
         let mut cfg_at = Instant::now();
         let mut shown: Vec<&'static str> = Vec::new();
@@ -270,34 +334,22 @@ pub fn spawn(app: AppHandle) {
             }
             let capture = CAPTURE.load(Ordering::Relaxed);
             let mut all: Vec<&'static str> = Vec::new();
-            // nicht verbundene Plaetze nur alle 2 s abfragen (XInput ist dort langsam)
-            let scan = last_scan.is_none_or(|t| t.elapsed() > Duration::from_secs(2));
-            if scan {
-                last_scan = Some(Instant::now());
-            }
             let mut pressed = Pressed { peek: Mode::Off, talk: false };
-            for (i, c) in connected.iter_mut().enumerate() {
-                if !*c && !scan {
+            let states = pads.poll();
+            for &(b, lt, rt) in &states {
+                if capture {
+                    for n in names(b, lt, rt) {
+                        if !all.contains(&n) {
+                            all.push(n);
+                        }
+                    }
                     continue;
                 }
-                let mut st = XINPUT_STATE::default();
-                *c = unsafe { XInputGetState(i as u32, &mut st) } == 0;
-                if *c {
-                    let (b, lt, rt) = (st.Gamepad.wButtons.0, st.Gamepad.bLeftTrigger, st.Gamepad.bRightTrigger);
-                    if capture {
-                        for n in names(b, lt, rt) {
-                            if !all.contains(&n) {
-                                all.push(n);
-                            }
-                        }
-                        continue;
-                    }
-                    let p = read(b, lt, rt, &cfg);
-                    if p.peek != Mode::Off {
-                        pressed.peek = p.peek;
-                    }
-                    pressed.talk |= p.talk;
+                let p = read(b, lt, rt, &cfg);
+                if p.peek != Mode::Off {
+                    pressed.peek = p.peek;
                 }
+                pressed.talk |= p.talk;
             }
 
             // Aufnehmen: gedrueckte Tasten ans Einstellungsfenster (nur bei Aenderung)
@@ -324,8 +376,7 @@ pub fn spawn(app: AppHandle) {
             }
 
             // ohne Controller selten nachsehen
-            let any = connected.iter().any(|&c| c);
-            std::thread::sleep(Duration::from_millis(if any { 16 } else { 250 }));
+            std::thread::sleep(Duration::from_millis(if states.is_empty() { 250 } else { 16 }));
         }
     });
 }

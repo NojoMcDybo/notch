@@ -1168,10 +1168,12 @@ pub fn sanitize_settings(v: &Value) -> Value {
 }
 
 /// Ist Arena installiert? (meldet das Schema arena:// bei Windows an) — dann bietet die Notch „In Arena“ an
-#[cfg(not(windows))]
+/// Mac: gibt es eine App fuer arena:// ?
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub fn arena_installed() -> bool {
-    false
+    let url = objc2_foundation::NSURL::URLWithString(&objc2_foundation::NSString::from_str("arena://open"));
+    url.is_some_and(|u| objc2_app_kit::NSWorkspace::sharedWorkspace().URLForApplicationToOpenURL(&u).is_some())
 }
 
 #[cfg(windows)]

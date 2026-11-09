@@ -14,18 +14,14 @@ mod jarvis;
 mod laya;
 mod lol;
 mod memory;
-#[cfg_attr(target_os = "macos", path = "mac/screen.rs")]
 mod screen;
 mod spotify;
 #[cfg_attr(target_os = "macos", path = "mac/media.rs")]
 mod media;
-// Musikstil kommt aus dem Systemton (spectrum.rs) — den gibt es nur unter Windows
-#[cfg_attr(not(windows), allow(dead_code))]
 mod music_style;
 mod open;
 mod share;
 mod shelf;
-#[cfg_attr(target_os = "macos", path = "mac/spectrum.rs")]
 mod spectrum;
 mod sport;
 mod shortcuts;
@@ -33,6 +29,11 @@ mod thumb;
 mod timer;
 mod update;
 mod voice;
+#[cfg(target_os = "macos")]
+mod mac {
+    pub mod loopback;
+    pub mod service;
+}
 #[cfg_attr(target_os = "macos", path = "mac/win.rs")]
 mod win;
 
@@ -419,6 +420,10 @@ fn spawn_pointer(w: WebviewWindow, hwnd: isize) {
             win::enforce(hwnd, !inside_prev);
             // Klick auf die Notch soll dem aktuellen Programm nicht den Fokus klauen
             let fg = win::foreground();
+            // Mac: vorne ist „die Notch“ auch, wenn das Einstellungsfenster den Fokus hat — das darf ihn behalten
+            #[cfg(target_os = "macos")]
+            // (nur alle ~250 ms nachfragen: is_focused geht ueber den Hauptfaden)
+            let fg = if fg == hwnd && (tick % 15 != 0 || !w.is_focused().unwrap_or(false)) { 0 } else { fg };
             if fg == hwnd {
                 let hold = activities::now_ms() < FOCUS_HOLD.load(Ordering::Relaxed);
                 if last_fg != 0 && !DOCK_DRAG.load(Ordering::Relaxed) && !KEYBOARD.load(Ordering::Relaxed) && !hold {
@@ -522,6 +527,8 @@ fn mac_overlay(app: &mut tauri::App, w: &WebviewWindow) {
     use objc2::runtime::AnyObject;
     app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     let _ = w.set_ignore_cursor_events(true);
+    gamepad::mac_background();
+    mac::service::register(app.handle());
     if let Ok(ns) = w.ns_window() {
         let ns = ns as *mut AnyObject;
         // NSStatusWindowLevel (25) liegt ueber der Menueleiste (24)
@@ -657,8 +664,9 @@ pub fn run() {
             place(&w, None);
             #[cfg(windows)]
             let hwnd = w.hwnd().map(|h| h.0 as isize).unwrap_or(0);
+            // Mac: die eigene pid (win.rs arbeitet dort mit Apps statt Fenstern)
             #[cfg(not(windows))]
-            let hwnd = 0;
+            let hwnd = std::process::id() as isize;
             win::enforce(hwnd, true);
             win::show_noactivate(hwnd);
             #[cfg(windows)]

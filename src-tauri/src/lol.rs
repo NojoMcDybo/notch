@@ -48,18 +48,27 @@ fn queue(modus: &str) -> Option<(u32, &'static str)> {
 
 /// Installationsordner: Riot-Metadaten (product_install_full_path), sonst der Standardpfad (wie Vantage)
 fn install_dir() -> PathBuf {
+    #[cfg(windows)]
     let meta = PathBuf::from(r"C:\ProgramData\Riot Games\Metadata\league_of_legends.live\league_of_legends.live.product_settings.yaml");
+    #[cfg(not(windows))]
+    let meta = PathBuf::from("/Users/Shared/Riot Games/Metadata/league_of_legends.live/league_of_legends.live.product_settings.yaml");
     if let Ok(text) = std::fs::read_to_string(meta) {
         for line in text.lines() {
             if let Some(v) = line.trim().strip_prefix("product_install_full_path:") {
                 let p = PathBuf::from(v.trim().trim_matches('"'));
+                // Mac: Pfad der .app, die Lockfile liegt darin
+                let p = if p.extension().is_some_and(|e| e == "app") { p.join("Contents").join("LoL") } else { p };
                 if p.exists() {
                     return p;
                 }
             }
         }
     }
-    PathBuf::from(r"C:\Riot Games\League of Legends")
+    #[cfg(windows)]
+    return PathBuf::from(r"C:\Riot Games\League of Legends");
+    // Mac: die Lockfile liegt in der .app unter Contents/LoL
+    #[cfg(not(windows))]
+    PathBuf::from("/Applications/League of Legends.app/Contents/LoL")
 }
 
 struct Lcu {
