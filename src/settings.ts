@@ -918,7 +918,7 @@ function renderSport() {
 
 type ShareDev = { fp: string; alias: string; model: string; kind: string; recent: boolean };
 type SharePhone = { name: string; present: boolean; battery: number | null; seen: string | null; ntfy: string | null; sendto: boolean };
-type ShareState = { on: boolean; running: boolean; error: string; ip: string; port: number; alias: string; folder: string; devices: ShareDev[]; phone: SharePhone | null };
+type ShareState = { on: boolean; running: boolean; error: string; ip: string; port: number; alias: string; folder: string; devices: ShareDev[]; phone: SharePhone | null; ancs?: { on: boolean; state: string; device: string; supported: boolean }; cam?: { supported: boolean; on?: boolean; installed?: boolean; running?: boolean; url?: string; streaming?: boolean; fps?: number; error?: string } };
 let share: ShareState | null = null;
 
 const ICON_PHONE = icon("phone");
@@ -1057,6 +1057,45 @@ function renderShare() {
     finder.append(el("span", "", "Finder: Fürs iPhone bereitlegen"));
     finder.querySelector("span")!.append(el("small", "", "Rechtsklick auf eine Datei › Dienste › Fürs iPhone bereitlegen (Notch)"));
     ksOpts.push(...(navigator.userAgent.includes("Mac") ? [push, finder] : [push, sendto]));
+  }
+  // Anrufe und Nachrichten per Bluetooth (ancs.rs): PC wie eine Uhr am iPhone koppeln, nur Windows
+  if (share?.ancs?.supported) {
+    const an = share.ancs;
+    const calls = optToggle("Anrufe und Nachrichten vom iPhone", () => an.on, (v) => { invoke("ancs_set", { on: v }).catch(() => {}); });
+    const state = an.state === "verbunden" ? `Verbunden mit ${an.device}` : an.state === "suche" ? "Sucht das iPhone …" : "";
+    calls.querySelector("span")!.append(el("small", "", [state, "Einmalig: Windows › Bluetooth › Gerät hinzufügen › iPhone koppeln, am iPhone Bluetooth › (i) › „Benachrichtigungen anzeigen“ erlauben. Nachrichtentexte erscheinen dann in der Notch."].filter(Boolean).join(" · ")));
+    ksOpts.push(calls);
+  }
+  // iPhone als Webcam (cam.rs, vcam.rs): virtuelle Kamera „Notch iPhone“, Safari am iPhone schickt die Bilder, nur Windows
+  if (share?.cam?.supported) {
+    const cm = share.cam;
+    const cam = optToggle("iPhone als Webcam", () => !!cm.on, (v) => {
+      // beim ersten Einschalten fragt Windows nach Administratorrechten (virtuelle Kamera einrichten)
+      invoke("cam_set", { on: v }).catch((e) => ksBox.replaceChildren(el("small", "error", String(e))));
+    });
+    const line = cm.streaming ? `Sendet${cm.fps ? ` · ${cm.fps} Bilder/s` : ""}`
+      : cm.error ? cm.error
+      : cm.on && cm.running ? "Bereit: Kamera „Notch iPhone“ in Teams, Zoom & Co. wählen"
+      : "Einmalig fragt Windows nach Administratorrechten (Kamera einrichten)";
+    cam.querySelector("span")!.append(el("small", cm.error ? "error" : "", line));
+    ksOpts.push(cam);
+    if (cm.on && cm.url) {
+      const camBtn = el("button", "button secondary", "QR-Code für die iPhone-Kamera");
+      camBtn.addEventListener("click", async () => {
+        try {
+          const r = await invoke<{ url: string; svg: string }>("cam_setup");
+          const img = new Image();
+          img.src = `data:image/svg+xml;utf8,${encodeURIComponent(r.svg)}`;
+          img.alt = "QR-Code für die Kameraseite";
+          img.className = "qr";
+          img.title = r.url;
+          ksBox.replaceChildren(img, el("small", "faint", "Mit der iPhone-Kamera scannen › Öffnen › „Nicht privat“ › Details › Trotzdem besuchen › Kamera starten"));
+        } catch (e) {
+          ksBox.replaceChildren(el("small", "error", String(e)));
+        }
+      });
+      ksRow.append(camBtn);
+    }
   }
   ks.append(ksHead, phLine, ...ksOpts, ksRow, ksBox);
   ways.append(ks, ls, qr);

@@ -9,7 +9,15 @@ mod clipboard;
 mod clipboard_sys;
 mod convert;
 mod gamepad;
+mod ancs;
+#[cfg(windows)]
+mod cam;
+#[cfg(not(windows))]
+#[path = "cam_stub.rs"]
+mod cam;
 mod iphone;
+#[cfg(windows)]
+mod vcam;
 mod jarvis;
 mod laya;
 mod lol;
@@ -543,6 +551,22 @@ fn mac_overlay(app: &mut tauri::App, w: &WebviewWindow) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// `notch.exe --vcam-setup` (mit Administratorrechten gestartet): Rueckgabe = Exitcode
+pub fn vcam_setup() -> i32 {
+    #[cfg(windows)]
+    {
+        return match vcam::system_install() {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("[notch] vcam-setup: {e}");
+                1
+            }
+        };
+    }
+    #[cfg(not(windows))]
+    1
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -655,7 +679,10 @@ pub fn run() {
             iphone::iphone_unpair,
             iphone::iphone_offer,
             iphone::iphone_push,
-            iphone::iphone_sendto
+            iphone::iphone_sendto,
+            ancs::ancs_set,
+            cam::cam_set,
+            cam::cam_setup
         ])
         .setup(|app| {
             shelf::load(app.handle());
@@ -723,6 +750,8 @@ pub fn run() {
             thumb::spawn();
             share::spawn(app.handle().clone());
             iphone::spawn(app.handle().clone());
+            ancs::spawn(app.handle().clone());
+            cam::spawn(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

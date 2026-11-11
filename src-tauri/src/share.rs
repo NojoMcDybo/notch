@@ -1091,6 +1091,8 @@ pub fn spawn(app: AppHandle) {
 
 fn status(app: &AppHandle) -> Value {
     let folder = folder(app).to_string_lossy().to_string();
+    // vor der Sperre holen: die Kamera fragt selbst nach der Adresse (addr() sperrt STATE ebenfalls)
+    let (phone, ancs, cam) = (crate::iphone::status_json(app), crate::ancs::status_json(), crate::cam::status_json(app));
     let st = STATE.lock().unwrap();
     let mut devices: Vec<&Device> = st.devices.values().collect();
     devices.sort_by_key(|d| d.seen.map(|s| s.elapsed()).unwrap_or(Duration::MAX));
@@ -1104,8 +1106,15 @@ fn status(app: &AppHandle) -> Value {
         "folder": folder,
         "devices": devices.iter().map(|d| json!({ "fp": d.fp, "alias": d.alias, "model": d.model, "kind": d.kind, "recent": d.seen.is_some_and(|s| s.elapsed() < Duration::from_secs(120)) })).collect::<Vec<_>>(),
         "offers": st.offers.iter().map(|o| json!({ "id": o.id, "name": o.name, "size": o.size })).collect::<Vec<_>>(),
-        "phone": crate::iphone::status_json(app),
+        "phone": phone,
+        "ancs": ancs,
+        "cam": cam,
     })
+}
+
+/// Adresse dieses PCs im lokalen Netz (unabhaengig davon, ob der Austausch-Server laeuft)
+pub(crate) fn lan_ip() -> String {
+    local_ip().map(|i| i.to_string()).unwrap_or_default()
 }
 
 /// Adresse im WLAN, Port, laeuft der Server

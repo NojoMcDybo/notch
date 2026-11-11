@@ -96,6 +96,15 @@
       <span class="tile" style="background:#5e5ce6"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a8 8 0 0 1 0 8M9.5 6a12 12 0 0 1 0 12M13 4a16 16 0 0 1 0 16"/></svg></span>
       <span class="txt"><b>NFC-Aufkleber</b><small>Kurzbefehle › Automation › NFC › Sofort ausführen › Notch</small></span>
     </div>
+    <div class="row">
+      <span class="tile" style="background:#30d158"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg></span>
+      <span class="txt"><b>Nachrichten am PC</b><small>Besser per Bluetooth (Notch › Einstellungen › iPhone). Ersatz: Kurzbefehle › Automation › Nachricht › Sofort ausführen › Inhalte von URL abrufen <code>Adresse/nachricht</code> · POST · Text = Kurzbefehleingabe</small></span>
+    </div>
+    <a class="row" id="camrow" href="{{CAMURL}}">
+      <span class="tile" style="background:#ff375f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l5-3v10l-5-3z"/><rect x="3" y="6" width="12" height="12" rx="2.5"/></svg></span>
+      <span class="txt"><b>iPhone als Webcam</b><small>Öffnen › „Nicht privat“ › Details › Trotzdem besuchen (einmalig)</small></span>
+      <span class="chev">›</span>
+    </a>
   </div>
 
   <details class="list">
@@ -140,6 +149,9 @@
     setTimeout(() => stop.abort(), 2500);
     fetch(host + "/hallo", { mode: "no-cors", cache: "no-store", signal: stop.signal }).then(() => useAddr(host)).catch(() => {});
   }
+  // Webcam: nur anbieten, wenn sie in der Notch eingeschaltet ist
+  const camRow = document.getElementById("camrow");
+  if (!camRow.getAttribute("href")) camRow.hidden = true;
   // ntfy: Schritt immer zeigen; ist es in der Notch ausgeschaltet, steht dort, wo man es einschaltet
   if (document.getElementById("topic").value.trim() === "") {
     document.getElementById("topicShow").textContent = "Aus – in der Notch: Einstellungen › iPhone › Mitteilung";

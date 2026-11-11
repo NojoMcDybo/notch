@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>iPhone-Kamera</title>
+<style>
+  :root { --bg: #000; --card: #1c1c1e; --fg: #fff; --fg2: #8e8e93; --green: #30d158; --blue: #0a84ff; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f2f2f7; --card: #fff; --fg: #000; --fg2: #8a8a8e; --green: #34c759; --blue: #007aff; } }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font: 17px/1.3 -apple-system, system-ui, sans-serif; min-height: 100vh; padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; }
+  main { max-width: 560px; width: 100%; margin: 0 auto; flex: 1; display: flex; flex-direction: column; gap: 14px; }
+  h1 { font-size: 24px; font-weight: 700; text-align: center; margin-top: 10px; }
+  .sub { color: var(--fg2); font-size: 15px; text-align: center; margin-top: -8px; }
+  .view { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 16px; overflow: hidden; }
+  video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .view .badge { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,.55); color: #fff; font-size: 13px; padding: 3px 9px; border-radius: 99px; }
+  .view .badge.live { background: var(--green); }
+  button { width: 100%; padding: 15px; font: inherit; font-weight: 600; border: 0; border-radius: 14px; background: var(--blue); color: #fff; }
+  button.second { background: var(--card); color: var(--fg); font-weight: 400; }
+  button:disabled { opacity: .5; }
+  .hint { color: var(--fg2); font-size: 14px; text-align: center; }
+  .err { color: #ff453a; font-size: 15px; text-align: center; }
+  canvas { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>iPhone-Kamera</h1>
+  <p class="sub">Webcam für {{NAME}}</p>
+  <div class="view"><video id="v" playsinline muted autoplay></video><span class="badge" id="badge">Aus</span></div>
+  <button id="go" type="button">Kamera starten</button>
+  <button id="flip" class="second" type="button" hidden>Vorder-/Rückkamera wechseln</button>
+  <p class="err" id="err" hidden></p>
+  <p class="hint" id="hint">iPhone quer halten, Bildschirm an lassen und diese Seite offen halten. Am PC erscheint die Kamera „Notch iPhone“.</p>
+  <canvas id="c" width="1280" height="720"></canvas>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const v = $("v"), c = $("c"), ctx = c.getContext("2d"), go = $("go"), flip = $("flip"), badge = $("badge"), err = $("err");
+  let stream = null, facing = "user", running = false, busy = false, last = 0, wake = null;
+
+  function fail(msg) { err.textContent = msg; err.hidden = !msg; }
+
+  async function open() {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+      audio: false,
+    });
+    v.srcObject = stream;
+    await v.play();
+  }
+
+  async function start() {
+    fail("");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      fail("Kamera nicht verfügbar: Die Seite muss über https geöffnet sein (Adresse aus der Notch).");
+      return;
+    }
+    try { await open(); } catch (e) { fail("Kamera nicht freigegeben (" + (e && e.name || e) + "). In den Safari-Einstellungen für diese Seite erlauben."); return; }
+    try { wake = await navigator.wakeLock.request("screen"); } catch {}
+    running = true; go.textContent = "Beenden"; flip.hidden = false;
+    loop();
+  }
+
+  function stop() {
+    running = false;
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null; v.srcObject = null;
+    if (wake) { wake.release().catch(() => {}); wake = null; }
+    go.textContent = "Kamera starten"; flip.hidden = true; badge.textContent = "Aus"; badge.className = "badge";
+  }
+
+  // Bild so in 1280x720 zeichnen, dass es das Feld fuellt (Hochkant wird mittig beschnitten)
+  function draw() {
+    const vw = v.videoWidth, vh = v.videoHeight;
+    if (!vw || !vh) return false;
+    const s = Math.max(1280 / vw, 720 / vh), dw = vw * s, dh = vh * s;
+    ctx.drawImage(v, (1280 - dw) / 2, (720 - dh) / 2, dw, dh);
+    return true;
+  }
+
+  async function loop() {
+    while (running) {
+      const now = performance.now();
+      if (!busy && now - last >= 33 && v.readyState >= 2 && draw()) {
+        last = now;
+        const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.72));
+        if (blob) {
+          busy = true;
+          fetch("frame", { method: "POST", body: blob, cache: "no-store" })
+            .then((r) => { if (!r.ok) throw new Error(r.status); badge.textContent = "Sendet"; badge.className = "badge live"; fail(""); })
+            .catch((e) => { badge.textContent = "Keine Verbindung"; badge.className = "badge"; fail("PC nicht erreichbar (" + e.message + ")."); })
+            .finally(() => { busy = false; });
+        }
+      }
+      await new Promise((r) => setTimeout(r, 8));
+    }
+  }
+
+  go.addEventListener("click", () => (running ? stop() : start()));
+  flip.addEventListener("click", async () => { facing = facing === "user" ? "environment" : "user"; try { await open(); } catch (e) { fail("Wechsel nicht möglich"); } });
+  // Bildschirm aus/Tab gewechselt: Safari haelt die Kamera an; beim Zurueckkommen neu starten
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState === "visible" && running) {
+      try { await open(); wake = await navigator.wakeLock.request("screen"); } catch {}
+    }
+  });
+</script>
+</body>
+</html>

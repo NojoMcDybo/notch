@@ -87,6 +87,15 @@ fn token(app: &AppHandle) -> String {
     t.clone()
 }
 
+/// Schluessel fuer die HTTPS-Kameraseite (cam.rs)
+pub(crate) fn token_ok(app: &AppHandle, t: &str) -> bool {
+    same(t, &token(app))
+}
+
+pub(crate) fn token_for(app: &AppHandle) -> String {
+    token(app)
+}
+
 fn new_token(app: &AppHandle) -> String {
     let t = share::random_hex(16);
     if let Some(f) = data_file(app, "iphone-token.txt") {
@@ -175,6 +184,51 @@ fn hello_pop(app: &AppHandle) {
         a.unit = Some("%".into());
     }
     a.ttl = Some(4);
+    activities::upsert(app, a);
+}
+
+// ---------- Anrufe und Nachrichten ----------
+
+const CALL_ID: &str = "notch:iphone:call";
+const MSG_ID: &str = "notch:iphone:msg";
+/// Klingeln hoert spaetestens nach so vielen Sekunden auf, auch wenn das „entfernt“ des iPhones fehlt
+const RING_FOR: u64 = 45;
+
+/// Eingehender Anruf: klappt die Notch auf, Annehmen/Ablehnen wirken am iPhone (Ton bleibt dort)
+pub(crate) fn show_call(app: &AppHandle, who: &str, via: &str, can_answer: bool, can_decline: bool) {
+    let mut a = share::act(CALL_ID, who.chars().take(60).collect(), format!("Eingehender Anruf · {via}"));
+    a.icon = Some("📞".into());
+    a.color = Some("#30d158".into());
+    a.priority = 90;
+    a.alert = true;
+    a.ttl = Some(RING_FOR);
+    if can_answer {
+        a.actions.push(share::btn("answer", "Annehmen", Some("check")));
+    }
+    if can_decline {
+        a.actions.push(share::btn("decline", "Ablehnen", Some("close")));
+    }
+    activities::upsert(app, a);
+}
+
+pub(crate) fn end_call(app: &AppHandle) {
+    activities::remove(app, CALL_ID);
+}
+
+/// Nachricht vom iPhone (Bluetooth oder Kurzbefehl): kurz in der Notch, der Text bleibt hoechstens eine Zeile lang sichtbar
+pub(crate) fn show_message(app: &AppHandle, via: &str, from: &str, text: &str) {
+    let clip = |s: &str, n: usize| -> String {
+        let one: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+        if one.chars().count() > n { format!("{}…", one.chars().take(n).collect::<String>().trim_end()) } else { one }
+    };
+    let from = clip(from, 60);
+    let mut a = share::act(MSG_ID, if from.is_empty() { via.to_string() } else { from }, clip(text, 160));
+    a.app = via.to_string();
+    a.icon = Some("💬".into());
+    a.color = Some("#30d158".into());
+    a.priority = 8;
+    a.alert = true;
+    a.ttl = Some(12);
     activities::upsert(app, a);
 }
 
@@ -350,11 +404,12 @@ fn log(app: &AppHandle, line: String) {
 }
 
 /// Einrichtungsseite befuellen (alle Platzhalter; der Test prueft, dass keiner uebrig bleibt)
-fn render_page(base: &str, host_base: &str, name: &str, ntfy: &str) -> String {
+fn render_page(base: &str, host_base: &str, name: &str, ntfy: &str, cam: &str) -> String {
     PAGE.replace("{{BASE}}", &share::html_escape(base))
         .replace("{{HOSTBASE}}", &share::html_escape(host_base))
         .replace("{{NAME}}", &share::html_escape(name))
         .replace("{{NTFY}}", &share::html_escape(ntfy))
+        .replace("{{CAMURL}}", &share::html_escape(cam))
 }
 
 /// Alles unter /k/ (aus share.rs weitergereicht)
@@ -386,7 +441,7 @@ fn handle_inner(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpA
             // probiert ihn auf dem iPhone aus und nimmt sonst die IP (iphone-page.html)
             let host = share::computer_name().filter(|n| n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
             let host_base = host.map(|h| format!("http://{h}.local:{port}/k/{tok}")).unwrap_or_default();
-            let page = render_page(&format!("http://{ip_pc}:{port}/k/{tok}"), &host_base, &share::alias(), &ntfy_topic(app).unwrap_or_default());
+            let page = render_page(&format!("http://{ip_pc}:{port}/k/{tok}"), &host_base, &share::alias(), &ntfy_topic(app).unwrap_or_default(), &crate::cam::url(app));
             Response::from_string(page)
                 .with_header(header("Content-Type", "text/html; charset=utf-8"))
                 .with_header(header("Cache-Control", "no-store"))
@@ -404,6 +459,14 @@ fn handle_inner(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpA
             fetch_list(app, tok)
         }
         (Method::Get, "text") => fetch_text(app),
+        // Automation „Wenn ich eine Nachricht bekomme“: ?von=Absender, Text im Body (Ersatz, wenn Bluetooth nicht geht)
+        (Method::Post, "nachricht") => {
+            seen(app, ip, q);
+            let mut body = Vec::new();
+            let _ = req.as_reader().take(4096).read_to_end(&mut body);
+            show_message(app, "Nachrichten", &url_decode(query(q, "von").unwrap_or("")), &String::from_utf8_lossy(&body));
+            json_resp(json!({ "ok": true }))
+        }
         // /datei/<id>/<art> beantwortet handle (gestreamt); die Art steht nur fuer den Kurzbefehl in der Adresse
         (Method::Post, "senden" | "clip") => {
             seen(app, ip, q);
@@ -573,6 +636,7 @@ fn offer_text(app: &AppHandle, text: String) {
 /// Knoepfe an der iPhone-Karte und an „Für iPhone bereit“
 pub fn action(app: &AppHandle, id: &str, action: &str) {
     match (id, action) {
+        (CALL_ID, _) => crate::ancs::call_action(app, action),
         (CARD_ID, "clip") => match arboard::Clipboard::new().and_then(|mut c| c.get_text()) {
             Ok(t) if !t.trim().is_empty() => offer_text(app, t),
             _ => {
@@ -895,11 +959,11 @@ mod tests {
 
     #[test]
     fn einrichtungsseite_vollstaendig() {
-        let p = render_page("http://192.168.2.5:53317/k/abc", "http://PC.local:53317/k/abc", "Notch · PC", "notch-123");
+        let p = render_page("http://192.168.2.5:53317/k/abc", "http://PC.local:53317/k/abc", "Notch · PC", "notch-123", "https://192.168.2.5:53443/cam/abc/");
         assert!(!p.contains("{{"), "Platzhalter uebrig: {}", &p[p.find("{{").unwrap()..][..30]);
         assert!(p.contains("http://192.168.2.5:53317/k/abc") && p.contains("http://PC.local:53317/k/abc") && p.contains("notch-123"));
         // ohne Rechnername und ohne Mitteilung bleibt nichts Ungefuelltes stehen
-        assert!(!render_page("http://1.2.3.4:53317/k/x", "", "N", "").contains("{{"));
+        assert!(!render_page("http://1.2.3.4:53317/k/x", "", "N", "", "").contains("{{"));
     }
 
     #[test]
