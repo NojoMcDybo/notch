@@ -24,6 +24,7 @@ struct ContentView: View {
     @State private var picks: [PhotosPickerItem] = []
     @State private var importing = false
     @State private var text = ""
+    @StateObject private var quick = QuickModel()
 
     var body: some View {
         NavigationStack {
@@ -45,7 +46,10 @@ struct ContentView: View {
                 }
             }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { r in
-                if case .success(let urls) = r { Task { await n.send(files: urls) } }
+                if case .success(let urls) = r {
+                    quick.remember(urls)
+                    Task { await n.send(files: urls) }
+                }
             }
             .onChange(of: picks) { items in
                 guard !items.isEmpty else { return }
@@ -94,14 +98,13 @@ struct ContentView: View {
             if let p = n.progress, n.working != nil { ProgressView(value: p) }
         }
 
-        Section("An den PC senden") {
+        QuickSendSections(quick: quick)
+
+        Section("Mehr senden") {
             PhotosPicker(selection: $picks, matching: .any(of: [.images, .videos])) {
-                Label("Fotos und Videos", systemImage: "photo.on.rectangle")
+                Label("Alle Fotos und Videos …", systemImage: "photo.on.rectangle")
             }
-            Button { importing = true } label: { Label("Dateien", systemImage: "folder") }
-            Button { Task { await n.sendText(UIPasteboard.general.string ?? "", clip: true) } } label: {
-                Label("Zwischenablage senden", systemImage: "doc.on.clipboard")
-            }
+            Button { importing = true } label: { Label("Dateien …", systemImage: "folder") }
             HStack {
                 TextField("Text oder Link", text: $text)
                 Button("Senden") {

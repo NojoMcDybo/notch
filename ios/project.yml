@@ -43,6 +43,7 @@ targets:
         NSLocalNetworkUsageDescription: Notch spricht im WLAN mit deinem PC (Dateien, Zwischenablage, Kamerabild).
         NSCameraUsageDescription: Für den QR-Code der Notch und wenn das iPhone als Webcam für den PC dient.
         NSPhotoLibraryAddUsageDescription: Fotos und Videos, die du am PC abholst, kommen in die Fotos-App.
+        NSPhotoLibraryUsageDescription: Die App zeigt deine letzten Fotos und Videos zum schnellen Senden an den PC.
         # Dateien vom PC liegen sichtbar in Dateien › Auf meinem iPhone › Notch
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true

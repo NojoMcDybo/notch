@@ -152,6 +152,12 @@ final class NotchModel: ObservableObject {
 
     func send(files: [URL]) async { await upload(files, scoped: true) }
 
+    /// Fuer den Versand angelegte Temp-Dateien: nach dem Senden samt Ordner loeschen
+    func sendTemporary(_ files: [URL]) async {
+        await upload(files, scoped: false)
+        files.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) }
+    }
+
     private func upload(_ files: [URL], scoped: Bool) async {
         var sent = 0
         for (i, f) in files.enumerated() {
