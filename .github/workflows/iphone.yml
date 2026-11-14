@@ -1,0 +1,43 @@
+# iPhone-Begleiter (ios/) als unsignierte Notch.ipa bauen, ohne Release. Die Datei liegt danach unten auf der Seite des
+# Laufs unter "Artifacts". Signiert wird beim Installieren (iLoader / SideStore mit der eigenen Apple-ID).
+name: iPhone-App bauen
+on:
+  push:
+    branches: [iphone-app]
+    paths:
+      - ios/**
+      - .github/workflows/iphone.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ipa:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+      - name: XcodeGen
+        run: brew install xcodegen
+      - name: Projekt erzeugen
+        run: xcodegen generate
+      - name: Archiv bauen (ohne Signatur)
+        run: |
+          xcodebuild archive \
+            -project Notch.xcodeproj \
+            -scheme Notch \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Notch.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+      - name: ipa packen
+        run: |
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$RUNNER_TEMP/Notch.xcarchive/Products/Applications/Notch.app" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qr "$GITHUB_WORKSPACE/Notch.ipa" Payload)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: notch-ipa
+          path: Notch.ipa
+          if-no-files-found: error

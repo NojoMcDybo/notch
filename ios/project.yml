@@ -1,0 +1,41 @@
+# iPhone-Begleiter fuer die Notch. Das Xcode-Projekt entsteht daraus (XcodeGen), im CI: .github/workflows/iphone.yml
+name: Notch
+options:
+  bundleIdPrefix: de.nojo
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+targets:
+  Notch:
+    type: application
+    platform: iOS
+    sources:
+      - Notch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.nojo.notch.phone
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Notch
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Der PC spricht im Heim-WLAN HTTP (Port 53317) und HTTPS mit eigenem Zertifikat (Kamera, Port 53443)
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Notch spricht im WLAN mit deinem PC (Dateien, Zwischenablage, Kamerabild).
+        NSCameraUsageDescription: Für den QR-Code der Notch und wenn das iPhone als Webcam für den PC dient.
+        NSPhotoLibraryAddUsageDescription: Fotos und Videos, die du am PC abholst, kommen in die Fotos-App.
+        # Dateien vom PC liegen sichtbar in Dateien › Auf meinem iPhone › Notch
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
