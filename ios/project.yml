@@ -34,6 +34,8 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: Notch
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         # Live-Aktivitaet (Sperrbildschirm) fuer Senden, Holen und Webcam
         NSSupportsLiveActivities: true
@@ -74,6 +76,8 @@ targets:
       path: NotchShare-Info.plist
       properties:
         CFBundleDisplayName: Notch
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
@@ -104,5 +108,7 @@ targets:
       path: NotchWidget-Info.plist
       properties:
         CFBundleDisplayName: Notch
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension

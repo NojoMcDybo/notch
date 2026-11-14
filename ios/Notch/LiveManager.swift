@@ -37,7 +37,11 @@ final class LiveManager: ObservableObject {
         let content = ActivityContent(state: State(kind: "send", title: "Test", detail: "Beispiel", progress: 0.4), staleDate: nil)
         do {
             let a = try Activity<NotchActivityAttributes>.request(attributes: NotchActivityAttributes(pc: pc), content: content, pushType: nil)
-            status = "Test gestartet, aktive Aktivitäten: \(Activity<NotchActivityAttributes>.activities.count)"
+            let ext = (Bundle.main.builtInPlugInsPath.flatMap { try? FileManager.default.contentsOfDirectory(atPath: $0) } ?? []).joined(separator: ", ")
+            status = "Test gestartet. Erweiterungen im Paket: \(ext.isEmpty ? "keine" : ext)"
+            Task {
+                for await st in a.activityStateUpdates { status += " · Zustand: \(st)" }
+            }
             Task {
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
                 await a.end(nil, dismissalPolicy: .immediate)
