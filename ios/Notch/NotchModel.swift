@@ -17,7 +17,7 @@ enum NotchError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .offline(let d): return "PC nicht erreichbar" + (d.isEmpty ? "" : " ((d))")
+        case .offline(let d): return "PC nicht erreichbar" + (d.isEmpty ? "" : " (\(d))")
         case .status(let c, let m): return m.isEmpty ? "PC antwortet mit \(c)" : m
         case .badAddress: return "Das ist keine Notch-Adresse"
         }
@@ -103,7 +103,7 @@ final class NotchModel: ObservableObject {
         if await resolve() {
             note("Gekoppelt mit \(link?.pc ?? "PC")")
         } else {
-            note("⚠︎ Gekoppelt, aber der PC antwortet nicht: (detail)")
+            note("⚠︎ Gekoppelt, aber der PC antwortet nicht: \(detail)")
         }
     }
 
@@ -134,12 +134,12 @@ final class NotchModel: ObservableObject {
                 result = try await probe(u)
             } catch {
                 let code = (error as? URLError)?.code.rawValue ?? 0
-                detail += "(u.host ?? b): (code) (error.localizedDescription) "
+                detail += "\(u.host ?? b): \(code) \(error.localizedDescription) "
                 continue
             }
             let (data, resp) = result
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            guard status == 200 else { detail += "(u.host ?? b): HTTP (status) "; continue }
+            guard status == 200 else { detail += "\(u.host ?? b): HTTP \(status) "; continue }
             base = b
             online = true
             if let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let pc = j["pc"] as? String, pc != l.pc {
@@ -353,7 +353,7 @@ final class NotchModel: ObservableObject {
         working = "Prüfe …"
         let ok = await resolve()
         working = nil
-        note(ok ? "Verbunden mit (link?.pc ?? "PC")" : "⚠︎ " + NotchError.offline(detail).localizedDescription)
+        note(ok ? "Verbunden mit \(link?.pc ?? "PC")" : "⚠︎ " + NotchError.offline(detail).localizedDescription)
     }
 
     /// App wird geoeffnet: Verbindung pruefen (meldet das iPhone dem PC) und Bereitliegendes holen
