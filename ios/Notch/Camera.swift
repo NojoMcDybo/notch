@@ -25,8 +25,8 @@ enum Lens: String, CaseIterable, Identifiable {
 /// iPhone als Webcam: Kamerabild als JPEG (16:9) an `POST <Kamera-Adresse>frame`, ein Bild nach dem anderen.
 /// Die Notch auf dem PC macht daraus die virtuelle Kamera „Notch iPhone“.
 final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, URLSessionDelegate {
-    @Published private(set) var running = false
-    @Published private(set) var fps = 0
+    @Published private(set) var running = false { didSet { live() } }
+    @Published private(set) var fps = 0 { didSet { live() } }
     @Published private(set) var error: String?
     /// Wird true, sobald das erste Bild gezeigt wird (davor zeigt die Oberflaeche einen Platzhalter)
     @Published private(set) var hasFrame = false
@@ -77,6 +77,11 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
             self.jpegQuality = [0.4, 0.6, 0.8][min(max(q, 0), 2)]
             self.mirrored = m
         }
+    }
+
+    private func live() {
+        let f: Int? = running ? fps : nil
+        Task { @MainActor in LiveManager.shared.camera(fps: f) }
     }
 
     private func store() {

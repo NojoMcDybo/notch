@@ -7,13 +7,18 @@ struct NotchApp: App {
     @StateObject private var notch = NotchModel()
     @Environment(\.scenePhase) private var phase
 
+    init() { NtfyBackground.register() }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(notch)
                 .task(id: phase) {
+                    notch.appActive = phase == .active
+                    if phase == .background { NtfyBackground.schedule() }
                     if phase == .active { await notch.onActive() }
                 }
+                .onAppear { LiveManager.shared.endOrphans() }
         }
     }
 }
@@ -130,6 +135,8 @@ struct ContentView: View {
         Section {
             NavigationLink { CameraView() } label: { Label("iPhone als Webcam", systemImage: "video") }
         }
+
+        NotifySection()
 
         historySection
 

@@ -8,6 +8,8 @@ struct Pairing: Codable, Equatable {
     /// `http://<PC>.local:53317/k/<s>` (uebersteht eine neue IP) und `http://<IP>:53317/k/<s>`
     var bases: [String]
     var pc: String
+    /// ntfy-Thema des PCs (leer, wenn dort ausgeschaltet); die App hoert darauf, solange sie laeuft
+    var ntfy: String?
 }
 
 enum NotchError: LocalizedError {

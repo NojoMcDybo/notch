@@ -37,9 +37,13 @@ final class NotchModel: ObservableObject {
     @Published private(set) var link: Pairing?
     @Published private(set) var online = false
     /// laufende Arbeit, z. B. „Sende 2 von 3 …“
-    @Published private(set) var working: String?
+    @Published private(set) var working: String? { didSet { liveSync() } }
     /// 0…1 der laufenden Datei
-    @Published private(set) var progress: Double?
+    @Published private(set) var progress: Double? { didSet { if working != nil { liveSync() } } }
+    // ntfy (siehe Ntfy.swift)
+    @Published var ntfyConnected = false
+    var ntfyTask: Task<Void, Never>?
+    var appActive = true
     @Published private(set) var history: [HistoryItem] = []
     /// Kamera-Adresse; leer, solange die Kamera am PC aus ist
     @Published private(set) var camURL: URL?
@@ -84,9 +88,11 @@ final class NotchModel: ObservableObject {
            let host = firstGroup(#"<textarea id="hostbase" readonly>(.*?)</textarea>"#, in: page), !host.isEmpty {
             bases.insert(host, at: 0)
         }
-        link = Pairing(token: token, bases: bases, pc: "PC")
+        let topic = (try? await NotchNet.text(from: NotchNet.endpoint(addr, ""), timeout: 6)).flatMap(Self.topic)
+        link = Pairing(token: token, bases: bases, pc: "PC", ntfy: topic)
         base = nil
         PairingStore.save(link)
+        startNtfy()
         if await resolve() {
             note("Gekoppelt mit \(link?.pc ?? "PC")")
         } else {
@@ -95,6 +101,7 @@ final class NotchModel: ObservableObject {
     }
 
     func unpair() {
+        stopNtfy()
         link = nil
         base = nil
         online = false
@@ -138,6 +145,22 @@ final class NotchModel: ObservableObject {
     }
 
     private func setProgress(_ p: Double) { progress = p }
+
+    /// Sperrbildschirm-Aktivitaet nachziehen: nur fuer Senden und Holen. Nach dem Ende kurz warten, denn bei
+    /// mehreren Dateien wird `working` zwischendurch leer.
+    private func liveSync() {
+        if let w = working, w.hasPrefix("Sende") || w.hasPrefix("Hole") {
+            LiveManager.shared.setPC(link?.pc ?? "PC")
+            LiveManager.shared.transfer(kind: w.hasPrefix("Sende") ? "send" : "fetch",
+                                        title: w.replacingOccurrences(of: " …", with: ""), progress: progress)
+        } else if working == nil {
+            Task {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard working == nil else { return }
+                LiveManager.shared.finish(text: history.first?.text ?? "Fertig", ok: history.first?.ok ?? true)
+            }
+        }
+    }
 
     // MARK: iPhone → PC
 
@@ -328,6 +351,11 @@ final class NotchModel: ObservableObject {
         let page = try? await NotchNet.text(from: NotchNet.endpoint(b, ""), timeout: 6)
         let href = page.flatMap { firstGroup(#"id="camrow" href="([^"]*)""#, in: $0) } ?? ""
         camURL = href.isEmpty ? nil : URL(string: href + "frame")
+        // dieselbe Seite nennt das ntfy-Thema; hat es sich am PC geaendert, neu abonnieren
+        if let page {
+            let t = Self.topic(page)
+            if t != link?.ntfy { link?.ntfy = t; PairingStore.save(link); startNtfy() }
+        }
     }
 
     // MARK: Verlauf
@@ -376,6 +404,10 @@ final class NotchModel: ObservableObject {
     /// App wird geoeffnet: Verbindung pruefen (meldet das iPhone dem PC) und Bereitliegendes holen
     func onActive() async {
         guard link != nil else { return }
-        if await resolve() { await fetch(quiet: true) }
+        if await resolve() {
+            await refreshCam()
+            await fetch(quiet: true)
+        }
+        startNtfy()   // nach dem Hintergrund ist die offene Verbindung meist tot
     }
 }

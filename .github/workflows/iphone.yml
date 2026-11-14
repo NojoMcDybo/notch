@@ -38,6 +38,7 @@ jobs:
           cp -R "$RUNNER_TEMP/Notch.xcarchive/Products/Applications/Notch.app" "$RUNNER_TEMP/ipa/Payload/"
           # Ad-hoc signieren (innen nach aussen), damit die App-Gruppe im Programm steht; iLoader/SideStore lesen sie dort aus
           APP="$RUNNER_TEMP/ipa/Payload/Notch.app"
+          codesign --force --sign - "$APP/PlugIns/NotchWidget.appex"
           codesign --force --sign - --entitlements NotchShare.entitlements "$APP/PlugIns/NotchShare.appex"
           codesign --force --sign - --entitlements Notch.entitlements "$APP"
           codesign -d --entitlements - "$APP/PlugIns/NotchShare.appex"
@@ -48,3 +49,16 @@ jobs:
           name: notch-ipa
           path: Notch.ipa
           if-no-files-found: error
+      - name: Live-Aktivitaet als Bild rendern
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/snap-out"
+          swiftc -o "$RUNNER_TEMP/snap" NotchWidget/LiveCard.swift scripts/snap/main.swift
+          "$RUNNER_TEMP/snap" "$RUNNER_TEMP/snap-out"
+          cp "$RUNNER_TEMP"/snap-out/*.png "$GITHUB_WORKSPACE/"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: notch-ansicht
+          path: "*.png"
+          if-no-files-found: ignore

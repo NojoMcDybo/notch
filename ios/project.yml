@@ -3,7 +3,7 @@ name: Notch
 options:
   bundleIdPrefix: de.nojo
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "16.2"
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -19,6 +19,7 @@ targets:
       - Shared
     dependencies:
       - target: NotchShare
+      - target: NotchWidget
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: de.nojo.notch.phone
@@ -34,6 +35,13 @@ targets:
       properties:
         CFBundleDisplayName: Notch
         UILaunchScreen: {}
+        # Live-Aktivitaet (Sperrbildschirm) fuer Senden, Holen und Webcam
+        NSSupportsLiveActivities: true
+        # Gelegentliche Pruefung auf ntfy-Nachrichten bei geschlossener App
+        UIBackgroundModes:
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - de.nojo.notch.phone.refresh
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         # Der PC spricht im Heim-WLAN HTTP (Port 53317) und HTTPS mit eigenem Zertifikat (Kamera, Port 53443)
@@ -80,3 +88,21 @@ targets:
               NSExtensionActivationSupportsMovieWithMaxCount: 20
               NSExtensionActivationSupportsText: true
               NSExtensionActivationSupportsWebURLWithMaxCount: 5
+  NotchWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - NotchWidget
+      - path: Shared
+        includes:
+          - NotchActivity.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.nojo.notch.phone.widget
+        SKIP_INSTALL: "YES"
+    info:
+      path: NotchWidget-Info.plist
+      properties:
+        CFBundleDisplayName: Notch
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
