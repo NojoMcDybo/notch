@@ -85,7 +85,7 @@ struct ContentView: View {
                 if let w = n.working {
                     HStack(spacing: 6) { ProgressView(); Text(w).font(.caption).foregroundStyle(.secondary) }
                 } else {
-                    Button("Prüfen") { Task { await n.onActive() } }.buttonStyle(.borderless)
+                    Button("Prüfen") { Task { await n.check() } }.buttonStyle(.borderless)
                 }
             }
         }
