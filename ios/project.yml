@@ -36,8 +36,6 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
         # Der PC spricht im Heim-WLAN HTTP (Port 53317) und HTTPS mit eigenem Zertifikat (Kamera, Port 53443)
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true

@@ -28,8 +28,10 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
     @Published private(set) var running = false
     @Published private(set) var fps = 0
     @Published private(set) var error: String?
-    /// Das gesendete Bild, damit man sieht, was der PC sieht
-    @Published private(set) var preview: UIImage?
+    /// Wird true, sobald das erste Bild gezeigt wird (davor zeigt die Oberflaeche einen Platzhalter)
+    @Published private(set) var hasFrame = false
+    /// Hier wird das gesendete Bild gezeigt (dasselbe, was der PC sieht), unabhaengig von SwiftUI
+    weak var previewView: UIView?
     @Published private(set) var maxZoom = 5.0
     @Published private(set) var hasTorch = false
     /// Hinten verfuegbare Objektive (iPhone 13: ultraweit und weit)
@@ -56,7 +58,7 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
     private var busy = false
     private var frames = 0
     private var since = Date()
-    private var shown = 0
+    private var previewPending = false
     private var orientation = AVCaptureVideoOrientation.landscapeRight
     private var applied: AVCaptureVideoOrientation?
 
@@ -117,6 +119,7 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
             busy = false
         }
         running = false
+        hasFrame = false
         fps = 0
         UIApplication.shared.isIdleTimerDisabled = false
     }
@@ -221,10 +224,17 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
         let q = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
         guard let jpeg = ctx.jpegRepresentation(of: img, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, options: [q: jpegQuality]) else { return }
 
-        shown += 1
-        if shown % 8 == 0, let cg = ctx.createCGImage(img, from: img.extent) {
-            let ui = UIImage(cgImage: cg)
-            DispatchQueue.main.async { self.preview = ui }
+        // Vorschau mit halber Aufloesung bei jedem Bild; ein neues erst, wenn das letzte angezeigt ist
+        if !previewPending, let view = previewView {
+            let small = img.transformed(by: CGAffineTransform(scaleX: 0.5, y: 0.5))
+            if let cg = ctx.createCGImage(small, from: small.extent) {
+                previewPending = true
+                DispatchQueue.main.async { [weak self] in
+                    view.layer.contents = cg
+                    if self?.hasFrame == false { self?.hasFrame = true }
+                    self?.queue.async { self?.previewPending = false }
+                }
+            }
         }
 
         busy = true
@@ -260,69 +270,5 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
         } else {
             completionHandler(.performDefaultHandling, nil)
         }
-    }
-}
-
-struct CameraView: View {
-    @EnvironmentObject var n: NotchModel
-    @StateObject private var cam = CameraStreamer()
-
-    var body: some View {
-        List {
-            Section {
-                if let img = cam.preview, cam.running {
-                    Image(uiImage: img).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 10))
-                        .listRowInsets(EdgeInsets())
-                } else {
-                    Text(n.camURL == nil ? "Am PC ist die Kamera aus: Notch › Einstellungen › iPhone › Kamera." : "Starte die Kamera, der PC bekommt dann „Notch iPhone“ als Webcam.")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Section {
-                Button(cam.running ? "Stoppen" : "Starten") {
-                    if cam.running { cam.stop() } else {
-                        Task {
-                            await n.refreshCam()   // vielleicht gerade erst am PC eingeschaltet
-                            if let u = n.camURL { cam.start(u) }
-                        }
-                    }
-                }
-                if cam.running { LabeledContent("Bilder pro Sekunde", value: "\(cam.fps)") }
-                if let e = cam.error { Text(e).foregroundStyle(.red) }
-            } footer: {
-                Text("Quer halten und die App offen lassen. Am PC erscheint die Kamera „Notch iPhone“ in Teams, Zoom und Chrome.")
-            }
-            Section("Bild") {
-                Toggle("Frontkamera", isOn: $cam.front)
-                if !cam.front && cam.lenses.count > 1 {
-                    Picker("Objektiv", selection: $cam.lens) {
-                        ForEach(cam.lenses) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                }
-                VStack(alignment: .leading) {
-                    Text("Zoom \(String(format: "%.1f", cam.zoom))×").font(.callout)
-                    Slider(value: $cam.zoom, in: 1...cam.maxZoom)
-                }
-                Toggle("Taschenlampe", isOn: $cam.torch).disabled(cam.front || !cam.hasTorch)
-                Toggle("Bild spiegeln", isOn: $cam.mirror)
-            }
-            Section("Übertragung") {
-                Picker("Qualität", selection: $cam.quality) {
-                    Text("Niedrig").tag(0)
-                    Text("Normal").tag(1)
-                    Text("Hoch").tag(2)
-                }
-                .pickerStyle(.segmented)
-                Picker("Bildrate", selection: $cam.rate) {
-                    Text("15").tag(15)
-                    Text("30").tag(30)
-                }
-                .pickerStyle(.segmented)
-            }
-        }
-        .navigationTitle("Webcam")
-        .task { await n.refreshCam() }
-        .onDisappear { cam.stop() }
     }
 }
