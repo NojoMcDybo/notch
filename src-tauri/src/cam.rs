@@ -238,6 +238,27 @@ fn watchdog(app: AppHandle) {
     });
 }
 
+/// Alten Server wirklich schliessen. tiny_http gibt den Port beim Verwerfen nur frei, wenn es sich dabei selbst
+/// erreicht; an 0.0.0.0 klappt das unter Windows nicht, der Port blieb belegt und nach vier Neustarts des Servers
+/// scheiterte jeder weitere mit „Adresse schon in Verwendung“ (os error 10048).
+fn retire(s: Arc<Server>, port: u16) {
+    s.unblock();
+    std::thread::spawn(move || {
+        // erst wenn der Anfrage-Thread seine Kopie abgegeben hat, setzt das Verwerfen die Schliess-Marke
+        for _ in 0..50 {
+            if Arc::strong_count(&s) == 1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        drop(s);
+        // der Annahme-Thread merkt die Marke erst mit der naechsten Verbindung und gibt dann den Port frei
+        if port != 0 {
+            let _ = std::net::TcpStream::connect(("127.0.0.1", port));
+        }
+    });
+}
+
 /// Aendert sich die Adresse des PCs (WLAN spaet verbunden, neue DHCP-Adresse), braucht der Server ein passendes Zertifikat
 fn renew_server(app: &AppHandle) {
     if !ENABLED.load(Ordering::Relaxed) {
@@ -246,8 +267,8 @@ fn renew_server(app: &AppHandle) {
     let old = live(|l| l.server.clone().map(|(s, _)| (s, l.names.clone())));
     if let Some((s, names)) = old {
         if names != cert_names() {
-            s.unblock();
-            live(|l| l.server = None);
+            let port = live(|l| l.server.take()).map_or(0, |(_, p)| p);
+            retire(s, port);
             if let Err(e) = start_server(app) {
                 live(|l| l.error = e);
             }
