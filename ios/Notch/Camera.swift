@@ -172,9 +172,13 @@ struct CameraView: View {
             }
             Section {
                 Button(cam.running ? "Stoppen" : "Starten") {
-                    if cam.running { cam.stop() } else if let u = n.camURL { cam.start(u) }
+                    if cam.running { cam.stop() } else {
+                        Task {
+                            await n.refreshCam()   // vielleicht gerade erst am PC eingeschaltet
+                            if let u = n.camURL { cam.start(u) }
+                        }
+                    }
                 }
-                .disabled(n.camURL == nil && !cam.running)
                 Toggle("Frontkamera", isOn: $cam.front)
                 if cam.running { LabeledContent("Bilder pro Sekunde", value: "\(cam.fps)") }
                 if let e = cam.error { Text(e).foregroundStyle(.red) }

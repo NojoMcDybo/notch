@@ -11,8 +11,14 @@ struct NotchApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(notch)
-                .onChange(of: phase) { p in
-                    if p == .active { Task { await notch.onActive() } }
+                // offen: beim Start und alle paar Sekunden schauen, ob am PC etwas bereitliegt
+                .task(id: phase) {
+                    guard phase == .active else { return }
+                    await notch.onActive()
+                    while !Task.isCancelled {
+                        try? await Task.sleep(nanoseconds: 4_000_000_000)
+                        await notch.poll()
+                    }
                 }
         }
     }

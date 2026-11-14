@@ -356,6 +356,13 @@ final class NotchModel: ObservableObject {
         note(ok ? "Verbunden mit \(link?.pc ?? "PC")" : "⚠︎ " + NotchError.offline(detail).localizedDescription)
     }
 
+    /// Im Vordergrund alle paar Sekunden: bereitgelegte Dateien holen, ohne laufende Arbeit zu stoeren
+    func poll() async {
+        guard link != nil, working == nil else { return }
+        if base == nil { await resolve() }
+        if online { await fetch(quiet: true) }
+    }
+
     /// App wird geoeffnet: Verbindung pruefen (meldet das iPhone dem PC) und Bereitliegendes holen
     func onActive() async {
         guard link != nil else { return }
