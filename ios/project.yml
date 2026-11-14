@@ -7,7 +7,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "0.2.0"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1"
 targets:
@@ -16,10 +16,19 @@ targets:
     platform: iOS
     sources:
       - Notch
+      - Shared
+    dependencies:
+      - target: NotchShare
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: de.nojo.notch.phone
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    # Gruppe fuer die gemeinsame Kopplung mit der Teilen-Erweiterung (siehe PairingStore)
+    entitlements:
+      path: Notch.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.de.nojo.notch
     info:
       path: Info.plist
       properties:
@@ -39,3 +48,36 @@ targets:
         # Dateien vom PC liegen sichtbar in Dateien › Auf meinem iPhone › Notch
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+  NotchShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - NotchShare
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.nojo.notch.phone.share
+        SKIP_INSTALL: "YES"
+    entitlements:
+      path: NotchShare.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.de.nojo.notch
+    info:
+      path: NotchShare-Info.plist
+      properties:
+        CFBundleDisplayName: Notch
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Notch spricht im WLAN mit deinem PC.
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsFileWithMaxCount: 20
+              NSExtensionActivationSupportsImageWithMaxCount: 20
+              NSExtensionActivationSupportsMovieWithMaxCount: 20
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsWebURLWithMaxCount: 5

@@ -83,11 +83,15 @@ struct ContentView: View {
                 }
                 Spacer()
                 if let w = n.working {
-                    HStack(spacing: 6) { ProgressView(); Text(w).font(.caption).foregroundStyle(.secondary) }
+                    HStack(spacing: 6) {
+                        if n.progress == nil { ProgressView() }
+                        Text(workLine(w)).font(.caption).foregroundStyle(.secondary)
+                    }
                 } else {
                     Button("Prüfen") { Task { await n.check() } }.buttonStyle(.borderless)
                 }
             }
+            if let p = n.progress, n.working != nil { ProgressView(value: p) }
         }
 
         Section("An den PC senden") {
@@ -133,6 +137,11 @@ struct ContentView: View {
         }
     }
 
+    private func workLine(_ w: String) -> String {
+        guard let p = n.progress, p > 0, p < 1 else { return w }
+        return w + " \(Int(p * 100)) %"
+    }
+
     private var statusLine: String {
         var s = n.online ? "Verbunden" : "Nicht erreichbar"
         if let t = n.lastCheck { s += " · geprüft " + t.formatted(date: .omitted, time: .standard) }
@@ -148,10 +157,24 @@ struct ContentView: View {
 
     @ViewBuilder private var historySection: some View {
         if !n.history.isEmpty {
-            Section("Verlauf") {
-                ForEach(Array(n.history.enumerated()), id: \.offset) { _, line in
-                    Text(line).font(.callout)
+            Section {
+                ForEach(n.history) { item in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: item.ok ? "checkmark.circle" : "exclamationmark.triangle")
+                                .foregroundStyle(item.ok ? Color.secondary : Color.orange)
+                            Text(item.text).font(.callout)
+                        }
+                        Text(item.date.formatted(date: .abbreviated, time: .shortened)).font(.caption2).foregroundStyle(.secondary)
+                        if item.retry != nil {
+                            Button("Erneut senden") { Task { await n.retry(item) } }
+                                .buttonStyle(.borderless).font(.callout).disabled(n.working != nil)
+                        }
+                    }
                 }
+                Button("Verlauf löschen", role: .destructive) { n.clearHistory() }
+            } header: {
+                Text("Verlauf")
             }
         }
     }

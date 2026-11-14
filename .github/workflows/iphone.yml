@@ -36,6 +36,12 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           cp -R "$RUNNER_TEMP/Notch.xcarchive/Products/Applications/Notch.app" "$RUNNER_TEMP/ipa/Payload/"
+          # Ad-hoc signieren (innen nach aussen), damit die App-Gruppe im Programm steht; iLoader/SideStore lesen sie dort aus
+          APP="$RUNNER_TEMP/ipa/Payload/Notch.app"
+          codesign --force --sign - --entitlements NotchShare.entitlements "$APP/PlugIns/NotchShare.appex"
+          codesign --force --sign - --entitlements Notch.entitlements "$APP"
+          codesign -d --entitlements - "$APP/PlugIns/NotchShare.appex"
+          codesign -d --entitlements - "$APP"
           (cd "$RUNNER_TEMP/ipa" && zip -qr "$GITHUB_WORKSPACE/Notch.ipa" Payload)
       - uses: actions/upload-artifact@v4
         with:
