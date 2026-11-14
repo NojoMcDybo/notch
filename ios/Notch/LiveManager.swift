@@ -4,10 +4,12 @@ import Foundation
 /// Live-Aktivitaet auf dem Sperrbildschirm: zeigt Senden, Holen und Webcam und meldet das Ergebnis.
 /// Ohne Push-Dienst (App sideloaded) kann nur die laufende App sie aendern; das reicht fuer alles hier.
 @MainActor
-final class LiveManager {
+final class LiveManager: ObservableObject {
     static let shared = LiveManager()
     typealias State = NotchActivityAttributes.ContentState
 
+    /// Letztes Ergebnis von ActivityKit, zur Fehlersuche in den Einstellungen
+    @Published var status = ""
     private var activity: Activity<NotchActivityAttributes>?
     private var pc = "PC"
     private var transfer: State?
@@ -23,6 +25,25 @@ final class LiveManager {
         set {
             UserDefaults.standard.set(newValue, forKey: "live")
             if !newValue { stopAll() }
+        }
+    }
+
+    /// Knopf „Testen“: 15 Sekunden lang eine Beispiel-Aktivitaet
+    func demo() {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            status = "Live-Aktivitäten sind für Notch in den iOS-Einstellungen aus"
+            return
+        }
+        let content = ActivityContent(state: State(kind: "send", title: "Test", detail: "Beispiel", progress: 0.4), staleDate: nil)
+        do {
+            let a = try Activity<NotchActivityAttributes>.request(attributes: NotchActivityAttributes(pc: pc), content: content, pushType: nil)
+            status = "Test gestartet, aktive Aktivitäten: \(Activity<NotchActivityAttributes>.activities.count)"
+            Task {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                await a.end(nil, dismissalPolicy: .immediate)
+            }
+        } catch {
+            status = "Start gescheitert: \(error)"
         }
     }
 
@@ -81,7 +102,11 @@ final class LiveManager {
     // MARK: ActivityKit
 
     private func show(_ s: State, alert: String?, force: Bool) {
-        guard enabled, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        guard enabled else { return }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            status = "Live-Aktivitäten sind für Notch in den iOS-Einstellungen aus"
+            return
+        }
         // Fortschritt hoechstens alle 0,8 s; Wechsel der Art oder Texte sofort
         let key = s.kind + s.title + s.detail
         if !force, key == lastKey, Date().timeIntervalSince(lastPush) < 0.8 { return }
@@ -97,7 +122,12 @@ final class LiveManager {
                 }
             }
         } else {
-            activity = try? Activity<NotchActivityAttributes>.request(attributes: NotchActivityAttributes(pc: pc), content: content, pushType: nil)
+            do {
+                activity = try Activity<NotchActivityAttributes>.request(attributes: NotchActivityAttributes(pc: pc), content: content, pushType: nil)
+                status = "Gestartet (\(s.kind))"
+            } catch {
+                status = "Start gescheitert: \(error)"
+            }
         }
     }
 

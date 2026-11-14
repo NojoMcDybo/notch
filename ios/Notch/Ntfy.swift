@@ -99,6 +99,7 @@ extension NotchModel {
 struct NotifySection: View {
     @EnvironmentObject var n: NotchModel
     @State private var live = LiveManager.shared.enabled
+    @ObservedObject private var liveMgr = LiveManager.shared
 
     var body: some View {
         Section {
@@ -119,6 +120,8 @@ struct NotifySection: View {
                 }
             }
             Toggle("Live-Aktivität", isOn: Binding(get: { live }, set: { live = $0; LiveManager.shared.enabled = $0 }))
+            Button("Live-Aktivität testen") { LiveManager.shared.demo() }
+            if !liveMgr.status.isEmpty { Text(liveMgr.status).font(.footnote).foregroundStyle(.secondary) }
         } header: {
             Text("Benachrichtigungen")
         } footer: {
