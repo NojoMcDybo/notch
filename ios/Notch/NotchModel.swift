@@ -65,6 +65,8 @@ final class NotchModel: ObservableObject {
     @Published private(set) var camURL: URL?
 
     private var base: String?
+    private var polling = false
+    @Published private(set) var lastCheck: Date?
     /// Warum die letzte Suche scheiterte (Fehlercode je Adresse), zur Fehlersuche
     private var detail = ""
     private let session: URLSession
@@ -74,6 +76,10 @@ final class NotchModel: ObservableObject {
         c.timeoutIntervalForRequest = 15          // Pause zwischen Daten
         c.timeoutIntervalForResource = 60 * 60    // grosse Videos
         session = URLSession(configuration: c)
+        // offen: alle 4 Sekunden schauen, ob am PC etwas bereitliegt (im Hintergrund haelt iOS den Timer an)
+        Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.poll() }
+        }
         if let d = UserDefaults.standard.data(forKey: "link"), let l = try? JSONDecoder().decode(Pairing.self, from: d) {
             link = l
         }
@@ -358,9 +364,12 @@ final class NotchModel: ObservableObject {
 
     /// Im Vordergrund alle paar Sekunden: bereitgelegte Dateien holen, ohne laufende Arbeit zu stoeren
     func poll() async {
-        guard link != nil, working == nil else { return }
+        guard link != nil, working == nil, !polling else { return }
+        polling = true
+        defer { polling = false }
         if base == nil { await resolve() }
         if online { await fetch(quiet: true) }
+        lastCheck = Date()
     }
 
     /// App wird geoeffnet: Verbindung pruefen (meldet das iPhone dem PC) und Bereitliegendes holen

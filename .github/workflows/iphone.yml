@@ -25,6 +25,7 @@ jobs:
       - name: Archiv bauen (ohne Signatur)
         run: |
           xcodebuild archive \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             -project Notch.xcodeproj \
             -scheme Notch \
             -configuration Release \

@@ -11,14 +11,8 @@ struct NotchApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(notch)
-                // offen: beim Start und alle paar Sekunden schauen, ob am PC etwas bereitliegt
                 .task(id: phase) {
-                    guard phase == .active else { return }
-                    await notch.onActive()
-                    while !Task.isCancelled {
-                        try? await Task.sleep(nanoseconds: 4_000_000_000)
-                        await notch.poll()
-                    }
+                    if phase == .active { await notch.onActive() }
                 }
         }
     }
@@ -85,7 +79,7 @@ struct ContentView: View {
                 Circle().fill(n.online ? Color.green : Color.orange).frame(width: 10, height: 10)
                 VStack(alignment: .leading) {
                     Text(n.link?.pc ?? "PC").font(.headline)
-                    Text(n.online ? "Verbunden" : "Nicht erreichbar").font(.caption).foregroundStyle(.secondary)
+                    Text(statusLine).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if let w = n.working {
@@ -134,7 +128,22 @@ struct ContentView: View {
 
         Section {
             Button("Kopplung lösen", role: .destructive) { n.unpair() }
+        } footer: {
+            Text(versionLine)
         }
+    }
+
+    private var statusLine: String {
+        var s = n.online ? "Verbunden" : "Nicht erreichbar"
+        if let t = n.lastCheck { s += " · geprüft " + t.formatted(date: .omitted, time: .standard) }
+        return s
+    }
+
+    private var versionLine: String {
+        let v = Bundle.main.infoDictionary
+        let short = v?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = v?["CFBundleVersion"] as? String ?? "?"
+        return "Version (short) (Build (build))"
     }
 
     @ViewBuilder private var historySection: some View {
