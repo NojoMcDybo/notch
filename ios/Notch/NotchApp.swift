@@ -143,7 +143,7 @@ struct ContentView: View {
         let v = Bundle.main.infoDictionary
         let short = v?["CFBundleShortVersionString"] as? String ?? "?"
         let build = v?["CFBundleVersion"] as? String ?? "?"
-        return "Version (short) (Build (build))"
+        return "Version \(short) (Build \(build))"
     }
 
     @ViewBuilder private var historySection: some View {
