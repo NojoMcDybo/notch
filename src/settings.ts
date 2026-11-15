@@ -1470,13 +1470,15 @@ async function main() {
 
   // iPhone-Austausch: Zustand aus share.rs (laeuft, Adresse, Geraete in der Naehe)
   invoke<ShareState>("share_status").then((x) => { share = x; renderShare(); }).catch(() => {});
+  // Webcam und Anrufe gehoeren dazu (Schalter, QR-Knopf, Zustandszeile); fps nicht, das kaeme mehrmals pro Sekunde
+  const shareKey = (x: ShareState | null) => JSON.stringify([x?.devices, x?.phone, x?.running, x?.alias, x?.folder,
+    x?.ancs && [x.ancs.on, x.ancs.state, x.ancs.device], x?.cam && [x.cam.on, x.cam.running, !!x.cam.url, x.cam.streaming, x.cam.error]]);
   await listen<ShareState>("share-state", (e) => {
-    const was = JSON.stringify([share?.devices, share?.phone]) + share?.running + share?.alias + share?.folder;
+    const was = shareKey(share);
     share = e.payload;
     renderShareStatus();
     // Liste der Geraete neu, aber nicht beim Tippen in ein Feld
-    const now = JSON.stringify([share.devices, share.phone]) + share.running + share.alias + share.folder;
-    if (now !== was && !(document.activeElement as HTMLElement | null)?.closest?.(".share-options input")) renderShare();
+    if (shareKey(share) !== was && !(document.activeElement as HTMLElement | null)?.closest?.(".share-options input:not([type=checkbox])")) renderShare();
   });
 
   // Andocken: gleiche Befehle wie Tray und Ziehen
