@@ -343,6 +343,21 @@ final class NotchModel: ObservableObject {
         return String(name)
     }
 
+    // MARK: League
+
+    /// Abfrage (GET) oder Befehl (POST) an die League-Anbindung des PCs (`lol`, `lol/accept`, …)
+    func lol(_ path: String, _ q: [String: String] = [:], post: Bool = false) async throws -> Data {
+        try await perform { b in
+            guard let u = NotchNet.endpoint(b, path, q) else { throw NotchError.badAddress }
+            var r = URLRequest(url: u)
+            r.timeoutInterval = 5
+            if post { r.httpMethod = "POST" }
+            let (d, resp) = try await NotchNet.session.data(for: r)
+            try NotchNet.check(resp, d)
+            return d
+        }
+    }
+
     // MARK: Kamera
 
     /// Die Einrichtungsseite nennt die Kamera-Adresse (Port und Schluessel); leer = am PC aus

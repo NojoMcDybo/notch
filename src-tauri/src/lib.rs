@@ -23,6 +23,7 @@ mod vcam;
 mod jarvis;
 mod laya;
 mod lol;
+mod lol_phone;
 mod memory;
 mod screen;
 mod spotify;
@@ -754,6 +755,7 @@ pub fn run() {
             iphone::spawn(app.handle().clone());
             ancs::spawn(app.handle().clone());
             cam::spawn(app.handle().clone());
+            lol_phone::spawn(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

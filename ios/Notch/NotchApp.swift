@@ -135,6 +135,7 @@ struct ContentView: View {
         Section {
             NavigationLink { CameraView() } label: { Label("iPhone als Webcam", systemImage: "video") }
             NavigationLink { ScreenView() } label: { Label("Bildschirm mit Ton streamen", systemImage: "rectangle.on.rectangle") }
+            NavigationLink { LolView() } label: { Label("League: annehmen, bannen, picken", systemImage: "gamecontroller") }
         }
 
         NotifySection()

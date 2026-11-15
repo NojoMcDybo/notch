@@ -71,7 +71,7 @@ fn install_dir() -> PathBuf {
     PathBuf::from("/Applications/League of Legends.app/Contents/LoL")
 }
 
-struct Lcu {
+pub(crate) struct Lcu {
     port: u16,
     auth: String,
 }
@@ -85,15 +85,16 @@ fn parse_lockfile(text: &str) -> Option<Lcu> {
     Some(Lcu { port: p[2].parse().ok()?, auth: format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("riot:{}", p[3]))) })
 }
 
-fn lockfile() -> Option<Lcu> {
+pub(crate) fn lockfile() -> Option<Lcu> {
     parse_lockfile(&std::fs::read_to_string(install_dir().join("lockfile")).ok()?)
 }
 
 impl Lcu {
-    fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+    pub(crate) fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
         let url = format!("https://127.0.0.1:{}{path}", self.port);
         let mut r = match (method, body) {
             ("GET", _) => LOCAL.get(&url).header("Authorization", &self.auth).call(),
+            ("PATCH", b) => LOCAL.patch(&url).header("Authorization", &self.auth).send_json(b.unwrap_or(Value::Null)),
             (_, Some(b)) => LOCAL.post(&url).header("Authorization", &self.auth).send_json(b),
             (_, None) => LOCAL.post(&url).header("Authorization", &self.auth).send_empty(),
         }
@@ -108,7 +109,7 @@ impl Lcu {
     }
 
     /// eingeloggt und ansprechbar? -> Spielphase ("None", "Lobby", "Matchmaking", "ChampSelect", "InProgress" …)
-    fn phase(&self) -> Option<String> {
+    pub(crate) fn phase(&self) -> Option<String> {
         self.call("GET", "/lol-gameflow/v1/gameflow-phase", None).ok().and_then(|v| v.as_str().map(String::from))
     }
 }
