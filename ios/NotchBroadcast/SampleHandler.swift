@@ -15,6 +15,8 @@ class SampleHandler: RPBroadcastSampleHandler, URLSessionDelegate {
     private var videoBusy = false
     private var lastFrame = Date.distantPast
     private var failures = 0
+    private var lastOK = Date()
+    private var lastError = ""
     private var audioBusy = false
     private var pending: [Int16] = []
     private var rate = 0
@@ -129,20 +131,24 @@ class SampleHandler: RPBroadcastSampleHandler, URLSessionDelegate {
         var r = URLRequest(url: url)
         r.httpMethod = "POST"
         r.timeoutInterval = 3
-        session.uploadTask(with: r, from: body) { _, resp, err in
-            finished(err == nil && (resp as? HTTPURLResponse)?.statusCode == 204)
+        session.uploadTask(with: r, from: body) { [weak self] _, resp, err in
+            let code = (resp as? HTTPURLResponse)?.statusCode
+            if err != nil || code != 204 { self?.lock.lock(); self?.lastError = err.map { "\(($0 as NSError).code) \($0.localizedDescription)" } ?? "HTTP \(code ?? 0)"; self?.lock.unlock() }
+            finished(err == nil && code == 204)
         }.resume()
     }
 
     private func done(video: Bool, ok: Bool) {
         lock.lock()
         if video { videoBusy = false } else { audioBusy = false }
-        failures = ok ? 0 : failures + 1
-        let giveUp = failures > 60
+        if ok { lastOK = Date(); failures = 0 } else { failures += 1 }
+        // aufgeben erst, wenn 8 s lang nichts mehr ankam (kurze WLAN-Aussetzer verzeihen)
+        let giveUp = failures > 10 && Date().timeIntervalSince(lastOK) > 8
+        let why = lastError
         lock.unlock()
         if giveUp {
             finishBroadcastWithError(NSError(domain: "Notch", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "Der PC antwortet nicht mehr (Kamera am PC an? Gleiches WLAN?)."]))
+                NSLocalizedDescriptionKey: "Der PC antwortet nicht (Notch am PC aktuell? Kamera an? Gleiches WLAN?) – \(why)"]))
         }
     }
 
