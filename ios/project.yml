@@ -20,6 +20,7 @@ targets:
     dependencies:
       - target: NotchShare
       - target: NotchWidget
+      - target: NotchBroadcast
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: de.nojo.notch.phone
@@ -112,3 +113,34 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+  NotchBroadcast:
+    type: app-extension
+    platform: iOS
+    sources:
+      - NotchBroadcast
+      - path: Shared
+        includes:
+          - NotchCore.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.nojo.notch.phone.screen
+        SKIP_INSTALL: "YES"
+    entitlements:
+      path: NotchBroadcast.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.de.nojo.notch
+    info:
+      path: NotchBroadcast-Info.plist
+      properties:
+        CFBundleDisplayName: Notch Bildschirm
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Notch spricht im WLAN mit deinem PC.
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
+          RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer

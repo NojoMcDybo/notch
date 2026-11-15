@@ -18,6 +18,7 @@ use tauri::{AppHandle, Manager};
 use tiny_http::{Method, Request, Response, Server, SslConfig};
 
 use crate::activities;
+use crate::cam_audio;
 use crate::share::{self, header, plain};
 use crate::vcam;
 
@@ -26,6 +27,8 @@ const ACT_ID: &str = "notch:iphone:cam";
 const PORT: u16 = 53443;
 /// groesstes angenommenes JPEG (1280x720 sind ~100 KB)
 const MAX_FRAME: u64 = 3 * 1024 * 1024;
+/// ein Tonstueck (~0,1 s) ist ~20 KB
+const MAX_AUDIO: u64 = 512 * 1024;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 
@@ -40,6 +43,8 @@ struct Live {
     since: Option<Instant>,
     last: Option<Instant>,
     fps: u32,
+    /// die laufende Uebertragung ist der Bildschirm (sonst die Kamera)
+    screen: bool,
     error: String,
 }
 
@@ -143,27 +148,59 @@ fn handle(app: &AppHandle, mut req: Request) {
             (Method::Get, "") => Response::from_string(PAGE.replace("{{NAME}}", &share::html_escape(&share::alias())))
                 .with_header(header("Content-Type", "text/html; charset=utf-8"))
                 .with_header(header("Cache-Control", "no-store")),
-            (Method::Post, "frame") => frame(app, &mut req),
+            (Method::Post, "frame") => frame(app, &mut req, false),
+            // Bildschirm: gleiche virtuelle Kamera, aber mit schwarzen Raendern statt gestreckt
+            (Method::Post, "screen") => frame(app, &mut req, true),
+            (Method::Post, "audio") => audio(&url, &mut req),
             _ => plain(404, "nicht gefunden"),
         }
     };
     let _ = req.respond(r);
 }
 
-fn frame(app: &AppHandle, req: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
+fn frame(app: &AppHandle, req: &mut Request, screen: bool) -> Response<std::io::Cursor<Vec<u8>>> {
     let mut body = Vec::new();
     if req.as_reader().take(MAX_FRAME + 1).read_to_end(&mut body).is_err() || body.len() as u64 > MAX_FRAME {
         return plain(400, "Bild zu gross oder abgebrochen");
     }
-    if let Err(e) = push(&body) {
+    if let Err(e) = push(&body, screen) {
         return plain(400, &e);
     }
-    tick(app);
+    tick(app, screen);
     Response::from_string("").with_status_code(204)
 }
 
+/// Ton der Bildschirmuebertragung: `POST …/audio?rate=48000&ch=2`, Rumpf = 16-bit-PCM
+fn audio(url: &str, req: &mut Request) -> Response<std::io::Cursor<Vec<u8>>> {
+    let q = |k: &str| {
+        url.split_once('?')?.1.split('&').find_map(|p| p.strip_prefix(k)?.strip_prefix('=')?.parse::<u32>().ok())
+    };
+    let (Some(rate), Some(ch)) = (q("rate"), q("ch")) else { return plain(400, "rate und ch fehlen") };
+    if !(8000..=96000).contains(&rate) || !(1..=2).contains(&ch) {
+        return plain(400, "Tonformat nicht unterstuetzt");
+    }
+    let mut body = Vec::new();
+    if req.as_reader().take(MAX_AUDIO + 1).read_to_end(&mut body).is_err() || body.len() as u64 > MAX_AUDIO {
+        return plain(400, "Ton zu gross oder abgebrochen");
+    }
+    cam_audio::feed(rate, ch as u16, &body);
+    Response::from_string("").with_status_code(204)
+}
+
+/// Bild einpassen, Rest schwarz (Hochformat-Bildschirm in 16:9)
+fn letterbox(src: &image::RgbImage) -> image::RgbImage {
+    let (w, h) = src.dimensions();
+    let (cw, ch) = (vcam::W as u32, vcam::H as u32);
+    let s = (cw as f64 / w as f64).min(ch as f64 / h as f64);
+    let (nw, nh) = (((w as f64 * s).round() as u32).clamp(1, cw), ((h as f64 * s).round() as u32).clamp(1, ch));
+    let small = if (nw, nh) == (w, h) { src.clone() } else { image::imageops::resize(src, nw, nh, image::imageops::FilterType::Triangle) };
+    let mut canvas = image::RgbImage::new(cw, ch);
+    image::imageops::overlay(&mut canvas, &small, ((cw - nw) / 2) as i64, ((ch - nh) / 2) as i64);
+    canvas
+}
+
 /// JPEG -> NV12 -> gemeinsame Datei der virtuellen Kamera
-fn push(jpeg: &[u8]) -> Result<(), String> {
+fn push(jpeg: &[u8], fit: bool) -> Result<(), String> {
     // erst die Masse lesen: ein kleines JPEG darf keinen riesigen Puffer anfordern
     let (w, h) = image::ImageReader::with_format(std::io::Cursor::new(jpeg), image::ImageFormat::Jpeg)
         .into_dimensions()
@@ -175,6 +212,8 @@ fn push(jpeg: &[u8]) -> Result<(), String> {
     let rgb = img.to_rgb8();
     let rgb = if rgb.dimensions() == (vcam::W as u32, vcam::H as u32) {
         rgb
+    } else if fit {
+        letterbox(&rgb)
     } else {
         image::imageops::resize(&rgb, vcam::W as u32, vcam::H as u32, image::imageops::FilterType::Triangle)
     };
@@ -189,9 +228,10 @@ fn push(jpeg: &[u8]) -> Result<(), String> {
 }
 
 /// Bildzaehler fuer „30 fps“ in der Anzeige
-fn tick(app: &AppHandle) {
+fn tick(app: &AppHandle, screen: bool) {
     let show = live(|l| {
         let now = Instant::now();
+        l.screen = screen;
         let first = l.last.is_none_or(|t| t.elapsed() > Duration::from_secs(3));
         l.last = Some(now);
         if first || l.since.is_none() {
@@ -219,8 +259,9 @@ fn activity(app: &AppHandle, streaming: bool) {
         return;
     }
     let fps = live(|l| l.fps);
-    let mut a = share::act(ACT_ID, "iPhone-Kamera".into(), if fps > 0 { format!("Sendet · {fps} Bilder/s") } else { "Sendet".into() });
-    a.icon = Some("📷".into());
+    let screen = live(|l| l.screen);
+    let mut a = share::act(ACT_ID, if screen { "iPhone-Bildschirm" } else { "iPhone-Kamera" }.into(), if fps > 0 { format!("Sendet · {fps} Bilder/s") } else { "Sendet".into() });
+    a.icon = Some(if screen { "📱" } else { "📷" }.into());
     a.color = Some("#30d158".into());
     a.priority = 5;
     a.ttl = Some(6);
@@ -383,4 +424,17 @@ pub fn status_json(app: &AppHandle) -> Value {
         "fps": fps,
         "error": error,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn letterbox_portrait_screen_gets_black_bars() {
+        let o = letterbox(&image::RgbImage::from_pixel(333, 720, image::Rgb([255, 255, 255])));
+        assert_eq!(o.dimensions(), (vcam::W as u32, vcam::H as u32));
+        assert_eq!(o.get_pixel(0, 0).0, [0, 0, 0]);
+        assert_eq!(o.get_pixel(vcam::W as u32 / 2, vcam::H as u32 / 2).0, [255, 255, 255]);
+    }
 }

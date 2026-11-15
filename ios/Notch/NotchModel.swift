@@ -351,6 +351,7 @@ final class NotchModel: ObservableObject {
         let page = try? await NotchNet.text(from: NotchNet.endpoint(b, ""), timeout: 6)
         let href = page.flatMap { firstGroup(#"id="camrow" href="([^"]*)""#, in: $0) } ?? ""
         camURL = href.isEmpty ? nil : URL(string: href + "frame")
+        PairingStore.saveCam(href.isEmpty ? nil : URL(string: href))
         // dieselbe Seite nennt das ntfy-Thema; hat es sich am PC geaendert, neu abonnieren
         if let page {
             let t = Self.topic(page)

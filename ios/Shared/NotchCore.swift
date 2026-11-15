@@ -63,6 +63,16 @@ enum PairingStore {
         }
     }
 
+    /// Kamera-Adresse des PCs (`https://<ip>:<port>/cam/<schluessel>/`) fuer die Bildschirm-Erweiterung, die selbst nicht suchen kann
+    static func saveCam(_ u: URL?) {
+        guard let file = container?.appendingPathComponent("cam.txt") else { return }
+        if let u { try? u.absoluteString.write(to: file, atomically: true, encoding: .utf8) } else { try? FileManager.default.removeItem(at: file) }
+    }
+
+    static func loadCam() -> URL? {
+        container.flatMap { try? String(contentsOf: $0.appendingPathComponent("cam.txt"), encoding: .utf8) }.flatMap { URL(string: $0) }
+    }
+
     static func load() -> Pairing? {
         let d = container.flatMap { try? Data(contentsOf: $0.appendingPathComponent("pairing.json")) }
             ?? UserDefaults.standard.data(forKey: "link")

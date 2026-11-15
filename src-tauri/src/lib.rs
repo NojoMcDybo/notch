@@ -12,6 +12,8 @@ mod gamepad;
 mod ancs;
 #[cfg(windows)]
 mod cam;
+#[cfg(windows)]
+mod cam_audio;
 #[cfg(not(windows))]
 #[path = "cam_stub.rs"]
 mod cam;

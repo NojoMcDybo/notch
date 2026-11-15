@@ -39,6 +39,7 @@ jobs:
           # Ad-hoc signieren (innen nach aussen), damit die App-Gruppe im Programm steht; iLoader/SideStore lesen sie dort aus
           APP="$RUNNER_TEMP/ipa/Payload/Notch.app"
           codesign --force --sign - "$APP/PlugIns/NotchWidget.appex"
+          codesign --force --sign - --entitlements NotchBroadcast.entitlements "$APP/PlugIns/NotchBroadcast.appex"
           codesign --force --sign - --entitlements NotchShare.entitlements "$APP/PlugIns/NotchShare.appex"
           codesign --force --sign - --entitlements Notch.entitlements "$APP"
           codesign -d --entitlements - "$APP/PlugIns/NotchShare.appex"
