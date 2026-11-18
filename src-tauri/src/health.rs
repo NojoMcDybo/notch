@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
+use crate::{activities, share};
+
 const MAX_RECORDS: usize = 20_000;
 
 pub fn dir(app: &AppHandle) -> Option<PathBuf> {
@@ -35,6 +37,15 @@ fn day_file(dir: &Path, day: &str) -> PathBuf {
 
 fn read_lines(path: &Path) -> Vec<Value> {
     fs::read_to_string(path).map(|t| t.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()).unwrap_or_default()
+}
+
+/// Gleicher Wert = gleiche Art, Zeit, Quelle und Zahl. Nicht die `id`: Apples Export-Datei kennt keine UUIDs,
+/// und derselbe Wert soll nicht doppelt liegen, wenn er einmal per Export und einmal von der App kommt.
+fn content_key(r: &Value) -> String {
+    let v = r["v"].as_f64().unwrap_or(0.0);
+    // Sportdauer: Export in Minuten, App in Sekunden mit Nachkommastellen -> auf ganze Sekunden
+    let v = if r["t"] == "workout" { format!("{:.0}", v) } else { format!("{:.2}", v) };
+    format!("{}|{}|{}|{}|{v}", r["t"].as_str().unwrap_or(""), r["s"].as_str().unwrap_or(""), r["e"].as_str().unwrap_or(""), r["src"].as_str().unwrap_or(""))
 }
 
 /// Uebersicht (`_status.json`): je Wertart Anzahl, Quellen, letzter Zeitpunkt
@@ -60,10 +71,10 @@ pub fn ingest_into(dir: &Path, body: &Value) -> Result<(usize, usize), String> {
     let mut added = 0;
     for (day, list) in by_day {
         let path = day_file(dir, day);
-        let mut known: HashSet<String> = read_lines(&path).iter().filter_map(|r| r["id"].as_str().map(String::from)).collect();
+        let mut known: HashSet<String> = read_lines(&path).iter().map(content_key).collect();
         let mut file = fs::OpenOptions::new().create(true).append(true).open(&path).map_err(|e| e.to_string())?;
         for r in list {
-            if !known.insert(r["id"].as_str().unwrap_or("").to_string()) {
+            if !known.insert(content_key(r)) {
                 continue;
             }
             writeln!(file, "{r}").map_err(|e| e.to_string())?;
@@ -80,6 +91,27 @@ pub fn ingest_into(dir: &Path, body: &Value) -> Result<(usize, usize), String> {
     status["updated"] = json!(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
     fs::write(dir.join("_status.json"), status.to_string()).map_err(|e| e.to_string())?;
     Ok((added, recs.len() - added))
+}
+
+/// Export-Datei im Hintergrund einlesen; die Notch zeigt Fortschritt und Ergebnis
+pub fn import_in_background(app: &AppHandle, path: PathBuf) {
+    let Some(dir) = dir(app) else { return };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let show = |title: &str, sub: String, ttl: u64| {
+            let mut a = share::act("notch:iphone:health", title.into(), sub);
+            a.ttl = Some(ttl);
+            activities::upsert(&app, a);
+        };
+        show("Health-Export wird eingelesen", "Bei grossen Dateien dauert das einige Minuten".into(), 900);
+        match crate::health_import::import_file(&dir, &path, &mut |n| show("Health-Export wird eingelesen", format!("{n} Werte gelesen"), 900)) {
+            Ok(r) => {
+                let skipped = if r.skipped.is_empty() { String::new() } else { format!(" · {} Arten übersprungen", r.skipped.len()) };
+                show("Health-Export eingelesen", format!("{} neue Werte, {} gelesen{skipped}", r.added, r.seen), 20);
+            }
+            Err(e) => show("Health-Export fehlgeschlagen", e, 30),
+        }
+    });
 }
 
 /// Alle Tage, fuer die es Werte gibt (aufsteigend)
