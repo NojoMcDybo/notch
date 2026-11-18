@@ -16,7 +16,10 @@ struct NotchApp: App {
                 .task(id: phase) {
                     notch.appActive = phase == .active
                     if phase == .background { NtfyBackground.schedule() }
-                    if phase == .active { await notch.onActive() }
+                    if phase == .active {
+                        await notch.onActive()
+                        await HealthSync.shared.auto(notch)
+                    }
                 }
                 .onAppear { LiveManager.shared.endOrphans() }
         }
@@ -136,6 +139,7 @@ struct ContentView: View {
             NavigationLink { CameraView() } label: { Label("iPhone als Webcam", systemImage: "video") }
             NavigationLink { ScreenView() } label: { Label("Bildschirm mit Ton streamen", systemImage: "rectangle.on.rectangle") }
             NavigationLink { LolView() } label: { Label("League: annehmen, bannen, picken", systemImage: "gamecontroller") }
+            NavigationLink { HealthView() } label: { Label("Health-Export an den PC", systemImage: "heart.text.square") }
         }
 
         NotifySection()

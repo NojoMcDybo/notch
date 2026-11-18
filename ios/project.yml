@@ -31,10 +31,12 @@ targets:
       properties:
         com.apple.security.application-groups:
           - group.de.nojo.notch
+        com.apple.developer.healthkit: true
     info:
       path: Info.plist
       properties:
         CFBundleDisplayName: Notch
+        NSHealthShareUsageDescription: Notch liest deine Gesundheitsdaten (Schritte, Schlaf, Puls, Essen …) und schickt sie an deinen PC. Es wird nichts in Health geschrieben.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}

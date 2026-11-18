@@ -22,6 +22,7 @@ mod iphone;
 mod vcam;
 mod jarvis;
 mod laya;
+mod health;
 mod lol;
 mod lol_phone;
 mod memory;

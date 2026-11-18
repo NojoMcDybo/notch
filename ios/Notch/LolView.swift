@@ -73,7 +73,7 @@ struct LolState: Decodable {
     func run(_ n: NotchModel) async {
         while !Task.isCancelled {
             do {
-                let new = try JSONDecoder().decode(LolState.self, from: try await n.lol("lol"))
+                let new = try JSONDecoder().decode(LolState.self, from: try await n.api("lol"))
                 buzz(old: state, new: new)
                 if new.select?.action?.id != actionID { actionID = new.select?.action?.id; chosen = nil }
                 state = new
@@ -98,7 +98,7 @@ struct LolState: Decodable {
     func send(_ n: NotchModel, _ what: String, _ q: [String: String] = [:]) async {
         busy = true
         defer { busy = false }
-        _ = try? await n.lol("lol/" + what, q, post: true)
+        _ = try? await n.api("lol/" + what, q, post: true)
     }
 
     func pick(_ n: NotchModel, _ id: Int) {

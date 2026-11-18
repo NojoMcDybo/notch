@@ -461,6 +461,33 @@ fn handle_inner(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpA
             fetch_list(app, tok)
         }
         (Method::Get, "text") => fetch_text(app),
+        // Health-Export (health.rs): die App schickt Werte aus Apple Health, GET liefert die Uebersicht
+        (Method::Get, "health") => match crate::health::dir(app) {
+            Some(d) => json_resp(crate::health::overview(&d)),
+            None => plain(500, "Kein Dokumente-Ordner"),
+        },
+        (Method::Post, "health") => {
+            seen(app, ip, q);
+            let mut body = Vec::new();
+            if req.as_reader().take(32 * 1024 * 1024).read_to_end(&mut body).is_err() {
+                return plain(400, "abgebrochen");
+            }
+            let res = serde_json::from_slice::<Value>(&body).map_err(|e| format!("ungueltiges JSON: {e}")).and_then(|v| {
+                let d = crate::health::dir(app).ok_or("Kein Dokumente-Ordner")?;
+                crate::health::ingest_into(&d, &v)
+            });
+            match res {
+                Ok((added, skipped)) => {
+                    if added > 0 {
+                        let mut a = share::act("notch:iphone:health", "Health synchronisiert".into(), format!("{added} neue Werte vom iPhone"));
+                        a.ttl = Some(6);
+                        activities::upsert(app, a);
+                    }
+                    json_resp(json!({ "ok": true, "added": added, "skipped": skipped }))
+                }
+                Err(e) => plain(400, &e),
+            }
+        }
         // League am iPhone (lol_phone.rs): Zustand lesen, Spiel annehmen, bannen, picken
         (Method::Get, "lol") => json_resp(crate::lol_phone::state()),
         (Method::Post, s) if s.starts_with("lol/") => {
