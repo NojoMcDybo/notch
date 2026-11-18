@@ -12,6 +12,8 @@ mod gamepad;
 mod ancs;
 #[cfg(windows)]
 mod cam;
+#[cfg(windows)]
+mod cam_audio;
 #[cfg(not(windows))]
 #[path = "cam_stub.rs"]
 mod cam;
@@ -20,7 +22,9 @@ mod iphone;
 mod vcam;
 mod jarvis;
 mod laya;
+mod health;
 mod lol;
+mod lol_phone;
 mod memory;
 mod screen;
 mod spotify;
@@ -752,6 +756,7 @@ pub fn run() {
             iphone::spawn(app.handle().clone());
             ancs::spawn(app.handle().clone());
             cam::spawn(app.handle().clone());
+            lol_phone::spawn(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -1,0 +1,148 @@
+# iPhone-Begleiter fuer die Notch. Das Xcode-Projekt entsteht daraus (XcodeGen), im CI: .github/workflows/iphone.yml
+name: Notch
+options:
+  bundleIdPrefix: de.nojo
+  deploymentTarget:
+    iOS: "16.2"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+targets:
+  Notch:
+    type: application
+    platform: iOS
+    sources:
+      - Notch
+      - Shared
+    dependencies:
+      - target: NotchShare
+      - target: NotchWidget
+      - target: NotchBroadcast
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.nojo.notch.phone
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    # Gruppe fuer die gemeinsame Kopplung mit der Teilen-Erweiterung (siehe PairingStore)
+    entitlements:
+      path: Notch.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.de.nojo.notch
+        com.apple.developer.healthkit: true
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Notch
+        NSHealthShareUsageDescription: Notch liest deine Gesundheitsdaten (Schritte, Schlaf, Puls, Essen …) und schickt sie an deinen PC. Es wird nichts in Health geschrieben.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        # Live-Aktivitaet (Sperrbildschirm) fuer Senden, Holen und Webcam
+        NSSupportsLiveActivities: true
+        # Gelegentliche Pruefung auf ntfy-Nachrichten bei geschlossener App
+        UIBackgroundModes:
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - de.nojo.notch.phone.refresh
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # Der PC spricht im Heim-WLAN HTTP (Port 53317) und HTTPS mit eigenem Zertifikat (Kamera, Port 53443)
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Notch spricht im WLAN mit deinem PC (Dateien, Zwischenablage, Kamerabild).
+        NSCameraUsageDescription: Für den QR-Code der Notch und wenn das iPhone als Webcam für den PC dient.
+        NSPhotoLibraryAddUsageDescription: Fotos und Videos, die du am PC abholst, kommen in die Fotos-App.
+        NSPhotoLibraryUsageDescription: Die App zeigt deine letzten Fotos und Videos zum schnellen Senden an den PC.
+        # Dateien vom PC liegen sichtbar in Dateien › Auf meinem iPhone › Notch
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+  NotchShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - NotchShare
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.nojo.notch.phone.share
+        SKIP_INSTALL: "YES"
+    entitlements:
+      path: NotchShare.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.de.nojo.notch
+    info:
+      path: NotchShare-Info.plist
+      properties:
+        CFBundleDisplayName: Notch
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Notch spricht im WLAN mit deinem PC.
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsFileWithMaxCount: 20
+              NSExtensionActivationSupportsImageWithMaxCount: 20
+              NSExtensionActivationSupportsMovieWithMaxCount: 20
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsWebURLWithMaxCount: 5
+  NotchWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - NotchWidget
+      - path: Shared
+        includes:
+          - NotchActivity.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.nojo.notch.phone.widget
+        SKIP_INSTALL: "YES"
+    info:
+      path: NotchWidget-Info.plist
+      properties:
+        CFBundleDisplayName: Notch
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+  NotchBroadcast:
+    type: app-extension
+    platform: iOS
+    sources:
+      - NotchBroadcast
+      - path: Shared
+        includes:
+          - NotchCore.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.nojo.notch.phone.screen
+        SKIP_INSTALL: "YES"
+    entitlements:
+      path: NotchBroadcast.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.de.nojo.notch
+    info:
+      path: NotchBroadcast-Info.plist
+      properties:
+        CFBundleDisplayName: Notch Bildschirm
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: Notch spricht im WLAN mit deinem PC.
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
+          RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer

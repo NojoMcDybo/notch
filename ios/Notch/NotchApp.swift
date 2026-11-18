@@ -1,0 +1,197 @@
+import PhotosUI
+import SwiftUI
+import UniformTypeIdentifiers
+
+@main
+struct NotchApp: App {
+    @StateObject private var notch = NotchModel()
+    @Environment(\.scenePhase) private var phase
+
+    init() { NtfyBackground.register() }
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environmentObject(notch)
+                .task(id: phase) {
+                    notch.appActive = phase == .active
+                    if phase == .background { NtfyBackground.schedule() }
+                    if phase == .active {
+                        await notch.onActive()
+                        await HealthSync.shared.auto(notch)
+                    }
+                }
+                .onAppear { LiveManager.shared.endOrphans() }
+        }
+    }
+}
+
+struct ContentView: View {
+    @EnvironmentObject var n: NotchModel
+    @State private var scanning = false
+    @State private var picks: [PhotosPickerItem] = []
+    @State private var importing = false
+    @State private var text = ""
+    @StateObject private var quick = QuickModel()
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if n.link == nil { pairSection } else { connectedSections }
+            }
+            .navigationTitle("Notch")
+            .sheet(isPresented: $scanning) {
+                ZStack(alignment: .topTrailing) {
+                    QRScanner { code in
+                        scanning = false
+                        Task { await n.pair(code) }
+                    }
+                    .ignoresSafeArea()
+                    Button("Abbrechen") { scanning = false }
+                        .padding(12)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding()
+                }
+            }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { r in
+                if case .success(let urls) = r {
+                    quick.remember(urls)
+                    Task { await n.send(files: urls) }
+                }
+            }
+            .onChange(of: picks) { items in
+                guard !items.isEmpty else { return }
+                picks = []
+                Task { await n.send(items) }
+            }
+        }
+    }
+
+    // MARK: Noch nicht gekoppelt
+
+    @ViewBuilder private var pairSection: some View {
+        Section {
+            Button { scanning = true } label: { Label("QR-Code scannen", systemImage: "qrcode.viewfinder") }
+            Button {
+                if let s = UIPasteboard.general.string { Task { await n.pair(s) } }
+            } label: { Label("Adresse aus Zwischenablage", systemImage: "doc.on.clipboard") }
+        } header: {
+            Text("Mit dem PC koppeln")
+        } footer: {
+            Text("Am PC: Notch › Einstellungen › iPhone › Kurzbefehl. Den QR-Code scannen oder die Adresse kopieren. PC und iPhone im selben WLAN.")
+        }
+        historySection
+    }
+
+    // MARK: Gekoppelt
+
+    @ViewBuilder private var connectedSections: some View {
+        Section {
+            HStack {
+                Circle().fill(n.online ? Color.green : Color.orange).frame(width: 10, height: 10)
+                VStack(alignment: .leading) {
+                    Text(n.link?.pc ?? "PC").font(.headline)
+                    Text(statusLine).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let w = n.working {
+                    HStack(spacing: 6) {
+                        if n.progress == nil { ProgressView() }
+                        Text(workLine(w)).font(.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Button("Prüfen") { Task { await n.check() } }.buttonStyle(.borderless)
+                }
+            }
+            if let p = n.progress, n.working != nil { ProgressView(value: p) }
+        }
+
+        QuickSendSections(quick: quick)
+
+        Section("Mehr senden") {
+            PhotosPicker(selection: $picks, matching: .any(of: [.images, .videos])) {
+                Label("Alle Fotos und Videos …", systemImage: "photo.on.rectangle")
+            }
+            Button { importing = true } label: { Label("Dateien …", systemImage: "folder") }
+            HStack {
+                TextField("Text oder Link", text: $text)
+                Button("Senden") {
+                    let t = text
+                    text = ""
+                    Task { await n.sendText(t, clip: false) }
+                }
+                .buttonStyle(.borderless)
+                .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .disabled(n.working != nil)
+
+        Section {
+            Button { Task { await n.fetch() } } label: { Label("Vom PC abholen", systemImage: "arrow.down.circle") }
+                .disabled(n.working != nil)
+        } header: {
+            Text("Vom PC")
+        } footer: {
+            Text("Was du am PC auf „iPhone“ ablegst, holt die App beim Öffnen von selbst. Fotos und Videos landen in Fotos, anderes in Dateien › Notch.")
+        }
+
+        Section {
+            NavigationLink { CameraView() } label: { Label("iPhone als Webcam", systemImage: "video") }
+            NavigationLink { ScreenView() } label: { Label("Bildschirm mit Ton streamen", systemImage: "rectangle.on.rectangle") }
+            NavigationLink { LolView() } label: { Label("League: annehmen, bannen, picken", systemImage: "gamecontroller") }
+            NavigationLink { HealthView() } label: { Label("Health-Export an den PC", systemImage: "heart.text.square") }
+        }
+
+        NotifySection()
+
+        historySection
+
+        Section {
+            Button("Kopplung lösen", role: .destructive) { n.unpair() }
+        } footer: {
+            Text(versionLine)
+        }
+    }
+
+    private func workLine(_ w: String) -> String {
+        guard let p = n.progress, p > 0, p < 1 else { return w }
+        return w + " \(Int(p * 100)) %"
+    }
+
+    private var statusLine: String {
+        var s = n.online ? "Verbunden" : "Nicht erreichbar"
+        if let t = n.lastCheck { s += " · geprüft " + t.formatted(date: .omitted, time: .standard) }
+        return s
+    }
+
+    private var versionLine: String {
+        let v = Bundle.main.infoDictionary
+        let short = v?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = v?["CFBundleVersion"] as? String ?? "?"
+        return "Version \(short) (Build \(build))"
+    }
+
+    @ViewBuilder private var historySection: some View {
+        if !n.history.isEmpty {
+            Section {
+                ForEach(n.history) { item in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: item.ok ? "checkmark.circle" : "exclamationmark.triangle")
+                                .foregroundStyle(item.ok ? Color.secondary : Color.orange)
+                            Text(item.text).font(.callout)
+                        }
+                        Text(item.date.formatted(date: .abbreviated, time: .shortened)).font(.caption2).foregroundStyle(.secondary)
+                        if item.retry != nil {
+                            Button("Erneut senden") { Task { await n.retry(item) } }
+                                .buttonStyle(.borderless).font(.callout).disabled(n.working != nil)
+                        }
+                    }
+                }
+                Button("Verlauf löschen", role: .destructive) { n.clearHistory() }
+            } header: {
+                Text("Verlauf")
+            }
+        }
+    }
+}

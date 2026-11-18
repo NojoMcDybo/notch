@@ -363,6 +363,25 @@ pub fn spawn(app: AppHandle) {
                         Err(e) => Response::from_string(format!("ungueltiges JSON: {e}")).with_status_code(400),
                     }
                 }
+                // Health-Export vom iPhone lesen (health.rs, Format in docs/health-export.md)
+                (Method::Get, p) if p.starts_with("/health-data") => {
+                    let q = |k: &str| query.split('&').find_map(|kv| kv.strip_prefix(k).and_then(|r| r.strip_prefix('='))).map(String::from);
+                    match crate::health::dir(&app) {
+                        None => Response::from_string("Kein Dokumente-Ordner").with_status_code(500),
+                        Some(d) => match &p["/health-data".len()..] {
+                            "" | "/overview" => Response::from_string(crate::health::overview(&d).to_string()).with_header(json),
+                            "/days" => Response::from_string(serde_json::to_string(&crate::health::days_in(&d)).unwrap()).with_header(json),
+                            "/records" => {
+                                let (from, to) = (q("from").unwrap_or_default(), q("to").unwrap_or_else(|| q("from").unwrap_or_default()));
+                                match crate::health::range_in(&d, &from, &to, q("type").as_deref()) {
+                                    Ok(v) => Response::from_string(serde_json::to_string(&v).unwrap()).with_header(json),
+                                    Err(e) => Response::from_string(e).with_status_code(400),
+                                }
+                            }
+                            _ => Response::from_string("not found").with_status_code(404),
+                        },
+                    }
+                }
                 (Method::Post, "/shelf") => {
                     // {"paths": ["C:\\…\\datei.pdf"]} -> Dateien in die Ablage legen (z. B. nach einem Export)
                     let mut body = String::new();

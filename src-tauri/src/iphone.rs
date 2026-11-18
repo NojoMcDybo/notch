@@ -421,7 +421,9 @@ pub fn handle(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpAdd
         Some(rest) if *req.method() == Method::Get && same(tok, &token(app)) => serve(app, rest.split('/').next().unwrap_or("")),
         _ => handle_inner(app, req, path, q, ip).boxed(),
     };
-    log(app, format!("{ip} {method} /{sub} -> {}", r.status_code().0));
+    if sub != "lol" {   // die App fragt es jede Sekunde ab
+        log(app, format!("{ip} {method} /{sub} -> {}", r.status_code().0));
+    }
     r
 }
 
@@ -459,6 +461,42 @@ fn handle_inner(app: &AppHandle, req: &mut Request, path: &str, q: &str, ip: IpA
             fetch_list(app, tok)
         }
         (Method::Get, "text") => fetch_text(app),
+        // Health-Export (health.rs): die App schickt Werte aus Apple Health, GET liefert die Uebersicht
+        (Method::Get, "health") => match crate::health::dir(app) {
+            Some(d) => json_resp(crate::health::overview(&d)),
+            None => plain(500, "Kein Dokumente-Ordner"),
+        },
+        (Method::Post, "health") => {
+            seen(app, ip, q);
+            let mut body = Vec::new();
+            if req.as_reader().take(32 * 1024 * 1024).read_to_end(&mut body).is_err() {
+                return plain(400, "abgebrochen");
+            }
+            let res = serde_json::from_slice::<Value>(&body).map_err(|e| format!("ungueltiges JSON: {e}")).and_then(|v| {
+                let d = crate::health::dir(app).ok_or("Kein Dokumente-Ordner")?;
+                crate::health::ingest_into(&d, &v)
+            });
+            match res {
+                Ok((added, skipped)) => {
+                    if added > 0 {
+                        let mut a = share::act("notch:iphone:health", "Health synchronisiert".into(), format!("{added} neue Werte vom iPhone"));
+                        a.ttl = Some(6);
+                        activities::upsert(app, a);
+                    }
+                    json_resp(json!({ "ok": true, "added": added, "skipped": skipped }))
+                }
+                Err(e) => plain(400, &e),
+            }
+        }
+        // League am iPhone (lol_phone.rs): Zustand lesen, Spiel annehmen, bannen, picken
+        (Method::Get, "lol") => json_resp(crate::lol_phone::state()),
+        (Method::Post, s) if s.starts_with("lol/") => {
+            let get = |k: &str| query(q, k).map(String::from);
+            match crate::lol_phone::act(&s[4..], &get) {
+                Ok(v) => json_resp(v),
+                Err(e) => plain(400, &e),
+            }
+        }
         // Automation „Wenn ich eine Nachricht bekomme“: ?von=Absender, Text im Body (Ersatz, wenn Bluetooth nicht geht)
         (Method::Post, "nachricht") => {
             seen(app, ip, q);
@@ -590,6 +628,17 @@ fn push(app: &AppHandle) {
             .header("Click", "shortcuts://run-shortcut?name=Notch")
             .send(what);
         if let Err(e) = r {
+            eprintln!("[notch] ntfy: {e}");
+        }
+    });
+}
+
+/// Freie Mitteilung aufs iPhone (nur wenn ntfy an ist)
+pub fn notify(app: &AppHandle, title: &str, body: &str) {
+    let Some(topic) = ntfy_topic(app) else { return };
+    let (title, body) = (title.to_string(), body.to_string());
+    std::thread::spawn(move || {
+        if let Err(e) = ureq::post(&format!("{NTFY}/{topic}")).header("Title", &title).send(body) {
             eprintln!("[notch] ntfy: {e}");
         }
     });
