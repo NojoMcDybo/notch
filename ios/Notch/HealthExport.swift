@@ -325,8 +325,12 @@ struct HealthView: View {
                 if !HealthSync.available {
                     Text("Health ist auf diesem Gerät nicht verfügbar.")
                 } else if !HealthSync.entitled {
-                    Text("Diese Installation darf nicht auf Health zugreifen: Das Profil enthält die Health-Berechtigung nicht (kostenloses Entwicklerkonto?).")
-                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Health direkt lesen geht mit dieser Installation nicht (kostenlose Apple-ID). So kommen die Daten trotzdem an den PC:")
+                            .foregroundStyle(.orange)
+                        Text("1. Health-App › dein Profilbild oben rechts\n2. „Alle Gesundheitsdaten exportieren“\n3. Teilen › Notch\n\nDer PC liest die Datei von selbst ein (Notch zeigt den Fortschritt, bei großen Dateien einige Minuten). Doppelte Werte erkennt er.")
+                            .font(.callout)
+                    }
                 } else if !h.asked {
                     Button { Task { await h.connect() } } label: { Label("Mit Health verbinden", systemImage: "heart.text.square") }
                 } else {

@@ -353,6 +353,10 @@ fn file_in(app: &AppHandle, req: &mut Request, head: Vec<u8>, name: &str, ctype:
     };
     let p = target.to_string_lossy().to_string();
     crate::shelf::shelf_add(app.clone(), vec![p]);
+    // Apples Health-Export (Health › Profil › Alle Gesundheitsdaten exportieren) wird von selbst eingelesen
+    if crate::health_import::looks_like_export(&name) {
+        crate::health::import_in_background(app, target.clone());
+    }
     let kind = share::kind_of(&name, ctype);
     let kinds = {
         let mut l = LIVE.lock().unwrap();

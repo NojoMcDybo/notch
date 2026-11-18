@@ -29,6 +29,8 @@ rustfft = "6"
 sha2 = "0.10"
 socket2 = { version = "0.5", features = ["all"] }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"
 
 [target.'cfg(windows)'.dependencies]
 # HTTPS fuer die iPhone-Kamera (cam.rs): Safari erlaubt die Kamera nur ueber https

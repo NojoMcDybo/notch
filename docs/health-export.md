@@ -60,6 +60,13 @@ Die Notch läuft auf `http://127.0.0.1:47800`. Nur lesen:
 
 Zeitraum, Wertart und Tage sind die einzigen Filter. Größere Zeiträume mit allen Wertarten liefern viele Zeilen (Puls ungefähr minütlich): nach `type` getrennt abfragen oder die Dateien direkt lesen.
 
+## Ohne Entwicklerkonto: Export-Datei
+
+Mit einer kostenlosen Apple-ID darf die App Health nicht direkt lesen. Dann: Health-App › Profilbild › „Alle Gesundheitsdaten exportieren“ › Teilen › Notch.
+Kommt eine Datei `export.zip` (oder `export.xml`) am PC an, liest die Notch sie von selbst ein (Fortschritt in der Notch, bei GB-Dateien einige Minuten) und legt die Werte in dieselben Tagesdateien.
+Unterschiede zum Abgleich der App: Der Export kennt keine UUIDs (`id` = Hash des Inhalts) und liefert Einheiten nach Health-Einstellung, die umgerechnet werden (km→m, lb→kg, mmol/L→mg/dL …). Nicht erkannte Wertarten oder Einheiten werden übersprungen.
+Doppelte erkennt die Notch am Inhalt (Art, Beginn, Ende, Quelle, Wert), egal ob ein Wert per Export oder per App kam.
+
 ## Abgleich vom iPhone
 
 - Die App gleicht beim Öffnen automatisch ab (höchstens alle 5 Minuten, abschaltbar) oder auf Knopfdruck. Beim ersten Mal die letzten 180 Tage, danach nur Neues oder Geändertes.
