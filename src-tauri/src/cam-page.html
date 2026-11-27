@@ -6,8 +6,8 @@
 <meta name="color-scheme" content="dark light">
 <title>iPhone-Kamera</title>
 <style>
-  :root { --bg: #000; --card: #1c1c1e; --fg: #fff; --fg2: #8e8e93; --green: #30d158; --blue: #0a84ff; }
-  @media (prefers-color-scheme: light) { :root { --bg: #f2f2f7; --card: #fff; --fg: #000; --fg2: #8a8a8e; --green: #34c759; --blue: #007aff; } }
+  :root { --bg: #000; --card: #1c1c1e; --card2: #2c2c2e; --fg: #fff; --fg2: #8e8e93; --green: #30d158; --blue: #0a84ff; --red: #ff453a; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f2f2f7; --card: #fff; --card2: #e5e5ea; --fg: #000; --fg2: #8a8a8e; --green: #34c759; --blue: #007aff; --red: #ff3b30; } }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--fg); font: 17px/1.3 -apple-system, system-ui, sans-serif; min-height: 100vh; padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; }
   main { max-width: 560px; width: 100%; margin: 0 auto; flex: 1; display: flex; flex-direction: column; gap: 14px; }
@@ -15,14 +15,32 @@
   .sub { color: var(--fg2); font-size: 15px; text-align: center; margin-top: -8px; }
   .view { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 16px; overflow: hidden; }
   video { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .view .badge { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,.55); color: #fff; font-size: 13px; padding: 3px 9px; border-radius: 99px; }
+  video.mirror { transform: scaleX(-1); }
+  .view .badge { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,.55); color: #fff; font-size: 13px; padding: 3px 9px; border-radius: 99px; font-variant-numeric: tabular-nums; }
   .view .badge.live { background: var(--green); }
-  button { width: 100%; padding: 15px; font: inherit; font-weight: 600; border: 0; border-radius: 14px; background: var(--blue); color: #fff; }
-  button.second { background: var(--card); color: var(--fg); font-weight: 400; }
-  button:disabled { opacity: .5; }
+  button { font: inherit; border: 0; color: inherit; background: none; cursor: pointer; }
+  #go { width: 100%; padding: 15px; font-weight: 600; border-radius: 14px; background: var(--blue); color: #fff; }
+  #go.stop { background: var(--red); }
+  button:disabled { opacity: .4; cursor: default; }
+  .chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .chip { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 4px; border-radius: 14px; background: var(--card); font-size: 13px; }
+  .chip svg { width: 22px; height: 22px; }
+  .chip[aria-pressed="true"] { background: var(--blue); color: #fff; }
+  .card { background: var(--card); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .card h2 { font-size: 13px; font-weight: 400; color: var(--fg2); text-transform: uppercase; letter-spacing: .02em; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .row > span { font-size: 16px; }
+  .seg { display: flex; background: var(--card2); border-radius: 9px; padding: 2px; flex: 0 1 230px; }
+  .seg.full { flex: 1 1 auto; }
+  .seg button { flex: 1; padding: 6px 4px; border-radius: 7px; font-size: 14px; }
+  .seg button[aria-pressed="true"] { background: var(--blue); color: #fff; font-weight: 600; }
+  .zoom { display: flex; align-items: center; gap: 10px; color: var(--fg2); }
+  .zoom input { flex: 1; accent-color: var(--blue); }
+  .small { font-size: 13px; color: var(--fg2); font-variant-numeric: tabular-nums; }
   .hint { color: var(--fg2); font-size: 14px; text-align: center; }
-  .err { color: #ff453a; font-size: 15px; text-align: center; }
+  .err { color: var(--red); font-size: 15px; text-align: center; }
   canvas { display: none; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -30,28 +48,145 @@
   <h1>iPhone-Kamera</h1>
   <p class="sub">Webcam für {{NAME}}</p>
   <div class="view"><video id="v" playsinline muted autoplay></video><span class="badge" id="badge">Aus</span></div>
-  <button id="go" type="button">Kamera starten</button>
-  <button id="flip" class="second" type="button" hidden>Vorder-/Rückkamera wechseln</button>
   <p class="err" id="err" hidden></p>
-  <p class="hint" id="hint">iPhone quer halten, Bildschirm an lassen und diese Seite offen halten. Am PC erscheint die Kamera „Notch iPhone“.</p>
+  <button id="go" type="button">Kamera starten</button>
+
+  <div class="chips">
+    <button class="chip" id="front" type="button" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2h6l2 2h3v11H4z"/><path d="M9.5 13.5a2.5 2.5 0 0 0 4.6 1.3M14.5 12.5a2.5 2.5 0 0 0-4.6-1.3"/><path d="M14.5 10.8v1.7h-1.7M9.5 15.2v-1.7h1.7"/></svg>
+      Frontkamera
+    </button>
+    <button class="chip" id="torch" type="button" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8v4l-2 3v11h-4V10L8 7z"/><path d="M8 7h8"/><circle cx="12" cy="14" r=".8" fill="currentColor"/></svg>
+      Licht
+    </button>
+    <button class="chip" id="mirror" type="button" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/></svg>
+      Spiegeln
+    </button>
+  </div>
+
+  <section class="card" id="framing">
+    <h2>Bildausschnitt</h2>
+    <div class="seg full" id="lens" hidden></div>
+    <div id="zoombox">
+      <div class="zoom">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M7.5 10.5h6"/></svg>
+        <input id="zoom" type="range" min="1" max="5" step="0.1" value="1" aria-label="Zoom">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M7.5 10.5h6M10.5 7.5v6"/></svg>
+      </div>
+      <p class="small" id="zoomtxt">Zoom 1,0×</p>
+    </div>
+    <p class="small" id="nozoom" hidden>Zoom wird von diesem Browser nicht unterstützt.</p>
+  </section>
+
+  <section class="card">
+    <h2>Übertragung</h2>
+    <div class="row"><span>Qualität</span>
+      <div class="seg" id="quality"><button type="button" data-v="0">Niedrig</button><button type="button" data-v="1">Normal</button><button type="button" data-v="2">Hoch</button></div>
+    </div>
+    <div class="row"><span>Bildrate</span>
+      <div class="seg" id="rate"><button type="button" data-v="15">15</button><button type="button" data-v="30">30</button></div>
+    </div>
+  </section>
+
+  <p class="hint">Das Bild folgt der Haltung des iPhones, quer ist für Videoanrufe am besten. Bildschirm an und diese Seite offen lassen; am PC erscheint die Kamera „Notch iPhone“ in Teams, Zoom und Chrome.</p>
   <canvas id="c" width="1280" height="720"></canvas>
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
-  const v = $("v"), c = $("c"), ctx = c.getContext("2d"), go = $("go"), flip = $("flip"), badge = $("badge"), err = $("err");
-  let stream = null, facing = "user", running = false, busy = false, last = 0, wake = null;
+  const v = $("v"), c = $("c"), ctx = c.getContext("2d"), go = $("go"), badge = $("badge"), err = $("err");
+  const QUALITY = [0.4, 0.6, 0.8];
+  const LENSES = [["ultra", "Ultraweit"], ["wide", "Weit"], ["tele", "Tele"]];
+  /** haengt ein Bild laenger, wird es abgebrochen und das naechste geschickt (sonst stuende der Strom) */
+  const SEND_TIMEOUT = 3000;
+
+  // Einstellungen wie in der Notch-App; bleiben in diesem Browser erhalten
+  const opts = Object.assign({ front: true, lens: "wide", quality: 1, rate: 30, mirror: false }, (() => {
+    try { return JSON.parse(localStorage.getItem("notch.cam") || "{}") || {}; } catch { return {}; }
+  })());
+  // alte oder fremde Werte nicht uebernehmen
+  if (![15, 30].includes(opts.rate)) opts.rate = 30;
+  if (![0, 1, 2].includes(opts.quality)) opts.quality = 1;
+  if (!["ultra", "wide", "tele"].includes(opts.lens)) opts.lens = "wide";
+  opts.front = !!opts.front; opts.mirror = !!opts.mirror;
+  function store() { try { localStorage.setItem("notch.cam", JSON.stringify(opts)); } catch {} }
+
+  let stream = null, track = null, caps = {}, base = {}, zoom = 1, torch = false;
+  let lensIds = {}, running = false, busy = false, last = 0, wake = null, sent = 0, since = 0, fps = 0;
 
   function fail(msg) { err.textContent = msg; err.hidden = !msg; }
 
-  async function open() {
+  // ---------- Kamera ----------
+
+  /** Rueckobjektive nach ihrem Namen (Safari: „Back Ultra Wide Camera“, „Rückseitige Ultraweitwinkelkamera“ …);
+   *  Dual/Triple sind Kombinationen, die Safari selbst umschaltet, und werden ausgelassen */
+  async function scanLenses() {
+    const ids = {};
+    try {
+      for (const d of await navigator.mediaDevices.enumerateDevices()) {
+        const l = d.label || "";
+        if (d.kind !== "videoinput" || !l || /front|vorder|facetime/i.test(l) || /dual|triple|dreifach/i.test(l)) continue;
+        const k = /ultra/i.test(l) ? "ultra" : /tele/i.test(l) ? "tele" : "wide";
+        if (!ids[k]) ids[k] = d.deviceId;
+      }
+    } catch {}
+    lensIds = ids;
+  }
+
+  function stopTracks() {
     if (stream) stream.getTracks().forEach((t) => t.stop());
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-      audio: false,
-    });
+    stream = null; track = null;
+  }
+
+  async function open() {
+    stopTracks();
+    base = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: opts.rate } };
+    const id = !opts.front && lensIds[opts.lens];
+    const want = id ? { ...base, deviceId: { exact: id } } : { ...base, facingMode: opts.front ? "user" : "environment" };
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: want, audio: false });
+    } catch (e) {
+      if (!id) throw e;
+      // Objektiv nicht (mehr) da: normale Rueckkamera
+      stream = await navigator.mediaDevices.getUserMedia({ video: { ...base, facingMode: "environment" }, audio: false });
+    }
+    track = stream.getVideoTracks()[0];
+    caps = (track && track.getCapabilities && track.getCapabilities()) || {};
+    zoom = caps.zoom ? Math.max(caps.zoom.min || 1, 1) : 1;
+    torch = false;
     v.srcObject = stream;
     await v.play();
+    // Namen der Objektive gibt Safari erst nach der Kamerafreigabe heraus
+    if (!Object.keys(lensIds).length) await scanLenses();
+    render();
   }
+
+  /** Bildrate, Zoom und Licht an die laufende Kamera geben; die Grundwerte (Groesse, Bildrate) gehen immer mit,
+   *  sonst setzt Safari sie zurueck. Beim Ziehen am Zoom wird gebuendelt: hoechstens ein Aufruf zur Zeit. */
+  let applying = false, again = false;
+  async function constrain() {
+    if (applying) { again = true; return; }
+    applying = true;
+    do {
+      again = false;
+      const t = track;
+      if (!t) break;
+      const x = {};
+      if (caps.zoom) x.zoom = zoom;
+      if ("torch" in caps) x.torch = torch;
+      try { await t.applyConstraints({ ...base, ...x }); continue; } catch {}
+      if (Object.keys(x).length) { try { await t.applyConstraints({ ...base, advanced: [x] }); } catch {} }
+    } while (again);
+    applying = false;
+  }
+
+  async function reopen() {
+    if (!running) { render(); return; }
+    try { await open(); fail(""); } catch (e) { fail("Kamera lässt sich nicht wechseln (" + (e && e.name || e) + ")."); }
+  }
+
+  // ---------- Senden ----------
 
   async function start() {
     fail("");
@@ -59,55 +194,143 @@
       fail("Kamera nicht verfügbar: Die Seite muss über https geöffnet sein (Adresse aus der Notch).");
       return;
     }
-    try { await open(); } catch (e) { fail("Kamera nicht freigegeben (" + (e && e.name || e) + "). In den Safari-Einstellungen für diese Seite erlauben."); return; }
+    running = true; render();
+    try { await open(); } catch (e) {
+      running = false; render();
+      fail("Kamera nicht freigegeben (" + (e && e.name || e) + "). In den Safari-Einstellungen für diese Seite erlauben.");
+      return;
+    }
     try { wake = await navigator.wakeLock.request("screen"); } catch {}
-    running = true; go.textContent = "Beenden"; flip.hidden = false;
+    sent = 0; since = performance.now(); fps = 0;
     loop();
   }
 
   function stop() {
     running = false;
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    stream = null; v.srcObject = null;
+    torch = false;
+    stopTracks();
+    caps = {};
+    v.srcObject = null;
     if (wake) { wake.release().catch(() => {}); wake = null; }
-    go.textContent = "Kamera starten"; flip.hidden = true; badge.textContent = "Aus"; badge.className = "badge";
+    badge.textContent = "Aus"; badge.className = "badge";
+    render();
   }
 
-  // Bild so in 1280x720 zeichnen, dass es das Feld fuellt (Hochkant wird mittig beschnitten)
+  // Bild so in 1280x720 zeichnen, dass es das Feld fuellt (Hochkant wird mittig beschnitten), auf Wunsch gespiegelt
   function draw() {
     const vw = v.videoWidth, vh = v.videoHeight;
     if (!vw || !vh) return false;
     const s = Math.max(1280 / vw, 720 / vh), dw = vw * s, dh = vh * s;
+    ctx.setTransform(opts.mirror ? -1 : 1, 0, 0, 1, opts.mirror ? 1280 : 0, 0);
     ctx.drawImage(v, (1280 - dw) / 2, (720 - dh) / 2, dw, dh);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     return true;
+  }
+
+  function counted() {
+    sent++;
+    const now = performance.now(), dt = now - since;
+    if (dt >= 1000) { fps = Math.round(sent * 1000 / dt); sent = 0; since = now; }
+    badge.textContent = fps ? "Sendet · " + fps + " Bilder/s" : "Sendet";
+    badge.className = "badge live";
   }
 
   async function loop() {
     while (running) {
       const now = performance.now();
-      if (!busy && now - last >= 33 && v.readyState >= 2 && draw()) {
+      // etwas Spiel, damit 30 Bilder/s nicht an der Taktung des Kamerabildes scheitern
+      if (!busy && now - last >= 1000 / opts.rate - 4 && v.readyState >= 2 && draw()) {
         last = now;
-        const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.72));
-        if (blob) {
+        const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", QUALITY[opts.quality] ?? 0.6));
+        if (blob && running) {
           busy = true;
-          fetch("frame", { method: "POST", body: blob, cache: "no-store" })
-            .then((r) => { if (!r.ok) throw new Error(r.status); badge.textContent = "Sendet"; badge.className = "badge live"; fail(""); })
-            .catch((e) => { badge.textContent = "Keine Verbindung"; badge.className = "badge"; fail("PC nicht erreichbar (" + e.message + ")."); })
-            .finally(() => { busy = false; });
+          const ac = new AbortController(), t = setTimeout(() => ac.abort(), SEND_TIMEOUT);
+          fetch("frame", { method: "POST", body: blob, cache: "no-store", signal: ac.signal })
+            .then((r) => {
+              if (r.status === 403) throw new Error("PC lehnt ab: Kamera am PC aus oder Kopplung erneuert");
+              if (!r.ok) throw new Error("Fehler " + r.status);
+              counted(); fail("");
+            })
+            .catch((e) => {
+              badge.textContent = "Keine Verbindung"; badge.className = "badge";
+              fail(e && e.name === "AbortError" ? "PC antwortet langsam, sende weiter …" : "PC nicht erreichbar (" + (e && e.message || e) + ").");
+            })
+            .finally(() => { clearTimeout(t); busy = false; });
         }
       }
       await new Promise((r) => setTimeout(r, 8));
     }
   }
 
+  // ---------- Oberflaeche ----------
+
+  function press(el, on) { el.setAttribute("aria-pressed", on ? "true" : "false"); }
+
+  function render() {
+    go.textContent = running ? "Beenden" : "Kamera starten";
+    go.classList.toggle("stop", running);
+    press($("front"), opts.front);
+    press($("mirror"), opts.mirror);
+    press($("torch"), torch);
+    $("torch").disabled = !running || opts.front || !("torch" in caps);
+    v.classList.toggle("mirror", opts.mirror);
+
+    const lens = $("lens"), avail = LENSES.filter(([k]) => lensIds[k]);
+    lens.hidden = opts.front || avail.length < 2;
+    if (!lens.hidden) {
+      lens.innerHTML = "";
+      for (const [k, name] of avail) {
+        const b = document.createElement("button");
+        b.type = "button"; b.textContent = name; press(b, opts.lens === k);
+        b.onclick = () => { if (opts.lens === k) return; opts.lens = k; store(); reopen(); };
+        lens.append(b);
+      }
+    }
+
+    // Zoom nur, wenn der Browser ihn anbietet (Safari ab iOS 17); erst nach dem Start bekannt
+    const z = $("zoom"), zc = caps.zoom;
+    $("zoombox").hidden = running && !zc;
+    $("nozoom").hidden = !(running && !zc);
+    z.disabled = !running || !zc;
+    if (zc) {
+      z.min = Math.max(zc.min || 1, 1); z.max = Math.max(Math.min(zc.max || 1, 8), Number(z.min) + 0.01);
+      z.step = zc.step && zc.step > 0 ? Math.max(zc.step, 0.05) : 0.1;
+    }
+    z.value = zoom;
+    $("zoomtxt").textContent = "Zoom " + zoom.toFixed(1).replace(".", ",") + "×";
+
+    for (const b of $("quality").children) press(b, Number(b.dataset.v) === opts.quality);
+    for (const b of $("rate").children) press(b, Number(b.dataset.v) === opts.rate);
+  }
+
   go.addEventListener("click", () => (running ? stop() : start()));
-  flip.addEventListener("click", async () => { facing = facing === "user" ? "environment" : "user"; try { await open(); } catch (e) { fail("Wechsel nicht möglich"); } });
+  $("front").addEventListener("click", () => { opts.front = !opts.front; torch = false; store(); reopen(); });
+  $("mirror").addEventListener("click", () => { opts.mirror = !opts.mirror; store(); render(); });
+  $("torch").addEventListener("click", () => { torch = !torch; render(); constrain(); });
+  $("zoom").addEventListener("input", (e) => {
+    zoom = Number(e.target.value);
+    $("zoomtxt").textContent = "Zoom " + zoom.toFixed(1).replace(".", ",") + "×";
+    constrain();
+  });
+  $("quality").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    opts.quality = Number(b.dataset.v); store(); render();
+  });
+  $("rate").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    const r = Number(b.dataset.v); if (r === opts.rate) return;
+    opts.rate = r; store();
+    base.frameRate = { ideal: r };
+    constrain();
+    render();
+  });
   // Bildschirm aus/Tab gewechselt: Safari haelt die Kamera an; beim Zurueckkommen neu starten
   document.addEventListener("visibilitychange", async () => {
     if (document.visibilityState === "visible" && running) {
       try { await open(); wake = await navigator.wakeLock.request("screen"); } catch {}
     }
   });
+  render();
 </script>
 </body>
 </html>

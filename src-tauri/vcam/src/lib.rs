@@ -1,7 +1,7 @@
 //! Virtuelle Kamera „Notch iPhone“: eine Media-Foundation-Quelle, die der Windows-Frame-Server laedt
 //! (MFCreateVirtualCamera, Windows 11). Sie liest fertige NV12-Bilder (1280x720) aus der Datei
-//! `%PUBLIC%\Notch\vcam.frame`, in die die Notch die Bilder vom iPhone schreibt, und zeigt ohne frisches Bild
-//! ein dunkles Platzhalterbild mit laufendem Balken.
+//! `%PUBLIC%\Notch\vcam.frame`, in die die Notch die Bilder vom iPhone schreibt. Bleibt ein neues Bild aus, steht
+//! das letzte weiter; erst nach `HOLD_MS` ohne neues Bild kommt ein schwarzes Bild mit dem Notch-Schriftzug.
 //!
 //! Der Frame-Server laeuft als LocalService: deshalb keine Pipes oder benannten Objekte, nur eine Datei, die jeder
 //! lesen darf. Dateikopf (64 Byte): "NCAM", seq (u64 @8, ungerade = wird gerade geschrieben), Breite (u32 @16),
@@ -27,8 +27,13 @@ pub const H: u32 = 720;
 const FPS: u32 = 30;
 const FRAME: usize = (W * H * 3 / 2) as usize;
 const HEADER: usize = 64;
-/// Bilder, die aelter sind, gelten als „iPhone nicht verbunden“
-const STALE_MS: u64 = 1500;
+/// So lange bleibt das letzte Bild stehen, wenn kein neues kommt; danach gilt das iPhone als „nicht verbunden“
+const HOLD_MS: u64 = 5000;
+/// Erwischt das Lesen die Notch mitten beim Schreiben, kurz warten und noch einmal lesen (statt ein Bild auszulassen)
+const READ_TRIES: u32 = 3;
+/// Notch-Schriftzug fuer das Platzhalterbild (aus icons/source.png, `node tools/vcam-logo.mjs`):
+/// u16 Breite, u16 Hoehe (little endian), dann Breite*Hoehe Byte Helligkeit
+const LOGO: &[u8] = include_bytes!("logo.bin");
 
 /// CLSID der Quelle; die Notch traegt sie unter HKCU/HKLM\Software\Classes\CLSID ein
 const CLSID_NOTCH_VCAM: GUID = GUID::from_u128(0x7c0c9b3e_5a1d_4f6b_9e47_2d6a1b8c3f10);
@@ -64,57 +69,130 @@ fn now_ms() -> u64 {
 
 // ---------- Bilder lesen ----------
 
+/// Liest die Bilder der Notch. Frueher fuehrte jedes Lesen, das die Notch mitten beim Schreiben erwischte (ungerade
+/// seq oder Bild waehrend des Lesens ueberschrieben), sofort zum Platzhalter: ein einzelnes dunkles Bild mitten im
+/// Strom. Jetzt bleibt immer das letzte ganze Bild stehen; neu gelesen wird in einen eigenen Puffer und nur ein
+/// geprueftes Bild ersetzt das alte.
 struct Feed {
+    path: std::path::PathBuf,
     file: Option<std::fs::File>,
+    /// letztes ganzes Bild
     buf: Vec<u8>,
+    /// Lesepuffer; wird erst nach der Pruefung zu `buf`
+    scratch: Vec<u8>,
+    /// Kennung (seq, Zeitstempel der Notch) des Bildes in `buf` und wann es hier ankam; `None` = noch keines
+    have: Option<((u64, u64), Instant)>,
+}
+
+/// Ergebnis eines Leseversuchs
+enum Step {
+    /// neues Bild uebernommen oder nichts Neues da
+    Done,
+    /// die Notch schreibt gerade: gleich noch einmal versuchen
+    Busy,
+    /// keine (brauchbare) Datei
+    Gone,
 }
 
 impl Feed {
     fn new() -> Self {
-        Feed { file: None, buf: vec![0; FRAME] }
+        Self::at(data_dir().join("vcam.frame"))
     }
 
-    /// Das neueste ganze Bild, `None` ohne frisches Bild (dann Platzhalter). Ein beim Lesen ueberschriebenes Bild
-    /// (seq geaendert) wird verworfen.
-    fn read(&mut self) -> Option<&[u8]> {
+    fn at(path: std::path::PathBuf) -> Self {
+        Feed { path, file: None, buf: vec![0; FRAME], scratch: vec![0; FRAME], have: None }
+    }
+
+    /// Dateikopf: `None` = keine gueltige Datei, `Some(None)` = wird gerade geschrieben, sonst (seq, Zeitstempel)
+    fn head(f: &std::fs::File) -> Option<Option<(u64, u64)>> {
+        use std::os::windows::fs::FileExt;
+        let mut h = [0u8; HEADER];
+        f.seek_read(&mut h, 0).ok().filter(|&n| n == HEADER)?;
+        let seq = u64::from_le_bytes(h[8..16].try_into().ok()?);
+        let (w, hh) = (u32::from_le_bytes(h[16..20].try_into().ok()?), u32::from_le_bytes(h[20..24].try_into().ok()?));
+        let stamp = u64::from_le_bytes(h[24..32].try_into().ok()?);
+        if &h[0..4] != b"NCAM" || (w, hh) != (W, H) {
+            return None;
+        }
+        Some((seq % 2 == 0).then_some((seq, stamp)))
+    }
+
+    fn try_read(&mut self) -> Step {
         use std::os::windows::fs::FileExt;
         if self.file.is_none() {
             // keine Verknuepfung als Bilddatei: der Frame-Server (LocalService) duerfte sonst fremde Dateien als Bild lesen
-            let p = data_dir().join("vcam.frame");
-            if std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink()) {
-                return None;
+            if std::fs::symlink_metadata(&self.path).is_ok_and(|m| m.file_type().is_symlink()) {
+                return Step::Gone;
             }
-            self.file = std::fs::File::open(p).ok();
+            self.file = std::fs::File::open(&self.path).ok();
         }
-        let f = self.file.as_ref()?;
-        let mut h = [0u8; HEADER];
-        let ok = (|| {
-            f.seek_read(&mut h, 0).ok().filter(|&n| n == HEADER)?;
-            let seq = u64::from_le_bytes(h[8..16].try_into().ok()?);
-            let (w, hh) = (u32::from_le_bytes(h[16..20].try_into().ok()?), u32::from_le_bytes(h[20..24].try_into().ok()?));
-            let stamp = u64::from_le_bytes(h[24..32].try_into().ok()?);
-            if &h[0..4] != b"NCAM" || seq % 2 == 1 || (w, hh) != (W, H) || now_ms().saturating_sub(stamp) > STALE_MS {
-                return None;
+        let Some(f) = self.file.as_ref() else { return Step::Gone };
+        let id = match Self::head(f) {
+            None => {
+                if std::fs::metadata(&self.path).is_err() {
+                    self.file = None; // Datei weg: beim naechsten Mal neu oeffnen
+                }
+                return Step::Gone;
             }
-            f.seek_read(&mut self.buf, HEADER as u64).ok().filter(|&n| n == FRAME)?;
-            f.seek_read(&mut h, 0).ok().filter(|&n| n == HEADER)?;
-            (u64::from_le_bytes(h[8..16].try_into().ok()?) == seq).then_some(())
-        })();
-        if ok.is_none() && std::fs::metadata(data_dir().join("vcam.frame")).is_err() {
-            self.file = None; // Datei weg: beim naechsten Mal neu oeffnen
+            Some(None) => return Step::Busy,
+            Some(Some(id)) => id,
+        };
+        // nichts Neues: das Bild nicht noch einmal lesen (weniger Arbeit, weniger Zusammenstoesse mit dem Schreiben)
+        if self.have.is_some_and(|(have, _)| have == id) {
+            return Step::Done;
         }
-        ok.map(|_| &self.buf[..])
+        if f.seek_read(&mut self.scratch, HEADER as u64).ok() != Some(FRAME) {
+            return Step::Gone;
+        }
+        // waehrend des Lesens ueberschrieben: verwerfen, `buf` bleibt unberuehrt
+        if Self::head(f) != Some(Some(id)) {
+            return Step::Busy;
+        }
+        std::mem::swap(&mut self.buf, &mut self.scratch);
+        self.have = Some((id, Instant::now()));
+        Step::Done
+    }
+
+    /// Ein neueres Bild holen, falls die Notch eins geschrieben hat
+    fn poll(&mut self) {
+        for i in 0..READ_TRIES {
+            if i > 0 {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            if !matches!(self.try_read(), Step::Busy) {
+                return;
+            }
+        }
+    }
+
+    /// Das anzuzeigende Bild: das letzte ganze, solange es hoechstens `HOLD_MS` alt ist (nach dem Zeitstempel der
+    /// Notch und nach der eigenen Uhr, falls die Systemzeit springt). `None` = Platzhalter.
+    fn current(&self, now: u64) -> Option<&[u8]> {
+        let ((_, stamp), got) = self.have?;
+        let fresh = now.saturating_sub(stamp) <= HOLD_MS && got.elapsed() <= Duration::from_millis(HOLD_MS);
+        fresh.then_some(&self.buf[..])
     }
 }
 
-/// Dunkles Bild mit laufendem hellem Balken
-fn placeholder(tick: u32, out: &mut [u8]) {
+/// Schwarzes Bild mit dem Notch-Schriftzug in der Mitte
+fn placeholder(out: &mut [u8]) {
     let (w, h) = (W as usize, H as usize);
-    out[..w * h].fill(40);
+    out[..w * h].fill(16); // Schwarz (begrenzter Bereich)
     out[w * h..].fill(128);
-    let x0 = (tick as usize * 8) % (w - 160);
-    for row in (h / 2 - 4)..(h / 2 + 4) {
-        out[row * w + x0..row * w + x0 + 160].fill(120);
+    if LOGO.len() < 4 {
+        return;
+    }
+    let (lw, lh) = (u16::from_le_bytes([LOGO[0], LOGO[1]]) as usize, u16::from_le_bytes([LOGO[2], LOGO[3]]) as usize);
+    if lw > w || lh > h || LOGO.len() < 4 + lw * lh {
+        return;
+    }
+    let (x0, y0) = ((w - lw) / 2, (h - lh) / 2);
+    for y in 0..lh {
+        for x in 0..lw {
+            // gedecktes Weiss (Y 200 statt 235), damit der Schriftzug nicht blendet
+            let a = LOGO[4 + y * lw + x] as u32;
+            out[(y0 + y) * w + x0 + x] = (16 + (a * (200 - 16) + 127) / 255) as u8;
+        }
     }
 }
 
@@ -187,7 +265,8 @@ fn deliver(queue: SendIt<IMFMediaEventQueue>, shared: Arc<Shared>) {
     }
     let queue = queue.0;
     let mut feed = Feed::new();
-    let mut frame = vec![0u8; FRAME];
+    let mut idle = vec![0u8; FRAME];
+    placeholder(&mut idle);
     let t0 = Instant::now();
     let mut n: u32 = 0;
     while shared.running.load(Ordering::Relaxed) {
@@ -196,10 +275,8 @@ fn deliver(queue: SendIt<IMFMediaEventQueue>, shared: Arc<Shared>) {
         std::thread::sleep(due.saturating_duration_since(Instant::now()));
         let token = shared.requests.lock().unwrap().pop_front();
         let Some(token) = token else { continue };
-        match feed.read() {
-            Some(f) => frame.copy_from_slice(f),
-            None => placeholder(n, &mut frame),
-        }
+        feed.poll();
+        let frame: &[u8] = feed.current(now_ms()).unwrap_or(&idle[..]);
         let r = (|| -> Result<()> {
             unsafe {
                 let buf = MFCreateMemoryBuffer(FRAME as u32)?;
@@ -559,4 +636,76 @@ pub extern "system" fn DllGetClassObject(clsid: *const GUID, riid: *const GUID, 
 pub extern "system" fn DllCanUnloadNow() -> HRESULT {
     // der Frame-Server haelt die Quelle; entladen bringt nichts
     S_FALSE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::windows::fs::FileExt;
+
+    /// Bilddatei wie die Notch sie schreibt (Kopf siehe oben)
+    fn write(f: &std::fs::File, seq: u64, stamp: u64, fill: u8) {
+        let mut h = [0u8; HEADER];
+        h[0..4].copy_from_slice(b"NCAM");
+        h[8..16].copy_from_slice(&seq.to_le_bytes());
+        h[16..20].copy_from_slice(&W.to_le_bytes());
+        h[20..24].copy_from_slice(&H.to_le_bytes());
+        h[24..32].copy_from_slice(&stamp.to_le_bytes());
+        f.seek_write(&h, 0).unwrap();
+        if seq % 2 == 0 {
+            f.seek_write(&vec![fill; FRAME], HEADER as u64).unwrap();
+        }
+    }
+
+    fn temp(name: &str) -> (std::path::PathBuf, std::fs::File) {
+        let p = std::env::temp_dir().join(format!("notch-vcam-test-{name}-{}.frame", std::process::id()));
+        let f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&p).unwrap();
+        f.set_len((HEADER + FRAME) as u64).unwrap();
+        (p, f)
+    }
+
+    #[test]
+    fn letztes_bild_bleibt_beim_schreiben_stehen() {
+        let (p, f) = temp("schreiben");
+        let mut feed = Feed::at(p.clone());
+        assert!(feed.current(now_ms()).is_none(), "ohne Bild: Platzhalter");
+        write(&f, 2, now_ms(), 50);
+        feed.poll();
+        assert_eq!(feed.current(now_ms()).unwrap()[0], 50);
+        // die Notch schreibt gerade (ungerade seq): kein Platzhalter, das letzte Bild bleibt
+        write(&f, 3, now_ms(), 0);
+        feed.poll();
+        assert_eq!(feed.current(now_ms()).unwrap()[0], 50);
+        write(&f, 4, now_ms(), 90);
+        feed.poll();
+        assert_eq!(feed.current(now_ms()).unwrap()[0], 90);
+        drop(f);
+        let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn nach_fuenf_sekunden_platzhalter() {
+        let (p, f) = temp("alt");
+        let mut feed = Feed::at(p.clone());
+        // 3 s alt: steht noch
+        write(&f, 2, now_ms() - 3000, 70);
+        feed.poll();
+        assert_eq!(feed.current(now_ms()).unwrap()[0], 70);
+        // mehr als HOLD_MS ohne neues Bild: Platzhalter
+        assert!(feed.current(now_ms() + HOLD_MS).is_none());
+        drop(f);
+        let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn platzhalter_schwarz_mit_schriftzug() {
+        let mut out = vec![0u8; FRAME];
+        placeholder(&mut out);
+        let (w, h) = (W as usize, H as usize);
+        assert_eq!(out[0], 16, "Rand schwarz");
+        assert!(out[w * h..].iter().all(|&c| c == 128), "keine Farbe");
+        assert!(out[..w * h].iter().any(|&y| y > 150), "Schriftzug fehlt");
+        let (lw, lh) = (u16::from_le_bytes([LOGO[0], LOGO[1]]) as usize, u16::from_le_bytes([LOGO[2], LOGO[3]]) as usize);
+        assert_eq!(LOGO.len(), 4 + lw * lh);
+    }
 }

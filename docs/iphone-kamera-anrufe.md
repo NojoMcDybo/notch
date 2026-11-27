@@ -22,8 +22,18 @@ Der PC verhält sich wie eine Uhr am iPhone und liest dessen Benachrichtigungen 
 Safari auf dem iPhone öffnet `https://<PC-Adresse>:53443/cam/<schlüssel>/` (QR-Code in Einstellungen › iPhone) und schickt je
 Bild ein JPEG (1280×720, ~30/s) an `POST …/frame`. Die Notch decodiert, wandelt nach NV12 und schreibt es in
 `%PUBLIC%\Notch\vcam.frame`. Daraus liest die virtuelle Kamera **„Notch iPhone“** (Media Foundation, `MFCreateVirtualCamera`,
-Windows 11); Teams, Zoom, Chrome und die Kamera-App sehen eine normale Webcam. Ohne frisches Bild zeigt sie ein dunkles Bild
-mit laufendem Balken.
+Windows 11); Teams, Zoom, Chrome und die Kamera-App sehen eine normale Webcam.
+
+- **Aussetzer:** Bleibt ein neues Bild aus (WLAN-Hänger, die Quelle liest gerade, während die Notch schreibt), zeigt die Kamera
+  das letzte ganze Bild weiter. Erst nach 5 s ohne neues Bild (`HOLD_MS` in `vcam/src/lib.rs`) kommt ein schwarzes Bild mit dem
+  Notch-Schriftzug (`vcam/src/logo.bin`, erzeugt mit `node tools/vcam-logo.mjs` aus `icons/source.png`). Früher brachte jedes
+  Lesen, das die Notch mitten beim Schreiben erwischte, sofort ein dunkles Platzhalterbild: das waren die einzelnen schwarzen
+  Bilder im laufenden Strom. Die Quelle liest jetzt nur noch, wenn ein neues Bild da ist, in einen eigenen Puffer, und versucht
+  es bei einem Zusammenstoß nach 2 ms erneut.
+- **Einstellungen auf der Browserseite** (wie in der App, gespeichert im Browser): Front-/Rückkamera, Licht, Spiegeln,
+  Objektiv (Ultraweit/Weit/Tele, erkannt am Gerätenamen), Zoom, Qualität (JPEG 0,4/0,6/0,8) und Bildrate (15/30). Zoom und
+  Licht nur, wenn Safari sie anbietet (`getCapabilities`, ab iOS 17). Ein Bild, das länger als 3 s nicht angenommen wird,
+  bricht die Seite ab und schickt das nächste (vorher konnte ein hängender Upload den Strom anhalten).
 
 - **HTTPS:** Safari erlaubt die Kamera nur über https. Die Notch erzeugt ein eigenes Zertifikat (`rcgen`, gültig für die LAN-Adresse
   und `<PC>.local`); Safari fragt beim ersten Öffnen einmal „Verbindung nicht privat“ › Details › Trotzdem besuchen. Ändert sich
@@ -39,7 +49,7 @@ mit laufendem Balken.
 - **Quelle (`vcam/`):** eigenes Paket, wird von `build.rs` mit eigenem Zielordner gebaut und in `notch.exe` eingebettet.
   Im Dienst gibt es kein Protokoll (nur mit `--features log` beim Fehlersuchen) und die Bilddatei darf keine Verknüpfung sein.
 - **Grenzen:** Safari muss im Vordergrund bleiben und der Bildschirm an (Wake Lock hilft). Quer halten; Hochkant wird mittig
-  beschnitten. Kein Objektivwechsel auf Ultraweitwinkel. Die iPhone-Seite (Kamerazugriff, Zertifikat-Ausnahme, Bildrate)
+  beschnitten. Die iPhone-Seite (Kamerazugriff, Zertifikat-Ausnahme, Bildrate)
   ist **noch nicht am iPhone geprüft**; die Strecke PC-Seite bis zur virtuellen Kamera ist mit einem JPEG per HTTPS bis in
   Media Foundation geprüft.
 - **Deinstallieren:** die Notch entfernt die systemweite Eintragung nicht selbst. Von Hand (Administrator-PowerShell):
@@ -49,6 +59,7 @@ mit laufendem Balken.
 
 ```
 cargo test --lib                                   # Protokoll, Farbumrechnung, Seitenplatzhalter
+cargo test --manifest-path vcam/Cargo.toml         # Quelle: letztes Bild halten, Platzhalter nach 5 s
 cargo test --lib vcam::tests::vcam_ende -- --ignored --nocapture   # virtuelle Kamera Ende zu Ende (NOTCH_EXE = gebaute notch.exe)
 ```
 
