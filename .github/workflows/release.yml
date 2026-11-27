@@ -39,9 +39,132 @@ jobs:
       # virtuelle Kamera (laeuft im Windows-Frame-Server): schlaegt hier etwas fehl, entsteht kein Release
       - name: Tests (virtuelle Kamera)
         run: cargo test --manifest-path src-tauri/vcam/Cargo.toml
-      - run: npx tauri build --bundles nsis
+
+      # Code-Signatur (SignPath Foundation), damit die Intelligente App-Steuerung von Windows Installer, notch.exe und
+      # die Kamera-DLL zulaesst. Aktiv, sobald das Secret SIGNPATH_API_TOKEN gesetzt ist; sonst unsigniert wie bisher.
+      # Reihenfolge: DLL (steckt in notch.exe) -> notch.exe (steckt im Installer) -> Installer. Einrichtung: docs/signieren.md
+      - name: Signieren aktiv?
+        id: sign
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          $on = if ($env:SIGNPATH_API_TOKEN) { 'true' } else { 'false' }
+          "on=$on" >> $env:GITHUB_OUTPUT
+          if ($on -eq 'false') { Write-Host '::warning::SIGNPATH_API_TOKEN fehlt: Release wird nicht signiert (die Intelligente App-Steuerung blockiert es dann)' }
+
+      - name: Bauen und verpacken (unsigniert)
+        if: steps.sign.outputs.on != 'true'
+        run: npx tauri build --bundles nsis
         env:
           # signiert das Update (.sig); den passenden oeffentlichen Schluessel prueft die App
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+
+      # 1) Kamera-DLL
+      - name: Kamera-DLL bauen
+        if: steps.sign.outputs.on == 'true'
+        run: |
+          cargo build --release --manifest-path src-tauri/vcam/Cargo.toml --target-dir vcam-target
+          New-Item -ItemType Directory -Force signing/dll | Out-Null
+          Copy-Item vcam-target/release/notch_vcam.dll signing/dll/
+      - name: Kamera-DLL hochladen
+        if: steps.sign.outputs.on == 'true'
+        id: up-dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-dll
+          path: signing/dll
+      - name: Kamera-DLL signieren
+        if: steps.sign.outputs.on == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'notch' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIG || 'windows' }}
+          github-artifact-id: ${{ steps.up-dll.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signing/dll-signed
+
+      # 2) notch.exe mit der signierten DLL
+      - name: notch.exe bauen
+        if: steps.sign.outputs.on == 'true'
+        run: |
+          $env:NOTCH_VCAM_DLL = (Resolve-Path signing/dll-signed/notch_vcam.dll).Path
+          npx tauri build --no-bundle
+          New-Item -ItemType Directory -Force signing/exe | Out-Null
+          Copy-Item src-tauri/target/release/notch.exe signing/exe/
+      - name: notch.exe hochladen
+        if: steps.sign.outputs.on == 'true'
+        id: up-exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exe
+          path: signing/exe
+      - name: notch.exe signieren
+        if: steps.sign.outputs.on == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'notch' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIG || 'windows' }}
+          github-artifact-id: ${{ steps.up-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signing/exe-signed
+
+      # 3) Installer aus der signierten notch.exe
+      - name: Installer verpacken
+        if: steps.sign.outputs.on == 'true'
+        run: |
+          Copy-Item signing/exe-signed/notch.exe src-tauri/target/release/notch.exe -Force
+          npx tauri bundle --bundles nsis
+          New-Item -ItemType Directory -Force signing/setup | Out-Null
+          Copy-Item src-tauri/target/release/bundle/nsis/*-setup.exe signing/setup/
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+      - name: Installer hochladen
+        if: steps.sign.outputs.on == 'true'
+        id: up-setup
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-setup
+          path: signing/setup
+      - name: Installer signieren
+        if: steps.sign.outputs.on == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'notch' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIG || 'windows' }}
+          github-artifact-id: ${{ steps.up-setup.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signing/setup-signed
+      - name: Signierten Installer uebernehmen, Update-Signatur neu, Signaturen pruefen
+        if: steps.sign.outputs.on == 'true'
+        run: |
+          $setup = Get-ChildItem signing/setup-signed/*-setup.exe | Select-Object -First 1
+          $dest = Join-Path src-tauri/target/release/bundle/nsis $setup.Name
+          Copy-Item $setup.FullName $dest -Force
+          # die Update-Signatur (.sig) muss zur signierten Datei passen
+          Remove-Item "$dest.sig" -ErrorAction SilentlyContinue
+          # direkt ueber node statt npx, damit das leere Passwort als leeres Argument ankommt
+          node node_modules/@tauri-apps/cli/tauri.js signer sign --private-key "$env:TAURI_SIGNING_PRIVATE_KEY" --password "" $dest
+          if (-not (Test-Path "$dest.sig")) { throw "Update-Signatur fehlt" }
+          foreach ($f in @($dest, 'src-tauri/target/release/notch.exe', 'signing/dll-signed/notch_vcam.dll')) {
+            $s = Get-AuthenticodeSignature $f
+            Write-Host "$f : $($s.Status) ($($s.SignerCertificate.Subject))"
+            if ($s.Status -ne 'Valid') { throw "$f ist nicht gueltig signiert: $($s.StatusMessage)" }
+          }
+        env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
       - name: Release anlegen, Installer und latest.json hochladen

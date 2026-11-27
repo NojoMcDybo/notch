@@ -8,17 +8,25 @@ fn main() {
     // notch.exe eingebettet (vcam.rs legt sie beim Einschalten der iPhone-Kamera ab)
     println!("cargo:rerun-if-changed=vcam/src");
     println!("cargo:rerun-if-changed=vcam/Cargo.toml");
+    // Release mit Signatur: die Action baut und signiert die DLL vorher und gibt sie hier herein (NOTCH_VCAM_DLL),
+    // damit die eingebettete Quelle signiert ist (die Intelligente App-Steuerung laedt sonst keine neue Fassung)
+    println!("cargo:rerun-if-env-changed=NOTCH_VCAM_DLL");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-        let target = out.join("vcam-target");
-        let ok = std::process::Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-            .args(["build", "--release", "--manifest-path", "vcam/Cargo.toml", "--target-dir"])
-            .arg(&target)
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        assert!(ok, "vcam (virtuelle Kamera) konnte nicht gebaut werden");
-        std::fs::copy(target.join("release").join("notch_vcam.dll"), out.join("notch_vcam.dll")).expect("notch_vcam.dll");
+        if let Some(signed) = std::env::var_os("NOTCH_VCAM_DLL").filter(|p| !p.is_empty()) {
+            println!("cargo:rerun-if-changed={}", std::path::Path::new(&signed).display());
+            std::fs::copy(&signed, out.join("notch_vcam.dll")).expect("NOTCH_VCAM_DLL nicht lesbar");
+        } else {
+            let target = out.join("vcam-target");
+            let ok = std::process::Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+                .args(["build", "--release", "--manifest-path", "vcam/Cargo.toml", "--target-dir"])
+                .arg(&target)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            assert!(ok, "vcam (virtuelle Kamera) konnte nicht gebaut werden");
+            std::fs::copy(target.join("release").join("notch_vcam.dll"), out.join("notch_vcam.dll")).expect("notch_vcam.dll");
+        }
         // Kennung fuer den Dateinamen im Programme-Ordner: FNV-1a der DLL, damit niemand eine Versionsnummer pflegen muss
         let dll = std::fs::read(out.join("notch_vcam.dll")).expect("notch_vcam.dll lesen");
         let hash = dll.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100_0000_01b3));

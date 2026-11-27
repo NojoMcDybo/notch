@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath-Artefaktkonfiguration "windows" fuer die Notch: signiert jede .exe und .dll im hochgeladenen Artefakt
+     (Kamera-DLL, notch.exe, Installer; je Lauf eine davon). Inhalt in SignPath unter Project > Artifact configurations
+     eintragen oder dort "aus dem Repository" auf diese Datei zeigen lassen. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file-set>
+      <include path="*.exe" min-matches="0" max-matches="unbounded" />
+      <include path="*.dll" min-matches="0" max-matches="unbounded" />
+      <for-each>
+        <authenticode-sign />
+      </for-each>
+    </pe-file-set>
+  </zip-file>
+</artifact-configuration>
