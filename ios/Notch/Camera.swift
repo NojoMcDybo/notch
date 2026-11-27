@@ -258,7 +258,9 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
                     let f = Int((Double(self.frames) / dt).rounded())
                     (self.frames, self.since) = (0, Date())
                     let msg: String? = err != nil || !(200..<300).contains(code)
-                        ? (code == 403 ? "PC lehnt ab: Kamera am PC aus oder Kopplung erneuert" : "PC nicht erreichbar")
+                        ? (code == 403 ? "PC lehnt ab: Kamera am PC aus oder Kopplung erneuert"
+                            : code == 409 ? "Am PC sendet schon ein anderes Gerät oder ein Safari-Fenster"
+                            : "PC nicht erreichbar")
                         : nil
                     DispatchQueue.main.async { self.fps = msg == nil ? f : 0; self.error = msg }
                 }

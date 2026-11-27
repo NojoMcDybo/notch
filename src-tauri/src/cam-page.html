@@ -100,6 +100,10 @@
   const LENSES = [["ultra", "Ultraweit"], ["wide", "Weit"], ["tele", "Tele"]];
   /** haengt ein Bild laenger, wird es abgebrochen und das naechste geschickt (sonst stuende der Strom) */
   const SEND_TIMEOUT = 3000;
+  /** Kennung dieser Seite: die Notch nimmt nur von einem Absender zur Zeit Bilder an (sonst blinkt das Bild) */
+  const CID = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)).replace(/-/g, "").slice(0, 32);
+  /** bei einer Absage (anderer Absender aktiv): so lange warten bis zum naechsten Versuch */
+  const BUSY_RETRY = 1000;
 
   // Einstellungen wie in der Notch-App; bleiben in diesem Browser erhalten
   const opts = Object.assign({ front: true, lens: "wide", quality: 1, rate: 30, mirror: false }, (() => {
@@ -113,7 +117,7 @@
   function store() { try { localStorage.setItem("notch.cam", JSON.stringify(opts)); } catch {} }
 
   let stream = null, track = null, caps = {}, base = {}, zoom = 1, torch = false;
-  let lensIds = {}, running = false, busy = false, last = 0, wake = null, sent = 0, since = 0, fps = 0;
+  let lensIds = {}, running = false, busy = false, last = 0, wake = null, sent = 0, since = 0, fps = 0, holdUntil = 0;
 
   function fail(msg) { err.textContent = msg; err.hidden = !msg; }
 
@@ -239,14 +243,21 @@
     while (running) {
       const now = performance.now();
       // etwas Spiel, damit 30 Bilder/s nicht an der Taktung des Kamerabildes scheitern
-      if (!busy && now - last >= 1000 / opts.rate - 4 && v.readyState >= 2 && draw()) {
+      if (!busy && now >= holdUntil && now - last >= 1000 / opts.rate - 4 && v.readyState >= 2 && draw()) {
         last = now;
         const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", QUALITY[opts.quality] ?? 0.6));
         if (blob && running) {
           busy = true;
           const ac = new AbortController(), t = setTimeout(() => ac.abort(), SEND_TIMEOUT);
-          fetch("frame", { method: "POST", body: blob, cache: "no-store", signal: ac.signal })
+          fetch("frame?c=" + CID, { method: "POST", body: blob, cache: "no-store", signal: ac.signal })
             .then((r) => {
+              if (r.status === 409) {
+                // ein anderes Fenster oder die App sendet gerade: still warten, danach uebernimmt diese Seite von selbst
+                holdUntil = performance.now() + BUSY_RETRY;
+                badge.textContent = "Wartet"; badge.className = "badge";
+                fail("Ein anderes Fenster oder die Notch-App sendet gerade an die Notch. Diese Seite sendet, sobald es aufhört.");
+                return;
+              }
               if (r.status === 403) throw new Error("PC lehnt ab: Kamera am PC aus oder Kopplung erneuert");
               if (!r.ok) throw new Error("Fehler " + r.status);
               counted(); fail("");

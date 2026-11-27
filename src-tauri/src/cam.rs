@@ -8,6 +8,7 @@
 //! Aus, bis der Schalter in Einstellungen › iPhone an ist; die einmalige Einrichtung der virtuellen Kamera braucht
 //! Administratorrechte (siehe vcam.rs).
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -29,6 +30,8 @@ const PORT: u16 = 53443;
 const MAX_FRAME: u64 = 3 * 1024 * 1024;
 /// ein Tonstueck (~0,1 s) ist ~20 KB
 const MAX_AUDIO: u64 = 512 * 1024;
+/// so lange gilt ein Absender ohne neues Bild noch als aktiv
+const SENDER_IDLE: Duration = Duration::from_secs(2);
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 
@@ -46,6 +49,8 @@ struct Live {
     /// die laufende Uebertragung ist der Bildschirm (sonst die Kamera)
     screen: bool,
     error: String,
+    /// aktive Absender: Kennung -> (erstes Bild, letztes Bild); siehe `claim`
+    senders: HashMap<String, (Instant, Instant)>,
 }
 
 static LIVE: Mutex<Option<Live>> = Mutex::new(None);
@@ -139,6 +144,7 @@ fn handle(app: &AppHandle, mut req: Request) {
     let path = url.split('?').next().unwrap_or("");
     let rest = path.strip_prefix("/cam/").unwrap_or("");
     let (tok, sub) = rest.split_once('/').unwrap_or((rest, ""));
+    let who = sender(&req, &url);
     let r = if !ENABLED.load(Ordering::Relaxed) {
         plain(403, "Kamera ist aus (Notch › Einstellungen › iPhone).")
     } else if !crate::iphone::token_ok(app, tok) {
@@ -148,9 +154,14 @@ fn handle(app: &AppHandle, mut req: Request) {
             (Method::Get, "") => Response::from_string(PAGE.replace("{{NAME}}", &share::html_escape(&share::alias())))
                 .with_header(header("Content-Type", "text/html; charset=utf-8"))
                 .with_header(header("Cache-Control", "no-store")),
-            (Method::Post, "frame") => frame(app, &mut req, false),
+            (Method::Post, "frame") => frame(app, &mut req, false, &who),
             // Bildschirm: gleiche virtuelle Kamera, aber mit schwarzen Raendern statt gestreckt
-            (Method::Post, "screen") => frame(app, &mut req, true),
+            (Method::Post, "screen") => frame(app, &mut req, true, &who),
+            // Ton nur vom Absender, dessen Bild gerade gezeigt wird (sonst liefe der Ton einer abgelehnten Uebertragung)
+            (Method::Post, "audio") if !owner_ok(&who) => {
+                let _ = req.as_reader().take(MAX_AUDIO + 1).read_to_end(&mut Vec::new());
+                plain(409, "Es sendet schon ein anderes Gerät oder Fenster an die Notch.")
+            }
             (Method::Post, "audio") => audio(&url, &mut req),
             _ => plain(404, "nicht gefunden"),
         }
@@ -158,10 +169,50 @@ fn handle(app: &AppHandle, mut req: Request) {
     let _ = req.respond(r);
 }
 
-fn frame(app: &AppHandle, req: &mut Request, screen: bool) -> Response<std::io::Cursor<Vec<u8>>> {
+/// Absender einer Anfrage: Kennung der Seite (`?c=`, je geoeffneter Seite neu), sonst Programm (User-Agent) und
+/// Adresse; so sind Safari, die Notch-App und die Bildschirmuebertragung auch ohne Kennung auseinanderzuhalten
+fn sender(req: &Request, url: &str) -> String {
+    let id = url
+        .split_once('?')
+        .and_then(|(_, q)| q.split('&').find_map(|p| p.strip_prefix("c=")))
+        .filter(|v| !v.is_empty() && v.len() <= 64);
+    if let Some(id) = id {
+        return format!("c:{id}");
+    }
+    let ua = req.headers().iter().find(|h| h.field.equiv("User-Agent")).map(|h| h.value.to_string()).unwrap_or_default();
+    let ip = req.remote_addr().map(|a| a.ip().to_string()).unwrap_or_default();
+    format!("ua:{ip}:{ua}")
+}
+
+/// Nur ein Absender zur Zeit: es gilt der zuletzt gestartete. Senden zwei (Safari-Seite und App, zwei Tabs), wechselten
+/// sich sonst ihre Bilder in der Kamera ab; ein Absender im Hintergrund schickte dabei schwarze Bilder (Blinken).
+/// Die anderen bekommen eine Absage, bis der aktive `SENDER_IDLE` lang nichts mehr schickt; danach uebernimmt der
+/// naechste von selbst.
+fn claim(key: &str) -> bool {
+    live(|l| {
+        let now = Instant::now();
+        l.senders.retain(|_, (_, last)| now.duration_since(*last) < SENDER_IDLE);
+        l.senders.entry(key.to_string()).and_modify(|e| e.1 = now).or_insert((now, now));
+        l.senders.iter().max_by_key(|(_, (first, _))| *first).is_some_and(|(k, _)| k == key)
+    })
+}
+
+/// Darf dieser Absender gerade senden, ohne sich anzumelden (Ton)? Ja, wenn er das Bild liefert oder niemand sendet.
+fn owner_ok(key: &str) -> bool {
+    live(|l| {
+        let now = Instant::now();
+        l.senders.retain(|_, (_, last)| now.duration_since(*last) < SENDER_IDLE);
+        l.senders.iter().max_by_key(|(_, (first, _))| *first).is_none_or(|(k, _)| k == key)
+    })
+}
+
+fn frame(app: &AppHandle, req: &mut Request, screen: bool, who: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let mut body = Vec::new();
     if req.as_reader().take(MAX_FRAME + 1).read_to_end(&mut body).is_err() || body.len() as u64 > MAX_FRAME {
         return plain(400, "Bild zu gross oder abgebrochen");
+    }
+    if !claim(who) {
+        return plain(409, "Es sendet schon ein anderes Gerät oder Fenster an die Notch.");
     }
     if let Err(e) = push(&body, screen) {
         return plain(400, &e);
@@ -429,6 +480,28 @@ pub fn status_json(app: &AppHandle) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nur_der_zuletzt_gestartete_absender_zaehlt() {
+        let (a, b) = ("test:absender-a", "test:absender-b");
+        assert!(claim(a), "erster Absender");
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(claim(b), "neu gestarteter Absender uebernimmt");
+        assert!(!claim(a), "der aeltere bekommt eine Absage");
+        assert!(!owner_ok(a) && owner_ok(b), "Ton nur vom aktiven Absender");
+        assert!(claim(b));
+        // b hoert auf: nach SENDER_IDLE uebernimmt a von selbst
+        live(|l| {
+            if let Some(e) = l.senders.get_mut(b) {
+                e.1 -= SENDER_IDLE;
+            }
+        });
+        assert!(claim(a));
+        live(|l| {
+            l.senders.remove(a);
+            l.senders.remove(b);
+        });
+    }
 
     #[test]
     fn letterbox_portrait_screen_gets_black_bars() {

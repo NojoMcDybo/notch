@@ -30,6 +30,10 @@ Windows 11); Teams, Zoom, Chrome und die Kamera-App sehen eine normale Webcam.
   Lesen, das die Notch mitten beim Schreiben erwischte, sofort ein dunkles Platzhalterbild: das waren die einzelnen schwarzen
   Bilder im laufenden Strom. Die Quelle liest jetzt nur noch, wenn ein neues Bild da ist, in einen eigenen Puffer, und versucht
   es bei einem Zusammenstoß nach 2 ms erneut.
+- **Nur ein Absender:** Senden zwei Quellen gleichzeitig (Safari-Seite und App, zwei Tabs, Kamera und Bildschirm), nimmt
+  die Notch nur die zuletzt gestartete an; die anderen bekommen `409` und warten (Seite: „Wartet“), bis die aktive 2 s
+  lang nichts mehr schickt. Vorher wechselten sich die Bilder ab, und eine Quelle im Hintergrund schickte schwarze Bilder
+  (regelmäßiges Blinken). Erkannt wird der Absender an `?c=<Kennung>` (Browserseite) oder an User-Agent und Adresse.
 - **Einstellungen auf der Browserseite** (wie in der App, gespeichert im Browser): Front-/Rückkamera, Licht, Spiegeln,
   Objektiv (Ultraweit/Weit/Tele, erkannt am Gerätenamen), Zoom, Qualität (JPEG 0,4/0,6/0,8) und Bildrate (15/30). Zoom und
   Licht nur, wenn Safari sie anbietet (`getCapabilities`, ab iOS 17). Ein Bild, das länger als 3 s nicht angenommen wird,
