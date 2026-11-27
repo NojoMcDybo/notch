@@ -36,6 +36,9 @@ jobs:
           }
           "tag=$tag" >> $env:GITHUB_OUTPUT
       - run: npm ci --include=dev
+      # virtuelle Kamera (laeuft im Windows-Frame-Server): schlaegt hier etwas fehl, entsteht kein Release
+      - name: Tests (virtuelle Kamera)
+        run: cargo test --manifest-path src-tauri/vcam/Cargo.toml
       - run: npx tauri build --bundles nsis
         env:
           # signiert das Update (.sig); den passenden oeffentlichen Schluessel prueft die App
