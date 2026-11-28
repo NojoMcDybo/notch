@@ -47,7 +47,8 @@ Windows 11); Teams, Zoom, Chrome und die Kamera-App sehen eine normale Webcam.
 - **Bildrate (bis 60/s):** Bis zu drei Bilder sind gleichzeitig unterwegs (`?s=<Nummer>`, ein überholtes verwirft die
   Notch), sonst bestimmte die WLAN-Laufzeit die Rate. Die Notch antwortet sofort und rechnet im Hintergrund um
   (`queue_push`, nur das neueste wartende Bild). Die virtuelle Kamera bietet 30 und 60 Bilder/s an; das öffnende
-  Programm wählt. Die Seite taktet mit `requestVideoFrameCallback`; die App wählt für 60/s ein passendes Kameraformat
+  Programm wählt. Die Seite taktet mit `requestVideoFrameCallback` und kodiert in drei Workern (OffscreenCanvas,
+  `convertToBlob`, Safari ab 16.4; im Haupt-Thread nur `createImageBitmap`), sonst wie bisher mit `toBlob`; die App wählt für 60/s ein passendes Kameraformat
   und verkleinert auf 1280×720. Zoom aus der Notch gleitet (Seite: ~180 ms, App: `ramp(toVideoZoomFactor:)`).
 - **Hintergrund:** Die Browserseite sendet nicht, solange Safari sie in den Hintergrund legt (dann kämen nur schwarze
   Bilder; so entstand früher das regelmäßige Blinken bei zwei Instanzen).

@@ -320,40 +320,104 @@
     step();
   }
 
+  // ---------- Verpacken im Hintergrund ----------
+  // Zuschneiden, Spiegeln, JPEG-Kodieren und Senden laufen in Workern (OffscreenCanvas, Safari ab 16.4). Im
+  // Haupt-Thread bleibt nur das Abgreifen des Kamerabildes (createImageBitmap, schnell); so stocken weder Vorschau noch
+  // Bedienung, und mehrere Bilder werden gleichzeitig kodiert. Ohne Worker-Unterstuetzung der bisherige Weg (toBlob).
+  const WORKER = `
+    let cv = null, ctx = null;
+    self.onmessage = async (e) => {
+      const { bmp, n, url, q, mirror, timeout } = e.data;
+      try {
+        if (!cv) { cv = new OffscreenCanvas(1280, 720); ctx = cv.getContext("2d", { alpha: false }); }
+        // Bild so in 1280x720, dass es das Feld fuellt (Hochkant wird mittig beschnitten), auf Wunsch gespiegelt
+        const s = Math.max(1280 / bmp.width, 720 / bmp.height), dw = bmp.width * s, dh = bmp.height * s;
+        ctx.setTransform(mirror ? -1 : 1, 0, 0, 1, mirror ? 1280 : 0, 0);
+        ctx.drawImage(bmp, (1280 - dw) / 2, (720 - dh) / 2, dw, dh);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        bmp.close();
+        const blob = await cv.convertToBlob({ type: "image/jpeg", quality: q });
+        const ac = new AbortController(), t = setTimeout(() => ac.abort(), timeout);
+        try {
+          const r = await fetch(url, { method: "POST", body: blob, cache: "no-store", signal: ac.signal });
+          const body = r.status === 200 ? await r.text() : "";
+          self.postMessage({ n, status: r.status, live: r.headers.get("X-Notch-Live"), rev: r.headers.get("X-Notch-Rev"), body });
+        } finally { clearTimeout(t); }
+      } catch (err) {
+        try { bmp && bmp.close(); } catch (_) {}
+        self.postMessage({ n, error: (err && err.name) || "Error", msg: String((err && err.message) || err) });
+      }
+    };`;
+
+  /** Worker-Pool (je ein Bild gleichzeitig je Worker); null = Safari kann es nicht, bisheriger Weg */
+  const pool = (() => {
+    try {
+      if (typeof Worker !== "function" || typeof OffscreenCanvas !== "function" || typeof createImageBitmap !== "function") return null;
+      const probe = new OffscreenCanvas(1, 1);
+      if (!probe.getContext("2d") || typeof probe.convertToBlob !== "function") return null;
+      const url = URL.createObjectURL(new Blob([WORKER], { type: "text/javascript" }));
+      return Array.from({ length: MAX_INFLIGHT }, () => {
+        const w = { worker: new Worker(url), busy: false };
+        w.worker.onmessage = (e) => { w.busy = false; inflight--; handled(e.data); };
+        w.worker.onerror = () => { w.busy = false; inflight = Math.max(0, inflight - 1); };
+        return w;
+      });
+    } catch { return null; }
+  })();
+
   function capture() {
     const now = performance.now();
     // etwas Spiel, damit die Bildrate nicht an der Taktung des Kamerabildes scheitert
-    if (inflight >= MAX_INFLIGHT || document.visibilityState !== "visible" || now - last < 1000 / opts.rate - 4 || v.readyState < 2 || !draw()) return;
+    if (inflight >= MAX_INFLIGHT || document.visibilityState !== "visible" || now - last < 1000 / opts.rate - 4 || v.readyState < 2) return;
+    const w = pool && pool.find((x) => !x.busy);
+    if (pool && !w) return;
+    if (!pool && !draw()) return;
     last = now;
     inflight++;
     const n = ++frameNo;
-    // toBlob uebernimmt das Bild sofort; danach darf schon das naechste gezeichnet werden
+    const url = new URL("frame?" + QS + "&s=" + n + "&r=" + knownRev, location.href).href;
+    if (w) {
+      // nur abgreifen; alles Weitere im Worker (das Bild wird uebergeben, nicht kopiert)
+      w.busy = true;
+      createImageBitmap(v).then(
+        (bmp) => w.worker.postMessage({ bmp, n, url, q: QUALITY[opts.quality] ?? 0.6, mirror: opts.mirror, timeout: SEND_TIMEOUT }, [bmp]),
+        () => { w.busy = false; inflight--; },
+      );
+      return;
+    }
+    // bisheriger Weg: toBlob uebernimmt das Bild sofort; danach darf schon das naechste gezeichnet werden
     c.toBlob((blob) => {
       if (!blob || !running) { inflight--; return; }
-      send(blob, n);
+      send(blob, url, n);
     }, "image/jpeg", QUALITY[opts.quality] ?? 0.6);
   }
 
-  function send(blob, n) {
+  function send(blob, url, n) {
     const ac = new AbortController(), t = setTimeout(() => ac.abort(), SEND_TIMEOUT);
-    fetch("frame?" + QS + "&s=" + n + "&r=" + knownRev, { method: "POST", body: blob, cache: "no-store", signal: ac.signal })
-      .then(async (r) => {
-        if (r.status === 403) throw new Error("PC lehnt ab: Kamera am PC aus oder Kopplung erneuert");
-        if (!r.ok) throw new Error("Fehler " + r.status);
-        const lv = r.headers.get("X-Notch-Live");
-        if (lv != null) isLive = lv === "1";
-        if (r.status === 200) {
-          // in der Notch geaendert: kommt gleich mit der Antwort
-          const j = await r.json().catch(() => null);
-          if (j && (Number(j.rev) || 0) > knownRev) { knownRev = Number(j.rev); applyRemote(j.settings || {}); }
-        } else if ((Number(r.headers.get("X-Notch-Rev")) || 0) > knownRev) pullSettings();
-        counted(); fail("");
-      })
-      .catch((e) => {
-        badge.textContent = "Keine Verbindung"; badge.className = "badge";
-        fail(e && e.name === "AbortError" ? "PC antwortet langsam, sende weiter …" : "PC nicht erreichbar (" + (e && e.message || e) + ").");
-      })
+    fetch(url, { method: "POST", body: blob, cache: "no-store", signal: ac.signal })
+      .then(async (r) => handled({ n, status: r.status, live: r.headers.get("X-Notch-Live"), rev: r.headers.get("X-Notch-Rev"), body: r.status === 200 ? await r.text() : "" }))
+      .catch((e) => handled({ n, error: (e && e.name) || "Error", msg: String((e && e.message) || e) }))
       .finally(() => { clearTimeout(t); inflight--; });
+  }
+
+  /** Antwort der Notch auf ein Bild (aus dem Worker oder dem bisherigen Weg) */
+  function handled(r) {
+    if (!running) return;
+    if (r.error || r.status === 403 || !(r.status >= 200 && r.status < 300)) {
+      badge.textContent = "Keine Verbindung"; badge.className = "badge";
+      fail(r.error === "AbortError" ? "PC antwortet langsam, sende weiter …"
+        : r.status === 403 ? "PC lehnt ab: Kamera am PC aus oder Kopplung erneuert"
+        : "PC nicht erreichbar (" + (r.msg || "Fehler " + r.status) + ").");
+      return;
+    }
+    if (r.live != null) isLive = r.live === "1";
+    if (r.status === 200 && r.body) {
+      // in der Notch geaendert: kommt gleich mit der Antwort
+      let j = null;
+      try { j = JSON.parse(r.body); } catch {}
+      if (j && (Number(j.rev) || 0) > knownRev) { knownRev = Number(j.rev); applyRemote(j.settings || {}); }
+    } else if ((Number(r.rev) || 0) > knownRev) pullSettings();
+    counted(); fail("");
   }
 
   /** Zoom aus der Notch: in ~180 ms weich zum neuen Wert gleiten statt springen */
