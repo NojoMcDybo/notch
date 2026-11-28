@@ -37,14 +37,17 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
     /// Hinten verfuegbare Objektive (iPhone 13: ultraweit und weit)
     let lenses: [Lens]
 
-    // Einstellungen, bleiben erhalten
-    @Published var front: Bool { didSet { store(); reconfigure() } }
-    @Published var lens: Lens { didSet { zoom = 1; torch = false; store(); reconfigure() } }
-    @Published var quality: Int { didSet { store(); queue.async { [q = quality] in self.jpegQuality = [0.4, 0.6, 0.8][min(max(q, 0), 2)] } } }
-    @Published var rate: Int { didSet { store(); adjust() } }
-    @Published var mirror: Bool { didSet { store(); queue.async { [m = mirror] in self.mirrored = m } } }
-    @Published var zoom = 1.0 { didSet { adjust() } }
-    @Published var torch = false { didSet { adjust() } }
+    /// Dieses Geraet ist am PC live (in der Kamera „Notch iPhone“); sonst sieht man es nur als Vorschau in der Notch
+    @Published private(set) var isLive = true
+
+    // Einstellungen, bleiben erhalten; beidseitig mit der Notch abgeglichen (syncOut / applyRemote)
+    @Published var front: Bool { didSet { store(); reconfigure(); syncOut() } }
+    @Published var lens: Lens { didSet { zoom = 1; torch = false; store(); reconfigure(); syncOut() } }
+    @Published var quality: Int { didSet { store(); queue.async { [q = quality] in self.jpegQuality = [0.4, 0.6, 0.8][min(max(q, 0), 2)] }; syncOut() } }
+    @Published var rate: Int { didSet { store(); adjust(); syncOut() } }
+    @Published var mirror: Bool { didSet { store(); queue.async { [m = mirror] in self.mirrored = m }; syncOut() } }
+    @Published var zoom = 1.0 { didSet { adjust(); syncOut() } }
+    @Published var torch = false { didSet { adjust(); syncOut() } }
 
     private let capture = AVCaptureSession()
     private let queue = DispatchQueue(label: "notch.cam")
@@ -61,6 +64,16 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
     private var previewPending = false
     private var orientation = AVCaptureVideoOrientation.landscapeRight
     private var applied: AVCaptureVideoOrientation?
+    /// Kennung dieses Starts und Name in der Notch: mehrere Geraete duerfen gleichzeitig senden, die Notch zeigt sie
+    /// als Vorschau und schaltet eines live
+    private var cid = ""
+    private var deviceName = "iPhone · App"
+    /// Stand der Einstellungen, den die App kennt (nur auf `queue`); ist der der Notch hoeher, holt sie sie ab
+    private var knownRev = 0
+    private var pulling = false
+    // nur auf main
+    private var applyingRemote = false
+    private var postWork: DispatchWorkItem?
 
     override init() {
         let d = UserDefaults.standard
@@ -95,6 +108,10 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
 
     func start(_ url: URL) {
         target = url
+        cid = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        deviceName = "\(UIDevice.current.model) · App"
+        isLive = true
+        queue.async { self.knownRev = 0 }
         Task { @MainActor [self] in
             guard await AVCaptureDevice.requestAccess(for: .video) else {
                 self.error = "Kein Kamerazugriff (iPhone-Einstellungen › Notch › Kamera)"
@@ -165,8 +182,91 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
             self.error = nil
             self.maxZoom = max(maxZ, 1.01)
             self.hasTorch = torchOK
+            // Zoombereich und Licht haengen an der Kamera: der Notch melden
+            self.postSettings()
         }
         applyDevice(dev)
+    }
+
+    // MARK: Abgleich mit der Notch
+    // Beidseitig: was hier geaendert wird, geht an die Notch (POST settings); aendert man es in der Notch, meldet die
+    // Antwort auf das naechste Bild einen hoeheren Stand (X-Notch-Rev) und die App holt die Einstellungen ab.
+
+    /// Adresse neben `frame` (settings, frame) mit Kennung und Name
+    private func endpoint(_ name: String) -> URL? {
+        guard let target, var c = URLComponents(url: target.deletingLastPathComponent().appendingPathComponent(name), resolvingAgainstBaseURL: false) else { return nil }
+        c.queryItems = [URLQueryItem(name: "c", value: cid), URLQueryItem(name: "n", value: deviceName)]
+        return c.url
+    }
+
+    /// Auf main: eine Aenderung am iPhone an die Notch melden (nicht, waehrend Werte aus der Notch uebernommen werden)
+    private func syncOut() {
+        if !applyingRemote && running { postSettings() }
+    }
+
+    /// Auf main: gebuendelt melden (beim Ziehen am Zoom nicht bei jedem Schritt)
+    private func postSettings() {
+        postWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.sendSettings() }
+        postWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: w)
+    }
+
+    private func sendSettings() {
+        guard running, let u = endpoint("settings") else { return }
+        let body: [String: Any] = [
+            "settings": ["front": front, "lens": lens.rawValue, "quality": quality, "rate": rate, "mirror": mirror, "zoom": zoom, "torch": torch] as [String: Any],
+            "caps": ["lenses": lenses.map(\.rawValue), "zoom": ["min": 1.0, "max": maxZoom] as [String: Double], "torch": hasTorch] as [String: Any],
+        ]
+        var r = URLRequest(url: u)
+        r.httpMethod = "POST"
+        r.timeoutInterval = 5
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        net.dataTask(with: r) { [weak self] data, _, _ in
+            guard let self, let data,
+                  let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let rev = obj["rev"] as? Int else { return }
+            self.queue.async { self.knownRev = max(self.knownRev, rev) }
+        }.resume()
+    }
+
+    /// Auf `queue`: in der Notch geaenderte Einstellungen abholen
+    private func pullSettings() {
+        guard !pulling, let u = endpoint("settings") else { return }
+        pulling = true
+        var r = URLRequest(url: u)
+        r.timeoutInterval = 5
+        net.dataTask(with: r) { [weak self] data, _, _ in
+            guard let self else { return }
+            let obj = data.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+            self.queue.async {
+                self.pulling = false
+                guard let obj else { return }
+                if let rev = obj["rev"] as? Int { self.knownRev = max(self.knownRev, rev) }
+                let s = obj["settings"] as? [String: Any] ?? [:]
+                DispatchQueue.main.async { self.applyRemote(s) }
+            }
+        }.resume()
+    }
+
+    /// Auf main: Einstellungen aus der Notch uebernehmen, ohne sie gleich wieder zurueckzumelden
+    private func applyRemote(_ s: [String: Any]) {
+        applyingRemote = true
+        defer { applyingRemote = false }
+        if let v = s["front"] as? Bool, v != front { front = v }
+        if let v = (s["lens"] as? String).flatMap(Lens.init(rawValue:)), v != lens, lenses.contains(v) { lens = v }
+        if let v = s["quality"] as? Int, (0...2).contains(v), v != quality { quality = v }
+        if let v = s["rate"] as? Int, [15, 30].contains(v), v != rate { rate = v }
+        if let v = s["mirror"] as? Bool, v != mirror { mirror = v }
+        if let v = s["zoom"] as? Double {
+            let z = min(max(v, 1), maxZoom)
+            if abs(z - zoom) > 0.01 { zoom = z }
+        }
+        if let v = s["torch"] as? Bool {
+            let t = v && hasTorch && !front
+            if t != torch { torch = t }
+        }
     }
 
     /// Zoom, Bildrate und Taschenlampe aendern, waehrend die Kamera laeuft
@@ -243,14 +343,22 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
         }
 
         busy = true
-        var r = URLRequest(url: target)
+        var r = URLRequest(url: endpoint("frame") ?? target)
         r.httpMethod = "POST"
         r.timeoutInterval = 5
         r.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
         net.uploadTask(with: r, from: jpeg) { [weak self] _, resp, err in
             guard let self else { return }
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let http = resp as? HTTPURLResponse
+            let code = http?.statusCode ?? 0
+            // Stand vom PC: ist dieses Geraet live, wurden Einstellungen in der Notch geaendert
+            let liveNow = http?.value(forHTTPHeaderField: "X-Notch-Live").map { $0 == "1" }
+            let rev = Int(http?.value(forHTTPHeaderField: "X-Notch-Rev") ?? "") ?? 0
+            if let liveNow {
+                DispatchQueue.main.async { if self.isLive != liveNow { self.isLive = liveNow } }
+            }
             self.queue.async {
+                if rev > self.knownRev { self.pullSettings() }
                 self.busy = false
                 self.frames += 1
                 let dt = Date().timeIntervalSince(self.since)

@@ -39,6 +39,9 @@ jobs:
       # virtuelle Kamera (laeuft im Windows-Frame-Server): schlaegt hier etwas fehl, entsteht kein Release
       - name: Tests (virtuelle Kamera)
         run: cargo test --manifest-path src-tauri/vcam/Cargo.toml
+      # Windows-Teile der Notch (iPhone-Kamera: Geraete, Live-Wahl, Einstellungen); der Mac-Testbuild prueft den Rest
+      - name: Tests (Notch, Windows)
+        run: cargo test --lib --manifest-path src-tauri/Cargo.toml cam::
 
       # Code-Signatur (SignPath Foundation), damit die Intelligente App-Steuerung von Windows Installer, notch.exe und
       # die Kamera-DLL zulaesst. Aktiv, sobald das Secret SIGNPATH_API_TOKEN gesetzt ist; sonst unsigniert wie bisher.

@@ -687,7 +687,11 @@ pub fn run() {
             iphone::iphone_sendto,
             ancs::ancs_set,
             cam::cam_set,
-            cam::cam_setup
+            cam::cam_setup,
+            cam::cam_sources,
+            cam::cam_preview,
+            cam::cam_live,
+            cam::cam_config
         ])
         .setup(|app| {
             shelf::load(app.handle());

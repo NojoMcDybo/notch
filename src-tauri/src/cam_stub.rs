@@ -15,6 +15,26 @@ pub fn cam_setup(_app: AppHandle) -> Result<Value, String> {
     Err("Die iPhone-Kamera gibt es nur unter Windows.".into())
 }
 
+#[tauri::command]
+pub fn cam_sources() -> Value {
+    json!([])
+}
+
+#[tauri::command]
+pub fn cam_preview(_key: String) -> Option<String> {
+    None
+}
+
+#[tauri::command]
+pub fn cam_live(_app: AppHandle, _key: String) -> Result<(), String> {
+    Err("Die iPhone-Kamera gibt es nur unter Windows.".into())
+}
+
+#[tauri::command]
+pub fn cam_config(_key: String, _patch: Value) -> Result<(), String> {
+    Err("Die iPhone-Kamera gibt es nur unter Windows.".into())
+}
+
 pub fn url(_app: &AppHandle) -> String {
     String::new()
 }

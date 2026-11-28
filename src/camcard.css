@@ -1,0 +1,48 @@
+/* ---------- iPhone-Kamera in der aufgeklappten Notch (camcard.ts) ----------
+ * Vorschau je sendendem Geraet (das Live-Geraet mit gruenem Rand, Klick schaltet um), darunter ruhige Schalter fuer
+ * das Live-Geraet: helle Pillen fuer an, Segmente fuer Objektiv, Qualitaet und Bildrate. */
+.act.camc { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 8px; cursor: default; }
+.act.camc:hover { background: none; }
+.cc-head { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+.cc-title { color: #30d158; font-weight: 600; }
+.cc-sub { color: var(--fg2); overflow: hidden; text-overflow: ellipsis; }
+.cc-tiles { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.cc-tiles:empty { display: none; }
+.cc-tiles[data-n="1"] { grid-template-columns: minmax(0, 320px); justify-content: center; }
+.cc-tiles[data-n="2"] { grid-template-columns: 1fr 1fr; }
+.cc-tiles[data-n="3"] { grid-template-columns: 1fr 1fr 1fr; }
+.cc-tile { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #000; cursor: pointer; box-shadow: inset 0 0 0 2px transparent; transition: box-shadow 0.2s, transform 0.12s; }
+.cc-tile::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 2px transparent; transition: box-shadow 0.2s; pointer-events: none; }
+.cc-tile.live { cursor: default; }
+.cc-tile.live::after { box-shadow: inset 0 0 0 2px #30d158; }
+.cc-tile:not(.live):hover::after { box-shadow: inset 0 0 0 2px var(--fg3); }
+.cc-tile:not(.live):active { transform: scale(0.98); }
+.cc-tile img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity 0.3s; }
+.cc-tile img:not([src]) { visibility: hidden; }
+.cc-tile.idle img { opacity: 0.35; }
+.cc-name { position: absolute; left: 8px; right: 8px; bottom: 6px; font-size: 11px; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-badge { position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 99px; background: rgba(0, 0, 0, 0.55); color: #fff; font-variant-numeric: tabular-nums; }
+.cc-tile.live .cc-badge { background: #30d158; color: #000; }
+.cc-ctl { display: flex; flex-direction: column; gap: 8px; }
+.cc-chip, .cc-seg button { display: grid; place-items: center; text-align: center; white-space: nowrap; }
+.cc-ctl:empty { display: none; }
+.cc-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cc-chips > * { flex: 1; }
+.cc-chip { height: 28px; border-radius: 14px; font-size: 12px; color: var(--fg2); background: rgba(255, 255, 255, 0.06); transition: background 0.15s, color 0.15s; }
+.cc-chip:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.cc-chip[aria-pressed="true"] { background: rgba(255, 255, 255, 0.92); color: #000; font-weight: 500; }
+.cc-chip:disabled { opacity: 0.35; cursor: default; }
+.cc-seg { display: flex; flex: 1; min-width: 0; background: rgba(255, 255, 255, 0.06); border-radius: 9px; padding: 2px; }
+.cc-seg button { flex: 1; height: 24px; border-radius: 7px; font-size: 11.5px; color: var(--fg2); transition: background 0.15s, color 0.15s; }
+.cc-seg button:hover { color: var(--fg); }
+.cc-seg button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.92); color: #000; font-weight: 600; }
+.cc-lbl { font-size: 11px; color: var(--fg2); flex: none; }
+.cc-zoom input { flex: 1; min-width: 0; accent-color: #30d158; }
+.cc-val { font-size: 11.5px; color: var(--fg); width: 36px; text-align: right; font-variant-numeric: tabular-nums; flex: none; }
+.cc-pair { gap: 12px; }
+.cc-field { flex: 1 1 60%; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cc-field + .cc-field { flex: 1 1 40%; }
+.cc-note { font-size: 11.5px; color: var(--fg2); }
+@media (prefers-reduced-motion: reduce) {
+  .cc-tile, .cc-tile::after, .cc-tile img { transition: none; }
+}

@@ -16,6 +16,10 @@ import { MusicReactor, type Spectrum } from "./music-react";
 import { iconNode, iconUrl, liquid, NOJO_ICONS, type IconName } from "./nojo/nojo-ui";
 import { Deck, LAYOUT_CLS, normalizeCards, stableOrder, type CardsState } from "./cards";
 import { fillPomo, pomoChime, pomoPicker, pomoWhen, type PomoInfo } from "./pomodoro";
+import { camWhen, fillCam } from "./camcard";
+
+/** Zeile der iPhone-Kamera (cam.rs): eigene Karte mit Vorschau und Einstellungen (camcard.ts) */
+const CAM_ID = "notch:iphone:cam";
 
 // Symbole aus der Bibliothek einsetzen (index.html hat nur Platzhalter <svg data-icon="…">), bevor jemand sie sucht
 document.querySelectorAll<SVGElement>("svg[data-icon]").forEach((s) => {
@@ -1257,6 +1261,13 @@ function fillRow(row: HTMLElement, a: Activity) {
     return;
   }
   delete row.dataset.phase;
+  if (a.id === CAM_ID) {
+    setCls(row, "act camc");
+    row.style.removeProperty("--accent");
+    row.title = "";
+    fillCam(row, a);
+    return;
+  }
   if (isBg(a)) {
     // Verlaufs-Karte (Haze): eigener Aufbau, wird nur neu gezeichnet, wenn sich etwas Sichtbares aendert
     setCls(row, "act bg");
@@ -2101,6 +2112,7 @@ async function main() {
   );
   cardsAdd.addEventListener("click", (e) => { e.stopPropagation(); if (menuOpen) closeMenu(); else openCardsMenu(); });
   pomoWhen(() => state === "expanded");
+  camWhen(() => state === "expanded", () => render(false));
 
   // Tabs
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((t) =>

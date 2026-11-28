@@ -30,10 +30,54 @@ const PORT: u16 = 53443;
 const MAX_FRAME: u64 = 3 * 1024 * 1024;
 /// ein Tonstueck (~0,1 s) ist ~20 KB
 const MAX_AUDIO: u64 = 512 * 1024;
-/// so lange gilt ein Absender ohne neues Bild noch als aktiv
-const SENDER_IDLE: Duration = Duration::from_secs(2);
+/// so lange gilt ein Geraet ohne neues Bild noch als sendend
+const ACTIVE: Duration = Duration::from_secs(3);
+/// schweigt das Live-Geraet so lange, uebernimmt ein anderes sendendes (wie lange die Kamera das letzte Bild haelt)
+const LIVE_FALLBACK: Duration = Duration::from_secs(5);
+/// so lange bleibt ein verstummtes Geraet in der Liste (Einstellungen, Vorschau)
+const FORGET: Duration = Duration::from_secs(20);
+/// Einstellungen, die Notch und Geraet austauschen (Bedeutung siehe cam-page.html / Camera.swift)
+const SETTING_KEYS: &[&str] = &["front", "lens", "quality", "rate", "mirror", "zoom", "torch"];
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// Ein Geraet, das Bilder schickt (Safari-Seite, Notch-App, Bildschirmuebertragung). Mehrere duerfen gleichzeitig
+/// senden; die virtuelle Kamera zeigt nur das Live-Geraet, die anderen sieht man als Vorschau in der Notch.
+struct Src {
+    name: String,
+    /// erster Kontakt; die Liste ist danach sortiert
+    first: Instant,
+    /// letztes Bild (`None`: bisher nur Einstellungen gemeldet)
+    last: Option<Instant>,
+    /// letztes Bild als JPEG, fuer die Vorschau in der Notch
+    jpeg: Vec<u8>,
+    /// zaehlt die Bilder; die Vorschau holt nur neue
+    seq: u64,
+    /// Bildschirmuebertragung statt Kamera
+    screen: bool,
+    /// Bilder im laufenden Zeitfenster, Beginn des Fensters, Bildrate
+    count: u32,
+    since: Instant,
+    fps: u32,
+    /// Einstellungen (beidseitig: Geraet meldet seine, die Notch aendert sie) und was das Geraet kann
+    settings: Value,
+    caps: Value,
+    /// Stand der Einstellungen; das Geraet erfaehrt ihn mit jeder Antwort und holt neue ab
+    rev: u64,
+}
+
+impl Src {
+    fn new(name: &str) -> Self {
+        let now = Instant::now();
+        Src {
+            name: name.into(), first: now, last: None, jpeg: Vec::new(), seq: 0, screen: false,
+            count: 0, since: now, fps: 0, settings: json!({}), caps: json!({}), rev: 0,
+        }
+    }
+    fn active(&self) -> bool {
+        self.last.is_some_and(|t| t.elapsed() < ACTIVE)
+    }
+}
 
 #[derive(Default)]
 struct Live {
@@ -41,16 +85,13 @@ struct Live {
     /// Adressen, fuer die das laufende Zertifikat gilt
     names: Vec<String>,
     writer: Option<vcam::Writer>,
-    /// Bilder im laufenden Zeitfenster, Beginn des Fensters, letztes Bild
-    count: u32,
-    since: Option<Instant>,
-    last: Option<Instant>,
-    fps: u32,
-    /// die laufende Uebertragung ist der Bildschirm (sonst die Kamera)
-    screen: bool,
+    /// verbundene Geraete (Schluessel siehe `sender`)
+    sources: HashMap<String, Src>,
+    /// dieses Geraet liefert das Bild der virtuellen Kamera
+    live_key: Option<String>,
+    /// Zeile „iPhone-Kamera“ wird angezeigt; zuletzt aktualisiert
+    shown: Option<Instant>,
     error: String,
-    /// aktive Absender: Kennung -> (erstes Bild, letztes Bild); siehe `claim`
-    senders: HashMap<String, (Instant, Instant)>,
 }
 
 static LIVE: Mutex<Option<Live>> = Mutex::new(None);
@@ -145,6 +186,7 @@ fn handle(app: &AppHandle, mut req: Request) {
     let rest = path.strip_prefix("/cam/").unwrap_or("");
     let (tok, sub) = rest.split_once('/').unwrap_or((rest, ""));
     let who = sender(&req, &url);
+    let name = param(&url, "n").map(|n| n.chars().filter(|c| !c.is_control()).take(40).collect::<String>()).unwrap_or_default();
     let r = if !ENABLED.load(Ordering::Relaxed) {
         plain(403, "Kamera ist aus (Notch › Einstellungen › iPhone).")
     } else if !crate::iphone::token_ok(app, tok) {
@@ -154,13 +196,15 @@ fn handle(app: &AppHandle, mut req: Request) {
             (Method::Get, "") => Response::from_string(PAGE.replace("{{NAME}}", &share::html_escape(&share::alias())))
                 .with_header(header("Content-Type", "text/html; charset=utf-8"))
                 .with_header(header("Cache-Control", "no-store")),
-            (Method::Post, "frame") => frame(app, &mut req, false, &who),
+            (Method::Post, "frame") => frame(app, &mut req, false, &who, &name),
             // Bildschirm: gleiche virtuelle Kamera, aber mit schwarzen Raendern statt gestreckt
-            (Method::Post, "screen") => frame(app, &mut req, true, &who),
-            // Ton nur vom Absender, dessen Bild gerade gezeigt wird (sonst liefe der Ton einer abgelehnten Uebertragung)
-            (Method::Post, "audio") if !owner_ok(&who) => {
+            (Method::Post, "screen") => frame(app, &mut req, true, &who, &name),
+            (Method::Get, "settings") => settings_get(&who),
+            (Method::Post, "settings") => settings_post(&mut req, &who, &name),
+            // Ton nur vom Live-Geraet (sonst liefe der Ton einer Uebertragung, deren Bild gar nicht gezeigt wird)
+            (Method::Post, "audio") if !is_live(&who) => {
                 let _ = req.as_reader().take(MAX_AUDIO + 1).read_to_end(&mut Vec::new());
-                plain(409, "Es sendet schon ein anderes Gerät oder Fenster an die Notch.")
+                Response::from_string("").with_status_code(204)
             }
             (Method::Post, "audio") => audio(&url, &mut req),
             _ => plain(404, "nicht gefunden"),
@@ -169,14 +213,10 @@ fn handle(app: &AppHandle, mut req: Request) {
     let _ = req.respond(r);
 }
 
-/// Absender einer Anfrage: Kennung der Seite (`?c=`, je geoeffneter Seite neu), sonst Programm (User-Agent) und
-/// Adresse; so sind Safari, die Notch-App und die Bildschirmuebertragung auch ohne Kennung auseinanderzuhalten
+/// Absender einer Anfrage: Kennung der Seite bzw. App (`?c=`, je Start neu), sonst Programm (User-Agent) und Adresse;
+/// so sind Safari, die Notch-App und die Bildschirmuebertragung auch ohne Kennung auseinanderzuhalten
 fn sender(req: &Request, url: &str) -> String {
-    let id = url
-        .split_once('?')
-        .and_then(|(_, q)| q.split('&').find_map(|p| p.strip_prefix("c=")))
-        .filter(|v| !v.is_empty() && v.len() <= 64);
-    if let Some(id) = id {
+    if let Some(id) = param(url, "c").filter(|v| !v.is_empty() && v.len() <= 64) {
         return format!("c:{id}");
     }
     let ua = req.headers().iter().find(|h| h.field.equiv("User-Agent")).map(|h| h.value.to_string()).unwrap_or_default();
@@ -184,41 +224,133 @@ fn sender(req: &Request, url: &str) -> String {
     format!("ua:{ip}:{ua}")
 }
 
-/// Nur ein Absender zur Zeit: es gilt der zuletzt gestartete. Senden zwei (Safari-Seite und App, zwei Tabs), wechselten
-/// sich sonst ihre Bilder in der Kamera ab; ein Absender im Hintergrund schickte dabei schwarze Bilder (Blinken).
-/// Die anderen bekommen eine Absage, bis der aktive `SENDER_IDLE` lang nichts mehr schickt; danach uebernimmt der
-/// naechste von selbst.
-fn claim(key: &str) -> bool {
+/// Wert eines Parameters der Adresse (`?k=v&…`), Prozent-Kodierung aufgeloest
+fn param(url: &str, key: &str) -> Option<String> {
+    let raw = url.split_once('?')?.1.split('&').find_map(|p| p.strip_prefix(key)?.strip_prefix('='))?;
+    let b = raw.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'%' if i + 2 < b.len() => {
+                match u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or("x"), 16) {
+                    Ok(v) => { out.push(v); i += 3; continue; }
+                    Err(_) => out.push(b'%'),
+                }
+            }
+            b'+' => out.push(b' '),
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    Some(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// Live-Geraet pruefen: verstummt es, uebernimmt das zuletzt gestartete sendende; lange stille Geraete vergessen
+fn prune(l: &mut Live) {
+    l.sources.retain(|_, s| s.last.unwrap_or(s.first).elapsed() < FORGET);
+    let ok = l.live_key.as_ref().and_then(|k| l.sources.get(k)).is_some_and(|s| s.last.is_some_and(|t| t.elapsed() < LIVE_FALLBACK));
+    if !ok {
+        l.live_key = l.sources.iter().filter(|(_, s)| s.active()).max_by_key(|(_, s)| s.first).map(|(k, _)| k.clone());
+    }
+}
+
+fn is_live(key: &str) -> bool {
     live(|l| {
-        let now = Instant::now();
-        l.senders.retain(|_, (_, last)| now.duration_since(*last) < SENDER_IDLE);
-        l.senders.entry(key.to_string()).and_modify(|e| e.1 = now).or_insert((now, now));
-        l.senders.iter().max_by_key(|(_, (first, _))| *first).is_some_and(|(k, _)| k == key)
+        prune(l);
+        l.live_key.as_deref().is_none_or(|k| k == key)
     })
 }
 
-/// Darf dieser Absender gerade senden, ohne sich anzumelden (Ton)? Ja, wenn er das Bild liefert oder niemand sendet.
-fn owner_ok(key: &str) -> bool {
+/// Bild eines Geraets merken (Vorschau). Wer zum ersten Mal sendet, wird live: wer am Geraet auf Start drueckt, will
+/// gesehen werden; zurueck geht es in der Notch. Rueckgabe: ist es das Live-Geraet, Stand seiner Einstellungen.
+fn accept(key: &str, name: &str, screen: bool, jpeg: &[u8]) -> (bool, u64) {
     live(|l| {
         let now = Instant::now();
-        l.senders.retain(|_, (_, last)| now.duration_since(*last) < SENDER_IDLE);
-        l.senders.iter().max_by_key(|(_, (first, _))| *first).is_none_or(|(k, _)| k == key)
+        let s = l.sources.entry(key.to_string()).or_insert_with(|| Src::new(name));
+        let first_frame = s.last.is_none();
+        if !name.is_empty() {
+            s.name = name.to_string();
+        }
+        s.last = Some(now);
+        s.screen = screen;
+        s.seq += 1;
+        s.jpeg.clear();
+        s.jpeg.extend_from_slice(jpeg);
+        s.count += 1;
+        let dt = s.since.elapsed();
+        if dt >= Duration::from_secs(2) {
+            s.fps = (s.count as f64 / dt.as_secs_f64()).round() as u32;
+            (s.count, s.since) = (0, now);
+        }
+        let rev = s.rev;
+        if first_frame {
+            l.live_key = Some(key.to_string());
+        }
+        prune(l);
+        (l.live_key.as_deref() == Some(key), rev)
     })
 }
 
-fn frame(app: &AppHandle, req: &mut Request, screen: bool, who: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+/// Antwort mit dem Stand fuer das Geraet: ist es live, welche Fassung seiner Einstellungen gilt
+fn with_state(r: Response<std::io::Cursor<Vec<u8>>>, live_now: bool, rev: u64) -> Response<std::io::Cursor<Vec<u8>>> {
+    r.with_header(header("X-Notch-Live", if live_now { "1" } else { "0" })).with_header(header("X-Notch-Rev", &rev.to_string()))
+}
+
+fn frame(app: &AppHandle, req: &mut Request, screen: bool, who: &str, name: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let mut body = Vec::new();
     if req.as_reader().take(MAX_FRAME + 1).read_to_end(&mut body).is_err() || body.len() as u64 > MAX_FRAME {
         return plain(400, "Bild zu gross oder abgebrochen");
     }
-    if !claim(who) {
-        return plain(409, "Es sendet schon ein anderes Gerät oder Fenster an die Notch.");
+    let (is_live, rev) = accept(who, name, screen, &body);
+    // nur das Live-Geraet geht in die virtuelle Kamera; die anderen sieht man als Vorschau in der Notch
+    if is_live {
+        if let Err(e) = push(&body, screen) {
+            return plain(400, &e);
+        }
     }
-    if let Err(e) = push(&body, screen) {
-        return plain(400, &e);
+    tick(app);
+    with_state(Response::from_string("").with_status_code(204), is_live, rev)
+}
+
+/// `GET …/settings`: Einstellungen, die die Notch fuer dieses Geraet hat (nach einer Aenderung in der Notch)
+fn settings_get(who: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    let (body, live_now, rev) = live(|l| {
+        prune(l);
+        let live_now = l.live_key.as_deref() == Some(who);
+        match l.sources.get(who) {
+            Some(s) => (json!({ "rev": s.rev, "settings": s.settings, "live": live_now }), live_now, s.rev),
+            None => (json!({ "rev": 0, "settings": {}, "live": false }), false, 0),
+        }
+    });
+    with_state(Response::from_string(body.to_string()).with_header(header("Content-Type", "application/json")), live_now, rev)
+}
+
+/// `POST …/settings` mit `{settings, caps}`: das Geraet meldet seine Einstellungen (am Geraet geaendert) und was es
+/// kann (Objektive, Zoom, Licht). Rueckgabe: neuer Stand.
+fn settings_post(req: &mut Request, who: &str, name: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    let mut body = Vec::new();
+    if req.as_reader().take(16 * 1024 + 1).read_to_end(&mut body).is_err() || body.len() > 16 * 1024 {
+        return plain(400, "Einstellungen zu gross");
     }
-    tick(app, screen);
-    Response::from_string("").with_status_code(204)
+    let Ok(v) = serde_json::from_slice::<Value>(&body) else { return plain(400, "kein JSON") };
+    let (rev, live_now) = live(|l| {
+        let s = l.sources.entry(who.to_string()).or_insert_with(|| Src::new(name));
+        if !name.is_empty() {
+            s.name = name.to_string();
+        }
+        if let Some(set) = v.get("settings").and_then(Value::as_object) {
+            s.settings = Value::Object(set.iter().filter(|(k, _)| SETTING_KEYS.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect());
+            s.rev += 1;
+        }
+        if let Some(c) = v.get("caps").filter(|c| c.is_object()) {
+            s.caps = c.clone();
+        }
+        let rev = s.rev;
+        prune(l);
+        (rev, l.live_key.as_deref() == Some(who))
+    });
+    with_state(Response::from_string(json!({ "rev": rev }).to_string()).with_header(header("Content-Type", "application/json")), live_now, rev)
 }
 
 /// Ton der Bildschirmuebertragung: `POST …/audio?rate=48000&ch=2`, Rumpf = 16-bit-PCM
@@ -278,40 +410,45 @@ fn push(jpeg: &[u8], fit: bool) -> Result<(), String> {
     })
 }
 
-/// Bildzaehler fuer „30 fps“ in der Anzeige
-fn tick(app: &AppHandle, screen: bool) {
-    let show = live(|l| {
-        let now = Instant::now();
-        l.screen = screen;
-        let first = l.last.is_none_or(|t| t.elapsed() > Duration::from_secs(3));
-        l.last = Some(now);
-        if first || l.since.is_none() {
-            (l.since, l.count) = (Some(now), 0);
+/// Zeile „iPhone-Kamera“ in der Notch: beim ersten Bild sofort, danach hoechstens alle 2 s aktualisieren
+fn tick(app: &AppHandle) {
+    let due = live(|l| {
+        let due = l.shown.is_none_or(|t| t.elapsed() >= Duration::from_secs(2));
+        if due {
+            l.shown = Some(Instant::now());
         }
-        l.count += 1;
-        match l.since {
-            Some(s) if s.elapsed() >= Duration::from_secs(2) => {
-                l.fps = (l.count as f64 / s.elapsed().as_secs_f64()).round() as u32;
-                (l.since, l.count) = (Some(now), 0);
-                true
-            }
-            _ => first,
-        }
+        due
     });
-    if show {
+    if due {
         activity(app, true);
         share::status_event(app);
     }
 }
 
+/// Live-Geraet und Zahl der sendenden Geraete
+fn summary() -> (bool, u32, String, usize) {
+    live(|l| {
+        prune(l);
+        let n = l.sources.values().filter(|s| s.active()).count();
+        match l.live_key.as_ref().and_then(|k| l.sources.get(k)) {
+            Some(s) => (s.screen, s.fps, s.name.clone(), n),
+            None => (false, 0, String::new(), n),
+        }
+    })
+}
+
 fn activity(app: &AppHandle, streaming: bool) {
     if !streaming {
+        live(|l| l.shown = None);
         activities::remove(app, ACT_ID);
         return;
     }
-    let fps = live(|l| l.fps);
-    let screen = live(|l| l.screen);
-    let mut a = share::act(ACT_ID, if screen { "iPhone-Bildschirm" } else { "iPhone-Kamera" }.into(), if fps > 0 { format!("Sendet · {fps} Bilder/s") } else { "Sendet".into() });
+    let (screen, fps, name, n) = summary();
+    let mut sub = if fps > 0 { format!("Sendet · {fps} Bilder/s") } else { "Sendet".to_string() };
+    if n > 1 {
+        sub = format!("{sub} · live: {}", if name.is_empty() { "Gerät" } else { &name });
+    }
+    let mut a = share::act(ACT_ID, if screen { "iPhone-Bildschirm" } else { "iPhone-Kamera" }.into(), sub);
     a.icon = Some(if screen { "📱" } else { "📷" }.into());
     a.color = Some("#30d158".into());
     a.priority = 5;
@@ -371,12 +508,8 @@ fn renew_server(app: &AppHandle) {
 
 fn watch_tick(app: &AppHandle) {
     let (was, now) = live(|l| {
-        let was = l.fps > 0 || l.last.is_some();
-        let alive = l.last.is_some_and(|t| t.elapsed() < Duration::from_secs(3));
-        if !alive && l.last.is_some() {
-            (l.last, l.fps) = (None, 0);
-        }
-        (was, alive)
+        prune(l);
+        (l.shown.is_some(), l.sources.values().any(Src::active))
     });
     if was && !now {
         activity(app, false);
@@ -463,8 +596,78 @@ pub fn cam_setup(app: AppHandle) -> Result<Value, String> {
     Ok(json!({ "url": u, "svg": share::qr_svg(&u)? }))
 }
 
+// ---------- Karte in der Notch (src/camcard.ts) ----------
+
+/// Verbundene Geraete fuer die Karte: Name, live, sendet, Bildrate, Bildzaehler, Einstellungen und Faehigkeiten
+#[tauri::command]
+pub fn cam_sources() -> Value {
+    live(|l| {
+        prune(l);
+        let mut v: Vec<_> = l
+            .sources
+            .iter()
+            .filter(|(_, s)| s.last.is_some())
+            .map(|(k, s)| {
+                (s.first, json!({
+                    "key": k, "name": s.name, "live": l.live_key.as_deref() == Some(k.as_str()), "active": s.active(),
+                    "fps": s.fps, "seq": s.seq, "screen": s.screen, "settings": s.settings, "caps": s.caps,
+                }))
+            })
+            .collect();
+        v.sort_by_key(|(first, _)| *first);
+        Value::Array(v.into_iter().map(|(_, j)| j).collect())
+    })
+}
+
+/// Letztes Bild eines Geraets als JPEG (Base64) fuer die Vorschau
+#[tauri::command]
+pub fn cam_preview(key: String) -> Option<String> {
+    use base64::Engine;
+    live(|l| l.sources.get(&key).filter(|s| !s.jpeg.is_empty()).map(|s| base64::engine::general_purpose::STANDARD.encode(&s.jpeg)))
+}
+
+fn set_live(key: &str) -> Result<(), String> {
+    live(|l| {
+        if !l.sources.get(key).is_some_and(Src::active) {
+            return Err("Das Gerät sendet gerade nicht.".to_string());
+        }
+        l.live_key = Some(key.to_string());
+        Ok(())
+    })
+}
+
+/// Dieses Geraet in die virtuelle Kamera schalten
+#[tauri::command]
+pub fn cam_live(app: AppHandle, key: String) -> Result<(), String> {
+    set_live(&key)?;
+    activity(&app, true);
+    Ok(())
+}
+
+/// Einstellung eines Geraets in der Notch aendern (`{"front": true}` usw.); das Geraet holt sie mit der naechsten
+/// Antwort ab (X-Notch-Rev)
+#[tauri::command]
+pub fn cam_config(key: String, patch: Value) -> Result<(), String> {
+    let Value::Object(p) = patch else { return Err("Ungültige Einstellung".into()) };
+    live(|l| {
+        let s = l.sources.get_mut(&key).ok_or_else(|| "Das Gerät ist nicht mehr verbunden.".to_string())?;
+        if !s.settings.is_object() {
+            s.settings = json!({});
+        }
+        let o = s.settings.as_object_mut().expect("Objekt");
+        for (k, v) in p {
+            if SETTING_KEYS.contains(&k.as_str()) {
+                o.insert(k, v);
+            }
+        }
+        s.rev += 1;
+        Ok(())
+    })
+}
+
 pub fn status_json(app: &AppHandle) -> Value {
-    let (streaming, fps, error) = live(|l| (l.last.is_some_and(|t| t.elapsed() < Duration::from_secs(3)), l.fps, l.error.clone()));
+    let (_, fps, _, n) = summary();
+    let (streaming, error) = (n > 0, live(|l| l.error.clone()));
     json!({
         "supported": true,
         "on": ENABLED.load(Ordering::Relaxed),
@@ -481,26 +684,58 @@ pub fn status_json(app: &AppHandle) -> Value {
 mod tests {
     use super::*;
 
+    /// die Tests teilen sich den Zustand (LIVE); nacheinander, damit sich Live-Geraete nicht in die Quere kommen
+    static SERIAL: Mutex<()> = Mutex::new(());
+
     #[test]
-    fn nur_der_zuletzt_gestartete_absender_zaehlt() {
-        let (a, b) = ("test:absender-a", "test:absender-b");
-        assert!(claim(a), "erster Absender");
+    fn mehrere_geraete_eines_ist_live() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (a, b) = ("test:geraet-a", "test:geraet-b");
+        assert_eq!(accept(a, "iPhone", false, b"x"), (true, 0), "erstes Geraet ist live");
         std::thread::sleep(Duration::from_millis(5));
-        assert!(claim(b), "neu gestarteter Absender uebernimmt");
-        assert!(!claim(a), "der aeltere bekommt eine Absage");
-        assert!(!owner_ok(a) && owner_ok(b), "Ton nur vom aktiven Absender");
-        assert!(claim(b));
-        // b hoert auf: nach SENDER_IDLE uebernimmt a von selbst
+        assert!(accept(b, "iPad", false, b"y").0, "neu gestartetes Geraet wird live");
+        assert!(!accept(a, "", false, b"z").0, "das andere liefert nur noch die Vorschau");
+        assert!(!is_live(a) && is_live(b), "Ton nur vom Live-Geraet");
+        // in der Notch zurueckschalten
+        set_live(a).unwrap();
+        assert!(accept(a, "", false, b"z").0);
+        // Live-Geraet verstummt: das andere uebernimmt
         live(|l| {
-            if let Some(e) = l.senders.get_mut(b) {
-                e.1 -= SENDER_IDLE;
+            if let Some(s) = l.sources.get_mut(a) {
+                s.last = s.last.map(|t| t - LIVE_FALLBACK);
             }
         });
-        assert!(claim(a));
+        assert!(accept(b, "", false, b"y").0);
         live(|l| {
-            l.senders.remove(a);
-            l.senders.remove(b);
+            l.sources.remove(a);
+            l.sources.remove(b);
+            l.live_key = None;
         });
+    }
+
+    #[test]
+    fn einstellungen_aus_der_notch_erhoehen_den_stand() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let k = "test:geraet-einst";
+        accept(k, "iPhone", false, b"x");
+        cam_config(k.into(), json!({ "front": true, "zoom": 2.5, "boese": 1 })).unwrap();
+        let (rev, set) = live(|l| {
+            let s = &l.sources[k];
+            (s.rev, s.settings.clone())
+        });
+        assert_eq!(rev, 1);
+        assert_eq!(set, json!({ "front": true, "zoom": 2.5 }), "nur bekannte Einstellungen");
+        live(|l| {
+            l.sources.remove(k);
+            l.live_key = None;
+        });
+    }
+
+    #[test]
+    fn parameter_werden_dekodiert() {
+        assert_eq!(param("/x?c=ab&n=iPhone%20%C2%B7%20Safari", "n").as_deref(), Some("iPhone · Safari"));
+        assert_eq!(param("/x?n=a%2", "n").as_deref(), Some("a%2"));
+        assert_eq!(param("/x?c=1", "n"), None);
     }
 
     #[test]

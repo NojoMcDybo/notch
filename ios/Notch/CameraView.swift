@@ -119,8 +119,9 @@ struct CameraView: View {
         .overlay(alignment: .topLeading) {
             if cam.running && cam.hasFrame {
                 HStack(spacing: 6) {
-                    Circle().fill(cam.fps > 0 ? Color.red : Color.orange).frame(width: 8, height: 8)
-                    Text(cam.fps > 0 ? "LIVE · \(cam.fps) fps" : "Keine Verbindung")
+                    // live: in der Kamera „Notch iPhone“ zu sehen; sonst nur Vorschau in der Notch (dort umschaltbar)
+                    Circle().fill(cam.fps == 0 ? Color.orange : cam.isLive ? Color.red : Color.gray).frame(width: 8, height: 8)
+                    Text(cam.fps == 0 ? "Keine Verbindung" : cam.isLive ? "LIVE · \(cam.fps) fps" : "VORSCHAU · \(cam.fps) fps")
                         .font(.caption.bold()).monospacedDigit()
                 }
                 .foregroundStyle(Color.white)
@@ -136,6 +137,8 @@ struct CameraView: View {
     @ViewBuilder private var notice: some View {
         if let e = cam.error {
             banner(e, icon: "exclamationmark.triangle.fill", color: .red)
+        } else if cam.running && cam.fps > 0 && !cam.isLive {
+            banner("Am PC ist gerade ein anderes Gerät live. Umschalten am PC in der aufgeklappten Notch: auf die Vorschau dieses Geräts klicken.", icon: "rectangle.on.rectangle", color: .orange)
         } else if n.camURL == nil && !cam.running {
             banner("Am PC ist die Kamera aus: Notch › Einstellungen › iPhone › Kamera einschalten.", icon: "info.circle.fill", color: .orange)
         }

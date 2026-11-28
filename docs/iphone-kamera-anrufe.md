@@ -30,10 +30,19 @@ Windows 11); Teams, Zoom, Chrome und die Kamera-App sehen eine normale Webcam.
   Lesen, das die Notch mitten beim Schreiben erwischte, sofort ein dunkles Platzhalterbild: das waren die einzelnen schwarzen
   Bilder im laufenden Strom. Die Quelle liest jetzt nur noch, wenn ein neues Bild da ist, in einen eigenen Puffer, und versucht
   es bei einem Zusammenstoß nach 2 ms erneut.
-- **Nur ein Absender:** Senden zwei Quellen gleichzeitig (Safari-Seite und App, zwei Tabs, Kamera und Bildschirm), nimmt
-  die Notch nur die zuletzt gestartete an; die anderen bekommen `409` und warten (Seite: „Wartet“), bis die aktive 2 s
-  lang nichts mehr schickt. Vorher wechselten sich die Bilder ab, und eine Quelle im Hintergrund schickte schwarze Bilder
-  (regelmäßiges Blinken). Erkannt wird der Absender an `?c=<Kennung>` (Browserseite) oder an User-Agent und Adresse.
+- **Mehrere Geräte, eines live:** Mehrere Geräte dürfen gleichzeitig senden (iPhone und iPad, Safari-Seite und App,
+  Bildschirm). Windows sieht weiter eine Kamera; sie zeigt nur das **Live-Gerät**. Wer zum ersten Mal sendet, wird live;
+  verstummt das Live-Gerät 5 s, übernimmt ein anderes sendendes. Erkannt wird ein Gerät an `?c=<Kennung>&n=<Name>`
+  (Seite und App, je Start neu), sonst an User-Agent und Adresse. Antworten tragen `X-Notch-Live` (0/1) und
+  `X-Notch-Rev` (Stand der Einstellungen). Ton der Bildschirmübertragung nur vom Live-Gerät.
+- **Karte in der Notch** (`src/camcard.ts`): Vorschau je Gerät (Live-Gerät grün, Klick schaltet live), darunter die
+  Einstellungen des Live-Geräts. Befehle `cam_sources`, `cam_preview`, `cam_live`, `cam_config`; Bilder nur, solange
+  die Notch aufgeklappt ist.
+- **Einstellungen beidseitig:** Das Gerät meldet Einstellungen und Fähigkeiten (`POST …/settings`, `{settings, caps}`);
+  in der Notch geänderte erhöhen den Stand, das Gerät sieht ihn in `X-Notch-Rev` und holt sie ab (`GET …/settings`).
+  Schlüssel: `front`, `lens` (`ultra`/`wide`/`tele`), `quality` (0–2), `rate` (15/30), `mirror`, `zoom`, `torch`.
+- **Hintergrund:** Die Browserseite sendet nicht, solange Safari sie in den Hintergrund legt (dann kämen nur schwarze
+  Bilder; so entstand früher das regelmäßige Blinken bei zwei Instanzen).
 - **Einstellungen auf der Browserseite** (wie in der App, gespeichert im Browser): Front-/Rückkamera, Licht, Spiegeln,
   Objektiv (Ultraweit/Weit/Tele, erkannt am Gerätenamen), Zoom, Qualität (JPEG 0,4/0,6/0,8) und Bildrate (15/30). Zoom und
   Licht nur, wenn Safari sie anbietet (`getCapabilities`, ab iOS 17). Ein Bild, das länger als 3 s nicht angenommen wird,
