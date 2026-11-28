@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -44,15 +44,19 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 /// Ein Geraet, das Bilder schickt (Safari-Seite, Notch-App, Bildschirmuebertragung). Mehrere duerfen gleichzeitig
 /// senden; die virtuelle Kamera zeigt nur das Live-Geraet, die anderen sieht man als Vorschau in der Notch.
 struct Src {
+    /// kurze Nummer fuer die Vorschau-Adresse (camprev://localhost/<id>)
+    id: u32,
     name: String,
     /// erster Kontakt; die Liste ist danach sortiert
     first: Instant,
     /// letztes Bild (`None`: bisher nur Einstellungen gemeldet)
     last: Option<Instant>,
-    /// letztes Bild als JPEG, fuer die Vorschau in der Notch
-    jpeg: Vec<u8>,
+    /// letztes Bild als JPEG, fuer die Vorschau in der Notch (geteilt, nicht kopiert)
+    jpeg: Arc<Vec<u8>>,
     /// zaehlt die Bilder; die Vorschau holt nur neue
     seq: u64,
+    /// Bildnummer des Geraets (`?s=`): mehrere Bilder sind gleichzeitig unterwegs, ein ueberholtes wird verworfen
+    client_seq: u64,
     /// Bildschirmuebertragung statt Kamera
     screen: bool,
     /// Bilder im laufenden Zeitfenster, Beginn des Fensters, Bildrate
@@ -68,10 +72,11 @@ struct Src {
 
 impl Src {
     fn new(name: &str) -> Self {
+        static NEXT_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
         let now = Instant::now();
         Src {
-            name: name.into(), first: now, last: None, jpeg: Vec::new(), seq: 0, screen: false,
-            count: 0, since: now, fps: 0, settings: json!({}), caps: json!({}), rev: 0,
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed), name: name.into(), first: now, last: None, jpeg: Arc::new(Vec::new()),
+            seq: 0, client_seq: 0, screen: false, count: 0, since: now, fps: 0, settings: json!({}), caps: json!({}), rev: 0,
         }
     }
     fn active(&self) -> bool {
@@ -95,6 +100,36 @@ struct Live {
 }
 
 static LIVE: Mutex<Option<Live>> = Mutex::new(None);
+/// meldet ein neues Bild (an `LIVE` gebunden); darauf wartet die Vorschau, statt staendig nachzufragen
+static NEW_FRAME: Condvar = Condvar::new();
+
+/// Bilder des Live-Geraets fuer die virtuelle Kamera. Die Anfrage wird sofort beantwortet (das Geraet darf das
+/// naechste Bild schicken), entpackt und umgerechnet wird hier im Hintergrund. Es zaehlt nur das neueste wartende
+/// Bild: kommt die Umrechnung nicht hinterher, fallen aeltere weg, statt sich zu stauen.
+static WORK: Mutex<Option<(Arc<Vec<u8>>, bool)>> = Mutex::new(None);
+static WORK_CV: Condvar = Condvar::new();
+
+fn queue_push(jpeg: Arc<Vec<u8>>, screen: bool) {
+    static START: std::sync::Once = std::sync::Once::new();
+    START.call_once(|| {
+        let _ = std::thread::Builder::new().name("notch-kamera".into()).spawn(|| loop {
+            let (jpeg, screen) = {
+                let mut g = WORK.lock().unwrap();
+                loop {
+                    if let Some(job) = g.take() {
+                        break job;
+                    }
+                    g = WORK_CV.wait(g).unwrap();
+                }
+            };
+            if let Err(e) = push(&jpeg, screen) {
+                eprintln!("[notch] Kamera: Bild verworfen: {e}");
+            }
+        });
+    });
+    *WORK.lock().unwrap() = Some((jpeg, screen));
+    WORK_CV.notify_one();
+}
 
 fn live<R>(f: impl FnOnce(&mut Live) -> R) -> R {
     let mut g = LIVE.lock().unwrap();
@@ -196,9 +231,9 @@ fn handle(app: &AppHandle, mut req: Request) {
             (Method::Get, "") => Response::from_string(PAGE.replace("{{NAME}}", &share::html_escape(&share::alias())))
                 .with_header(header("Content-Type", "text/html; charset=utf-8"))
                 .with_header(header("Cache-Control", "no-store")),
-            (Method::Post, "frame") => frame(app, &mut req, false, &who, &name),
+            (Method::Post, "frame") => frame(app, &mut req, false, &who, &name, &url),
             // Bildschirm: gleiche virtuelle Kamera, aber mit schwarzen Raendern statt gestreckt
-            (Method::Post, "screen") => frame(app, &mut req, true, &who, &name),
+            (Method::Post, "screen") => frame(app, &mut req, true, &who, &name, &url),
             (Method::Get, "settings") => settings_get(&who),
             (Method::Post, "settings") => settings_post(&mut req, &who, &name),
             // Ton nur vom Live-Geraet (sonst liefe der Ton einer Uebertragung, deren Bild gar nicht gezeigt wird)
@@ -262,12 +297,30 @@ fn is_live(key: &str) -> bool {
     })
 }
 
+/// Ergebnis eines angenommenen Bildes
+struct Accepted {
+    /// das Geraet ist live (geht in die virtuelle Kamera)
+    live: bool,
+    /// Stand seiner Einstellungen
+    rev: u64,
+    /// neuere Einstellungen aus der Notch, wenn das Geraet einen aelteren Stand kennt (`?r=`): gleich mit der
+    /// Antwort, ohne eigene Abfrage, damit z. B. der Zoom aus der Notch ohne Umweg ankommt
+    news: Option<Value>,
+}
+
 /// Bild eines Geraets merken (Vorschau). Wer zum ersten Mal sendet, wird live: wer am Geraet auf Start drueckt, will
-/// gesehen werden; zurueck geht es in der Notch. Rueckgabe: ist es das Live-Geraet, Stand seiner Einstellungen.
-fn accept(key: &str, name: &str, screen: bool, jpeg: &[u8]) -> (bool, u64) {
-    live(|l| {
+/// gesehen werden; zurueck geht es in der Notch. `None`: ein spaeter geschicktes Bild ist schon da (mehrere Bilder
+/// sind gleichzeitig unterwegs und koennen sich ueberholen), dieses wird verworfen.
+fn accept(key: &str, name: &str, screen: bool, jpeg: Arc<Vec<u8>>, cseq: Option<u64>, known: Option<u64>) -> Option<Accepted> {
+    let r = live(|l| {
         let now = Instant::now();
         let s = l.sources.entry(key.to_string()).or_insert_with(|| Src::new(name));
+        if let Some(c) = cseq {
+            if c <= s.client_seq && s.active() {
+                return None;
+            }
+            s.client_seq = c;
+        }
         let first_frame = s.last.is_none();
         if !name.is_empty() {
             s.name = name.to_string();
@@ -275,8 +328,7 @@ fn accept(key: &str, name: &str, screen: bool, jpeg: &[u8]) -> (bool, u64) {
         s.last = Some(now);
         s.screen = screen;
         s.seq += 1;
-        s.jpeg.clear();
-        s.jpeg.extend_from_slice(jpeg);
+        s.jpeg = jpeg;
         s.count += 1;
         let dt = s.since.elapsed();
         if dt >= Duration::from_secs(2) {
@@ -284,12 +336,16 @@ fn accept(key: &str, name: &str, screen: bool, jpeg: &[u8]) -> (bool, u64) {
             (s.count, s.since) = (0, now);
         }
         let rev = s.rev;
+        let news = known.filter(|k| *k < rev).map(|_| s.settings.clone());
         if first_frame {
             l.live_key = Some(key.to_string());
         }
         prune(l);
-        (l.live_key.as_deref() == Some(key), rev)
-    })
+        Some(Accepted { live: l.live_key.as_deref() == Some(key), rev, news })
+    });
+    // wartende Vorschauen wecken
+    NEW_FRAME.notify_all();
+    r
 }
 
 /// Antwort mit dem Stand fuer das Geraet: ist es live, welche Fassung seiner Einstellungen gilt
@@ -297,20 +353,30 @@ fn with_state(r: Response<std::io::Cursor<Vec<u8>>>, live_now: bool, rev: u64) -
     r.with_header(header("X-Notch-Live", if live_now { "1" } else { "0" })).with_header(header("X-Notch-Rev", &rev.to_string()))
 }
 
-fn frame(app: &AppHandle, req: &mut Request, screen: bool, who: &str, name: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+/// `POST …/frame?c=…&s=<Bildnummer>&r=<bekannter Stand>`: ein JPEG. Antwortet sofort; umgerechnet wird im Hintergrund
+/// (`queue_push`), damit das Geraet gleich das naechste schicken kann. Gibt es neuere Einstellungen aus der Notch,
+/// stehen sie in der Antwort (200 mit JSON), sonst 204.
+fn frame(app: &AppHandle, req: &mut Request, screen: bool, who: &str, name: &str, url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let mut body = Vec::new();
     if req.as_reader().take(MAX_FRAME + 1).read_to_end(&mut body).is_err() || body.len() as u64 > MAX_FRAME {
         return plain(400, "Bild zu gross oder abgebrochen");
     }
-    let (is_live, rev) = accept(who, name, screen, &body);
+    let num = |k: &str| param(url, k).and_then(|v| v.parse::<u64>().ok());
+    let jpeg = Arc::new(body);
+    let Some(a) = accept(who, name, screen, jpeg.clone(), num("s"), num("r")) else {
+        return Response::from_string("").with_status_code(204);
+    };
     // nur das Live-Geraet geht in die virtuelle Kamera; die anderen sieht man als Vorschau in der Notch
-    if is_live {
-        if let Err(e) = push(&body, screen) {
-            return plain(400, &e);
-        }
+    if a.live {
+        queue_push(jpeg, screen);
     }
     tick(app);
-    with_state(Response::from_string("").with_status_code(204), is_live, rev)
+    let r = match a.news {
+        Some(set) => Response::from_string(json!({ "rev": a.rev, "settings": set }).to_string())
+            .with_header(header("Content-Type", "application/json")),
+        None => Response::from_string("").with_status_code(204),
+    };
+    with_state(r, a.live, a.rev)
 }
 
 /// `GET …/settings`: Einstellungen, die die Notch fuer dieses Geraet hat (nach einer Aenderung in der Notch)
@@ -392,7 +458,8 @@ fn push(jpeg: &[u8], fit: bool) -> Result<(), String> {
         return Err("Bild zu gross".into());
     }
     let img = image::load_from_memory_with_format(jpeg, image::ImageFormat::Jpeg).map_err(|e| format!("kein JPEG: {e}"))?;
-    let rgb = img.to_rgb8();
+    // JPEG ist schon RGB: uebernehmen statt kopieren
+    let rgb = img.into_rgb8();
     let rgb = if rgb.dimensions() == (vcam::W as u32, vcam::H as u32) {
         rgb
     } else if fit {
@@ -609,7 +676,7 @@ pub fn cam_sources() -> Value {
             .filter(|(_, s)| s.last.is_some())
             .map(|(k, s)| {
                 (s.first, json!({
-                    "key": k, "name": s.name, "live": l.live_key.as_deref() == Some(k.as_str()), "active": s.active(),
+                    "key": k, "id": s.id, "name": s.name, "live": l.live_key.as_deref() == Some(k.as_str()), "active": s.active(),
                     "fps": s.fps, "seq": s.seq, "screen": s.screen, "settings": s.settings, "caps": s.caps,
                 }))
             })
@@ -619,11 +686,42 @@ pub fn cam_sources() -> Value {
     })
 }
 
-/// Letztes Bild eines Geraets als JPEG (Base64) fuer die Vorschau
-#[tauri::command]
-pub fn cam_preview(key: String) -> Option<String> {
-    use base64::Engine;
-    live(|l| l.sources.get(&key).filter(|s| !s.jpeg.is_empty()).map(|s| base64::engine::general_purpose::STANDARD.encode(&s.jpeg)))
+/// Vorschau ohne Umweg: `camprev://localhost/<id>?after=<seq>` (unter Windows `http://camprev.localhost/…`) liefert
+/// das neueste JPEG eines Geraets unveraendert (kein Base64, kein Umrechnen), sobald es neuer ist als `after`. Bis
+/// dahin wartet die Anfrage bis zu 0,5 s (204 ohne neues Bild); so laeuft die Vorschau im Takt des Geraets, ohne
+/// staendiges Nachfragen. Kopf `X-Seq`: Nummer des gelieferten Bildes.
+pub fn preview_protocol(req: tauri::http::Request<Vec<u8>>, responder: tauri::UriSchemeResponder) {
+    use tauri::http::Response as HttpResponse;
+    std::thread::spawn(move || {
+        let uri = req.uri();
+        let id: u32 = uri.path().trim_matches('/').parse().unwrap_or(0);
+        let after: u64 = uri.query().and_then(|q| q.split('&').find_map(|p| p.strip_prefix("after="))).and_then(|v| v.parse().ok()).unwrap_or(0);
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let mut g = LIVE.lock().unwrap_or_else(|e| e.into_inner());
+        let found = loop {
+            match g.as_ref().and_then(|l| l.sources.values().find(|s| s.id == id)) {
+                None => break None,
+                Some(s) if s.seq > after && !s.jpeg.is_empty() => break Some((s.seq, s.jpeg.clone())),
+                Some(_) => {}
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break None;
+            }
+            g = NEW_FRAME.wait_timeout(g, left).unwrap_or_else(|e| e.into_inner()).0;
+        };
+        drop(g);
+        let base = HttpResponse::builder().header("Access-Control-Allow-Origin", "*").header("Cache-Control", "no-store");
+        let resp = match found {
+            Some((seq, jpeg)) => base
+                .header("Content-Type", "image/jpeg")
+                .header("X-Seq", seq.to_string())
+                .header("Access-Control-Expose-Headers", "X-Seq")
+                .body(jpeg.as_ref().clone()),
+            None => base.status(204).body(Vec::new()),
+        };
+        responder.respond(resp.unwrap_or_default());
+    });
 }
 
 fn set_live(key: &str) -> Result<(), String> {
@@ -691,24 +789,60 @@ mod tests {
     fn mehrere_geraete_eines_ist_live() {
         let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (a, b) = ("test:geraet-a", "test:geraet-b");
-        assert_eq!(accept(a, "iPhone", false, b"x"), (true, 0), "erstes Geraet ist live");
+        assert!(img(a, "iPhone", None).live, "erstes Geraet ist live");
         std::thread::sleep(Duration::from_millis(5));
-        assert!(accept(b, "iPad", false, b"y").0, "neu gestartetes Geraet wird live");
-        assert!(!accept(a, "", false, b"z").0, "das andere liefert nur noch die Vorschau");
+        assert!(img(b, "iPad", None).live, "neu gestartetes Geraet wird live");
+        assert!(!img(a, "", None).live, "das andere liefert nur noch die Vorschau");
         assert!(!is_live(a) && is_live(b), "Ton nur vom Live-Geraet");
         // in der Notch zurueckschalten
         set_live(a).unwrap();
-        assert!(accept(a, "", false, b"z").0);
+        assert!(img(a, "", None).live);
         // Live-Geraet verstummt: das andere uebernimmt
         live(|l| {
             if let Some(s) = l.sources.get_mut(a) {
                 s.last = s.last.map(|t| t - LIVE_FALLBACK);
             }
         });
-        assert!(accept(b, "", false, b"y").0);
+        assert!(img(b, "", None).live);
         live(|l| {
             l.sources.remove(a);
             l.sources.remove(b);
+            l.live_key = None;
+        });
+    }
+
+    /// ein Bild annehmen (ohne Bildnummer, ohne bekannten Stand)
+    fn img(k: &str, name: &str, cseq: Option<u64>) -> Accepted {
+        accept(k, name, false, Arc::new(b"x".to_vec()), cseq, None).expect("angenommen")
+    }
+
+    #[test]
+    fn ueberholtes_bild_wird_verworfen() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let k = "test:geraet-reihenfolge";
+        img(k, "iPhone", Some(5));
+        assert!(accept(k, "", false, Arc::new(vec![1]), Some(4), None).is_none(), "Bild 4 kam nach Bild 5");
+        assert!(accept(k, "", false, Arc::new(vec![2]), Some(6), None).is_some());
+        let seq = live(|l| l.sources[k].seq);
+        assert_eq!(seq, 2, "nur Bild 5 und 6 zaehlen");
+        live(|l| {
+            l.sources.remove(k);
+            l.live_key = None;
+        });
+    }
+
+    #[test]
+    fn neuere_einstellungen_kommen_mit_der_antwort() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let k = "test:geraet-antwort";
+        img(k, "iPhone", None);
+        cam_config(k.into(), json!({ "zoom": 3.0 })).unwrap();
+        let a = accept(k, "", false, Arc::new(vec![1]), None, Some(0)).unwrap();
+        assert_eq!((a.rev, a.news), (1, Some(json!({ "zoom": 3.0 }))));
+        let a = accept(k, "", false, Arc::new(vec![1]), None, Some(1)).unwrap();
+        assert!(a.news.is_none(), "Stand bekannt: nichts mitschicken");
+        live(|l| {
+            l.sources.remove(k);
             l.live_key = None;
         });
     }
@@ -717,7 +851,7 @@ mod tests {
     fn einstellungen_aus_der_notch_erhoehen_den_stand() {
         let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let k = "test:geraet-einst";
-        accept(k, "iPhone", false, b"x");
+        img(k, "iPhone", None);
         cam_config(k.into(), json!({ "front": true, "zoom": 2.5, "boese": 1 })).unwrap();
         let (rev, set) = live(|l| {
             let s = &l.sources[k];

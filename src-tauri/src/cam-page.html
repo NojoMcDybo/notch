@@ -86,7 +86,7 @@
       <div class="seg" id="quality"><button type="button" data-v="0">Niedrig</button><button type="button" data-v="1">Normal</button><button type="button" data-v="2">Hoch</button></div>
     </div>
     <div class="row"><span>Bildrate</span>
-      <div class="seg" id="rate"><button type="button" data-v="15">15</button><button type="button" data-v="30">30</button></div>
+      <div class="seg" id="rate"><button type="button" data-v="15">15</button><button type="button" data-v="30">30</button><button type="button" data-v="60" hidden>60</button></div>
     </div>
   </section>
 
@@ -100,6 +100,8 @@
   const LENSES = [["ultra", "Ultraweit"], ["wide", "Weit"], ["tele", "Tele"]];
   /** haengt ein Bild laenger, wird es abgebrochen und das naechste geschickt (sonst stuende der Strom) */
   const SEND_TIMEOUT = 3000;
+  /** so viele Bilder duerfen gleichzeitig unterwegs sein */
+  const MAX_INFLIGHT = 3;
   /** Kennung dieser Seite und Name in der Notch: mehrere Geraete duerfen gleichzeitig senden, die Notch zeigt sie
    *  als Vorschau und schaltet eines davon live */
   const CID = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)).replace(/-/g, "").slice(0, 32);
@@ -113,14 +115,14 @@
     try { return JSON.parse(localStorage.getItem("notch.cam") || "{}") || {}; } catch { return {}; }
   })());
   // alte oder fremde Werte nicht uebernehmen
-  if (![15, 30].includes(opts.rate)) opts.rate = 30;
+  if (![15, 30, 60].includes(opts.rate)) opts.rate = 30;
   if (![0, 1, 2].includes(opts.quality)) opts.quality = 1;
   if (!["ultra", "wide", "tele"].includes(opts.lens)) opts.lens = "wide";
   opts.front = !!opts.front; opts.mirror = !!opts.mirror;
   function store() { try { localStorage.setItem("notch.cam", JSON.stringify(opts)); } catch {} }
 
   let stream = null, track = null, caps = {}, base = {}, zoom = 1, torch = false;
-  let lensIds = {}, running = false, busy = false, last = 0, wake = null, sent = 0, since = 0, fps = 0;
+  let lensIds = {}, running = false, last = 0, wake = null, sent = 0, since = 0, fps = 0;
   /** Stand der Einstellungen, den diese Seite kennt; ist dieses Geraet gerade in der Kamera „Notch iPhone“ zu sehen */
   let knownRev = 0, isLive = true, pulling = false, postT = 0;
 
@@ -183,6 +185,8 @@
       lenses: LENSES.map(([k]) => k).filter((k) => lensIds[k]),
       zoom: caps.zoom ? { min: Math.max(caps.zoom.min || 1, 1), max: caps.zoom.max || 1 } : null,
       torch: "torch" in caps,
+      // 60 Bilder/s nur, wenn die Kamera es kann
+      maxRate: Math.round((caps.frameRate && caps.frameRate.max) || 30),
     };
   }
 
@@ -215,13 +219,13 @@
     if (typeof s.front === "boolean") opts.front = s.front;
     if (["ultra", "wide", "tele"].includes(s.lens)) opts.lens = s.lens;
     if ([0, 1, 2].includes(s.quality)) opts.quality = s.quality;
-    if ([15, 30].includes(s.rate)) opts.rate = s.rate;
+    if ([15, 30, 60].includes(s.rate)) opts.rate = s.rate;
     if (typeof s.mirror === "boolean") opts.mirror = s.mirror;
     store();
     // Kamera oder Objektiv gewechselt: neu oeffnen (setzt Zoom und Licht zurueck, danach gelten die Werte der Notch)
     if (running && (was.front !== opts.front || (!opts.front && was.lens !== opts.lens))) await reopen();
     base.frameRate = { ideal: opts.rate };
-    if (typeof s.zoom === "number" && caps.zoom) zoom = Math.min(Math.max(s.zoom, Math.max(caps.zoom.min || 1, 1)), Math.min(caps.zoom.max || 1, 8));
+    if (typeof s.zoom === "number" && caps.zoom) glideZoom(Math.min(Math.max(s.zoom, Math.max(caps.zoom.min || 1, 1)), Math.min(caps.zoom.max || 1, 8)));
     if (typeof s.torch === "boolean") torch = s.torch && !opts.front && "torch" in caps;
     constrain();
     render();
@@ -267,7 +271,7 @@
     }
     try { wake = await navigator.wakeLock.request("screen"); } catch {}
     sent = 0; since = performance.now(); fps = 0;
-    loop();
+    startPump();
   }
 
   function stop() {
@@ -301,36 +305,72 @@
     badge.className = "badge" + (isLive ? " live" : "");
   }
 
-  async function loop() {
-    while (running) {
-      const now = performance.now();
-      // etwas Spiel, damit 30 Bilder/s nicht an der Taktung des Kamerabildes scheitern. Im Hintergrund nichts senden:
-      // Safari liefert dann nur schwarze Bilder (die das Bild in der Notch blinken liessen)
-      if (!busy && document.visibilityState === "visible" && now - last >= 1000 / opts.rate - 4 && v.readyState >= 2 && draw()) {
-        last = now;
-        const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", QUALITY[opts.quality] ?? 0.6));
-        if (blob && running) {
-          busy = true;
-          const ac = new AbortController(), t = setTimeout(() => ac.abort(), SEND_TIMEOUT);
-          fetch("frame?" + QS, { method: "POST", body: blob, cache: "no-store", signal: ac.signal })
-            .then((r) => {
-              if (r.status === 403) throw new Error("PC lehnt ab: Kamera am PC aus oder Kopplung erneuert");
-              if (!r.ok) throw new Error("Fehler " + r.status);
-              const lv = r.headers.get("X-Notch-Live");
-              if (lv != null) isLive = lv === "1";
-              // in der Notch geaendert: abholen
-              if ((Number(r.headers.get("X-Notch-Rev")) || 0) > knownRev) pullSettings();
-              counted(); fail("");
-            })
-            .catch((e) => {
-              badge.textContent = "Keine Verbindung"; badge.className = "badge";
-              fail(e && e.name === "AbortError" ? "PC antwortet langsam, sende weiter …" : "PC nicht erreichbar (" + (e && e.message || e) + ").");
-            })
-            .finally(() => { clearTimeout(t); busy = false; });
-        }
-      }
-      await new Promise((r) => setTimeout(r, 8));
-    }
+  /** Bilder abgreifen und senden. Getaktet vom Kamerabild selbst (requestVideoFrameCallback: jedes neue Bild genau
+   *  einmal, kein Abfragen im Leerlauf), sonst alle 4 ms. Bis zu MAX_INFLIGHT Bilder sind gleichzeitig unterwegs
+   *  (Kodieren und Senden ueberlappen sich), sonst bestimmte die Laufzeit im WLAN die Bildrate. Jedes Bild traegt eine
+   *  Nummer; ein ueberholtes verwirft die Notch. Im Hintergrund nichts senden: Safari liefert dann nur schwarze Bilder. */
+  let inflight = 0, frameNo = 0, pumpId = 0;
+  function startPump() {
+    const id = ++pumpId;
+    const step = () => {
+      if (!running || id !== pumpId) return;
+      capture();
+      if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(step); else setTimeout(step, 4);
+    };
+    step();
+  }
+
+  function capture() {
+    const now = performance.now();
+    // etwas Spiel, damit die Bildrate nicht an der Taktung des Kamerabildes scheitert
+    if (inflight >= MAX_INFLIGHT || document.visibilityState !== "visible" || now - last < 1000 / opts.rate - 4 || v.readyState < 2 || !draw()) return;
+    last = now;
+    inflight++;
+    const n = ++frameNo;
+    // toBlob uebernimmt das Bild sofort; danach darf schon das naechste gezeichnet werden
+    c.toBlob((blob) => {
+      if (!blob || !running) { inflight--; return; }
+      send(blob, n);
+    }, "image/jpeg", QUALITY[opts.quality] ?? 0.6);
+  }
+
+  function send(blob, n) {
+    const ac = new AbortController(), t = setTimeout(() => ac.abort(), SEND_TIMEOUT);
+    fetch("frame?" + QS + "&s=" + n + "&r=" + knownRev, { method: "POST", body: blob, cache: "no-store", signal: ac.signal })
+      .then(async (r) => {
+        if (r.status === 403) throw new Error("PC lehnt ab: Kamera am PC aus oder Kopplung erneuert");
+        if (!r.ok) throw new Error("Fehler " + r.status);
+        const lv = r.headers.get("X-Notch-Live");
+        if (lv != null) isLive = lv === "1";
+        if (r.status === 200) {
+          // in der Notch geaendert: kommt gleich mit der Antwort
+          const j = await r.json().catch(() => null);
+          if (j && (Number(j.rev) || 0) > knownRev) { knownRev = Number(j.rev); applyRemote(j.settings || {}); }
+        } else if ((Number(r.headers.get("X-Notch-Rev")) || 0) > knownRev) pullSettings();
+        counted(); fail("");
+      })
+      .catch((e) => {
+        badge.textContent = "Keine Verbindung"; badge.className = "badge";
+        fail(e && e.name === "AbortError" ? "PC antwortet langsam, sende weiter …" : "PC nicht erreichbar (" + (e && e.message || e) + ").");
+      })
+      .finally(() => { clearTimeout(t); inflight--; });
+  }
+
+  /** Zoom aus der Notch: in ~180 ms weich zum neuen Wert gleiten statt springen */
+  let zoomAnim = 0;
+  function glideZoom(target) {
+    cancelAnimationFrame(zoomAnim);
+    const from = zoom, t0 = performance.now(), dur = 180;
+    if (Math.abs(target - from) < 0.01) return;
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / dur);
+      zoom = from + (target - from) * (1 - Math.pow(1 - k, 3));
+      constrain();
+      $("zoom").value = zoom;
+      $("zoomtxt").textContent = "Zoom " + zoom.toFixed(1).replace(".", ",") + "×";
+      if (k < 1) zoomAnim = requestAnimationFrame(step);
+    };
+    zoomAnim = requestAnimationFrame(step);
   }
 
   // ---------- Oberflaeche ----------
@@ -371,7 +411,12 @@
     $("zoomtxt").textContent = "Zoom " + zoom.toFixed(1).replace(".", ",") + "×";
 
     for (const b of $("quality").children) press(b, Number(b.dataset.v) === opts.quality);
-    for (const b of $("rate").children) press(b, Number(b.dataset.v) === opts.rate);
+    // 60 erst zeigen, wenn die Kamera es kann (iPhones mit 60-Bilder-Kamera)
+    const max60 = ((caps.frameRate && caps.frameRate.max) || 0) >= 59;
+    for (const b of $("rate").children) {
+      press(b, Number(b.dataset.v) === opts.rate);
+      if (b.dataset.v === "60") b.hidden = !max60 && opts.rate !== 60;
+    }
   }
 
   go.addEventListener("click", () => (running ? stop() : start()));
@@ -401,7 +446,7 @@
   // Bildschirm aus/Tab gewechselt: Safari haelt die Kamera an; beim Zurueckkommen neu starten
   document.addEventListener("visibilitychange", async () => {
     if (document.visibilityState === "visible" && running) {
-      try { await open(); wake = await navigator.wakeLock.request("screen"); } catch {}
+      try { await open(); startPump(); wake = await navigator.wakeLock.request("screen"); } catch {}
     }
   });
   render();

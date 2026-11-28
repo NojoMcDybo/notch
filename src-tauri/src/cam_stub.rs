@@ -21,11 +21,6 @@ pub fn cam_sources() -> Value {
 }
 
 #[tauri::command]
-pub fn cam_preview(_key: String) -> Option<String> {
-    None
-}
-
-#[tauri::command]
 pub fn cam_live(_app: AppHandle, _key: String) -> Result<(), String> {
     Err("Die iPhone-Kamera gibt es nur unter Windows.".into())
 }
@@ -33,6 +28,10 @@ pub fn cam_live(_app: AppHandle, _key: String) -> Result<(), String> {
 #[tauri::command]
 pub fn cam_config(_key: String, _patch: Value) -> Result<(), String> {
     Err("Die iPhone-Kamera gibt es nur unter Windows.".into())
+}
+
+pub fn preview_protocol(_req: tauri::http::Request<Vec<u8>>, responder: tauri::UriSchemeResponder) {
+    responder.respond(tauri::http::Response::builder().status(404).body(Vec::new()).unwrap_or_default());
 }
 
 pub fn url(_app: &AppHandle) -> String {

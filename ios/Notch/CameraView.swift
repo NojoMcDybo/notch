@@ -83,6 +83,8 @@ struct CameraView: View {
                         Picker("Bildrate", selection: $cam.rate) {
                             Text("15").tag(15)
                             Text("30").tag(30)
+                            // nur auf iPhones, deren Kamera 60 Bilder/s bei 720p oder mehr kann
+                            if cam.maxRate >= 60 { Text("60").tag(60) }
                         }
                         .pickerStyle(.segmented)
                         .frame(maxWidth: 210)

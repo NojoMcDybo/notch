@@ -36,15 +36,23 @@ Windows 11); Teams, Zoom, Chrome und die Kamera-App sehen eine normale Webcam.
   (Seite und App, je Start neu), sonst an User-Agent und Adresse. Antworten tragen `X-Notch-Live` (0/1) und
   `X-Notch-Rev` (Stand der Einstellungen). Ton der Bildschirmübertragung nur vom Live-Gerät.
 - **Karte in der Notch** (`src/camcard.ts`): Vorschau je Gerät (Live-Gerät grün, Klick schaltet live), darunter die
-  Einstellungen des Live-Geräts. Befehle `cam_sources`, `cam_preview`, `cam_live`, `cam_config`; Bilder nur, solange
-  die Notch aufgeklappt ist.
+  Einstellungen des Live-Geräts. Befehle `cam_sources`, `cam_live`, `cam_config`. Die Bilder kommen über das Protokoll
+  `camprev://localhost/<id>?after=<seq>` (Windows: `http://camprev.localhost/…`, `cam.rs: preview_protocol`): das neueste
+  JPEG unverändert, die Anfrage wartet bis zu 0,5 s auf ein neues. Live-Gerät im Takt des Geräts (bis 60/s), andere
+  12/s; nur, solange die Notch aufgeklappt ist.
 - **Einstellungen beidseitig:** Das Gerät meldet Einstellungen und Fähigkeiten (`POST …/settings`, `{settings, caps}`);
-  in der Notch geänderte erhöhen den Stand, das Gerät sieht ihn in `X-Notch-Rev` und holt sie ab (`GET …/settings`).
-  Schlüssel: `front`, `lens` (`ultra`/`wide`/`tele`), `quality` (0–2), `rate` (15/30), `mirror`, `zoom`, `torch`.
+  in der Notch geänderte erhöhen den Stand. Das Gerät nennt seinen Stand bei jedem Bild (`?r=`); ist er älter, kommen
+  die Einstellungen gleich mit der Antwort (200 mit JSON, sonst 204). Schlüssel: `front`, `lens` (`ultra`/`wide`/`tele`),
+  `quality` (0–2), `rate` (15/30/60), `mirror`, `zoom`, `torch`; Fähigkeiten `lenses`, `zoom`, `torch`, `maxRate`.
+- **Bildrate (bis 60/s):** Bis zu drei Bilder sind gleichzeitig unterwegs (`?s=<Nummer>`, ein überholtes verwirft die
+  Notch), sonst bestimmte die WLAN-Laufzeit die Rate. Die Notch antwortet sofort und rechnet im Hintergrund um
+  (`queue_push`, nur das neueste wartende Bild). Die virtuelle Kamera bietet 30 und 60 Bilder/s an; das öffnende
+  Programm wählt. Die Seite taktet mit `requestVideoFrameCallback`; die App wählt für 60/s ein passendes Kameraformat
+  und verkleinert auf 1280×720. Zoom aus der Notch gleitet (Seite: ~180 ms, App: `ramp(toVideoZoomFactor:)`).
 - **Hintergrund:** Die Browserseite sendet nicht, solange Safari sie in den Hintergrund legt (dann kämen nur schwarze
   Bilder; so entstand früher das regelmäßige Blinken bei zwei Instanzen).
 - **Einstellungen auf der Browserseite** (wie in der App, gespeichert im Browser): Front-/Rückkamera, Licht, Spiegeln,
-  Objektiv (Ultraweit/Weit/Tele, erkannt am Gerätenamen), Zoom, Qualität (JPEG 0,4/0,6/0,8) und Bildrate (15/30). Zoom und
+  Objektiv (Ultraweit/Weit/Tele, erkannt am Gerätenamen), Zoom, Qualität (JPEG 0,4/0,6/0,8) und Bildrate (15/30/60). Zoom und
   Licht nur, wenn Safari sie anbietet (`getCapabilities`, ab iOS 17). Ein Bild, das länger als 3 s nicht angenommen wird,
   bricht die Seite ab und schickt das nächste (vorher konnte ein hängender Upload den Strom anhalten).
 

@@ -574,6 +574,8 @@ pub fn vcam_setup() -> i32 {
 
 pub fn run() {
     tauri::Builder::default()
+        // Vorschau der iPhone-Kamera in der Notch (camcard.ts): neuestes JPEG je Geraet, ohne Umweg ueber Befehle
+        .register_asynchronous_uri_scheme_protocol("camprev", |_ctx, req, responder| cam::preview_protocol(req, responder))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -689,7 +691,6 @@ pub fn run() {
             cam::cam_set,
             cam::cam_setup,
             cam::cam_sources,
-            cam::cam_preview,
             cam::cam_live,
             cam::cam_config
         ])

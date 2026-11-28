@@ -17,9 +17,8 @@
 .cc-tile.live::after { box-shadow: inset 0 0 0 2px #30d158; }
 .cc-tile:not(.live):hover::after { box-shadow: inset 0 0 0 2px var(--fg3); }
 .cc-tile:not(.live):active { transform: scale(0.98); }
-.cc-tile img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity 0.3s; }
-.cc-tile img:not([src]) { visibility: hidden; }
-.cc-tile.idle img { opacity: 0.35; }
+.cc-tile canvas { width: 100%; height: 100%; display: block; transition: opacity 0.3s; }
+.cc-tile.idle canvas { opacity: 0.35; }
 .cc-name { position: absolute; left: 8px; right: 8px; bottom: 6px; font-size: 11px; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cc-badge { position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 99px; background: rgba(0, 0, 0, 0.55); color: #fff; font-variant-numeric: tabular-nums; }
 .cc-tile.live .cc-badge { background: #30d158; color: #000; }
@@ -44,5 +43,5 @@
 .cc-field + .cc-field { flex: 1 1 40%; }
 .cc-note { font-size: 11.5px; color: var(--fg2); }
 @media (prefers-reduced-motion: reduce) {
-  .cc-tile, .cc-tile::after, .cc-tile img { transition: none; }
+  .cc-tile, .cc-tile::after, .cc-tile canvas { transition: none; }
 }

@@ -11,7 +11,7 @@
 
 use std::collections::VecDeque;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -24,7 +24,9 @@ use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 
 pub const W: u32 = 1280;
 pub const H: u32 = 720;
-const FPS: u32 = 30;
+/// angebotene Bildraten; das Programm, das die Kamera oeffnet (Teams, Zoom, Kamera-App), waehlt eine davon.
+/// 30 steht vorn (Standard fuer Videoanrufe), 60 fuer alle, die es koennen und wollen.
+const RATES: [u32; 2] = [30, 60];
 const FRAME: usize = (W * H * 3 / 2) as usize;
 const HEADER: usize = 64;
 /// So lange bleibt das letzte Bild stehen, wenn kein neues kommt; danach gilt das iPhone als „nicht verbunden“
@@ -206,6 +208,8 @@ struct Shared {
     /// ausstehende RequestSample-Aufrufe (mit Token)
     requests: Mutex<VecDeque<Option<SendIt<IUnknown>>>>,
     running: AtomicBool,
+    /// gewaehlte Bildrate (beim Start aus dem Format gelesen; 0 = noch keine, dann 30)
+    fps: AtomicU32,
 }
 
 #[implement(IMFMediaStream2)]
@@ -267,12 +271,16 @@ fn deliver(queue: SendIt<IMFMediaEventQueue>, shared: Arc<Shared>) {
     let mut feed = Feed::new();
     let mut idle = vec![0u8; FRAME];
     placeholder(&mut idle);
-    let t0 = Instant::now();
-    let mut n: u32 = 0;
+    let mut next = Instant::now();
     while shared.running.load(Ordering::Relaxed) {
-        n += 1;
-        let due = t0 + Duration::from_micros(n as u64 * 1_000_000 / FPS as u64);
-        std::thread::sleep(due.saturating_duration_since(Instant::now()));
+        // Takt nach der gewaehlten Bildrate; ein neues Format beim naechsten Start gilt sofort
+        let fps = match shared.fps.load(Ordering::Relaxed) { 0 => RATES[0], f => f.min(60) };
+        next += Duration::from_nanos(1_000_000_000 / fps as u64);
+        let now = Instant::now();
+        if next + Duration::from_millis(100) < now {
+            next = now; // weit zurueck (Rechner war beschaeftigt): nicht hinterherhetzen
+        }
+        std::thread::sleep(next.saturating_duration_since(now));
         let token = shared.requests.lock().unwrap().pop_front();
         let Some(token) = token else { continue };
         feed.poll();
@@ -288,7 +296,7 @@ fn deliver(queue: SendIt<IMFMediaEventQueue>, shared: Arc<Shared>) {
                 let s = MFCreateSample()?;
                 s.AddBuffer(&buf)?;
                 s.SetSampleTime(MFGetSystemTime())?;
-                s.SetSampleDuration(10_000_000 / FPS as i64)?;
+                s.SetSampleDuration(10_000_000 / fps as i64)?;
                 if let Some(t) = &token {
                     s.SetUnknown(&MFSampleExtension_Token, &t.0)?;
                 }
@@ -318,23 +326,40 @@ fn pack(hi: u32, lo: u32) -> u64 {
     ((hi as u64) << 32) | lo as u64
 }
 
-fn create_source() -> Result<IMFMediaSourceEx> {
+/// NV12, 1280x720, mit dieser Bildrate
+fn media_type(fps: u32) -> Result<IMFMediaType> {
     unsafe {
-        MFStartup(MF_VERSION, MFSTARTUP_LITE)?;
         let mt = MFCreateMediaType()?;
         mt.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
         mt.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12)?;
         mt.SetUINT64(&MF_MT_FRAME_SIZE, pack(W, H))?;
-        mt.SetUINT64(&MF_MT_FRAME_RATE, pack(FPS, 1))?;
+        mt.SetUINT64(&MF_MT_FRAME_RATE, pack(fps, 1))?;
         mt.SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, pack(1, 1))?;
         mt.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
         mt.SetUINT32(&MF_MT_ALL_SAMPLES_INDEPENDENT, 1)?;
         mt.SetUINT32(&MF_MT_DEFAULT_STRIDE, W)?;
         mt.SetUINT32(&MF_MT_SAMPLE_SIZE, FRAME as u32)?;
-        mt.SetUINT32(&MF_MT_AVG_BITRATE, (FRAME as u32) * 8 * FPS)?;
+        mt.SetUINT32(&MF_MT_AVG_BITRATE, (FRAME as u32) * 8 * fps)?;
+        Ok(mt)
+    }
+}
 
-        let sd = MFCreateStreamDescriptor(0, &[Some(mt.clone())])?;
-        sd.GetMediaTypeHandler()?.SetCurrentMediaType(&mt)?;
+/// Bildrate des Formats, das das Programm gewaehlt hat (aus dem Stream-Deskriptor)
+fn chosen_fps(sd: &IMFStreamDescriptor) -> Option<u32> {
+    unsafe {
+        let t = sd.GetMediaTypeHandler().ok()?.GetCurrentMediaType().ok()?;
+        let v = t.GetUINT64(&MF_MT_FRAME_RATE).ok()?;
+        let (n, d) = ((v >> 32) as u32, (v & 0xffff_ffff) as u32);
+        (d > 0).then(|| (n / d).clamp(1, 60))
+    }
+}
+
+fn create_source() -> Result<IMFMediaSourceEx> {
+    unsafe {
+        MFStartup(MF_VERSION, MFSTARTUP_LITE)?;
+        let types = RATES.iter().map(|&f| media_type(f).map(Some)).collect::<Result<Vec<_>>>()?;
+        let sd = MFCreateStreamDescriptor(0, &types)?;
+        sd.GetMediaTypeHandler()?.SetCurrentMediaType(types[0].as_ref().ok_or(E_FAIL)?)?;
         sd.SetGUID(&MF_DEVICESTREAM_STREAM_CATEGORY, &PINNAME_VIDEO_CAPTURE)?;
         sd.SetUINT32(&MF_DEVICESTREAM_STREAM_ID, 0)?;
         sd.SetUINT32(&MF_DEVICESTREAM_FRAMESERVER_SHARED, 1)?;
@@ -390,6 +415,10 @@ impl IMFMediaSource_Impl for Source_Impl {
             self.queue.QueueEventParamUnk(if first { MENewStream.0 } else { MEUpdatedStream.0 } as u32, &GUID::zeroed(), S_OK, stream)?;
             self.queue.QueueEventParamVar(MESourceStarted.0 as u32, &GUID::zeroed(), S_OK, &empty)?;
             q.QueueEventParamVar(MEStreamStarted.0 as u32, &GUID::zeroed(), S_OK, &empty)?;
+            // gewaehltes Format: 30 oder 60 Bilder/s
+            let fps = chosen_fps(&self.sd).unwrap_or(RATES[0]);
+            self.shared.fps.store(fps, Ordering::Relaxed);
+            log(&format!("Start mit {fps} Bildern/s"));
             if !self.shared.running.swap(true, Ordering::SeqCst) {
                 let (sh, q2) = (self.shared.clone(), SendIt(q.clone()));
                 *self.thread.lock().unwrap() = Some(std::thread::spawn(move || deliver(q2, sh)));

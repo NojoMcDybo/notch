@@ -61,29 +61,25 @@ impl Writer {
     }
 }
 
-/// RGB (3 Byte je Pixel, W x H) -> NV12, BT.601 mit begrenztem Bereich (so erwarten es Videoprogramme)
+/// RGB (3 Byte je Pixel, W x H) -> NV12, BT.601 mit begrenztem Bereich (so erwarten es Videoprogramme).
+/// Zeilenpaarweise ueber Slices, ohne Indexrechnung je Pixel: bei 60 Bildern/s zaehlt jede Millisekunde.
 pub fn rgb_to_nv12(rgb: &[u8], out: &mut [u8]) {
-    let px = |x: usize, y: usize| -> (i32, i32, i32) {
-        let i = (y * W + x) * 3;
-        (rgb[i] as i32, rgb[i + 1] as i32, rgb[i + 2] as i32)
-    };
-    for y in 0..H {
-        for x in 0..W {
-            let (r, g, b) = px(x, y);
-            out[y * W + x] = (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16) as u8;
-        }
-    }
-    for cy in 0..H / 2 {
-        for cx in 0..W / 2 {
-            let (mut r, mut g, mut b) = (0, 0, 0);
-            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                let (pr, pg, pb) = px(cx * 2 + dx, cy * 2 + dy);
-                (r, g, b) = (r + pr, g + pg, b + pb);
+    let (y_plane, uv_plane) = out[..FRAME].split_at_mut(W * H);
+    for ((rows, ys), uv) in rgb.chunks_exact(W * 3 * 2).zip(y_plane.chunks_exact_mut(W * 2)).zip(uv_plane.chunks_exact_mut(W)) {
+        let (top, bottom) = rows.split_at(W * 3);
+        let (y0, y1) = ys.split_at_mut(W);
+        for (row, ys) in [(top, y0), (bottom, y1)] {
+            for (p, y) in row.chunks_exact(3).zip(ys.iter_mut()) {
+                let (r, g, b) = (p[0] as i32, p[1] as i32, p[2] as i32);
+                *y = (((66 * r + 129 * g + 25 * b + 128) >> 8) + 16) as u8;
             }
-            let (r, g, b) = (r / 4, g / 4, b / 4);
-            let o = W * H + cy * W + cx * 2;
-            out[o] = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
-            out[o + 1] = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+        }
+        for ((t, bt), c) in top.chunks_exact(6).zip(bottom.chunks_exact(6)).zip(uv.chunks_exact_mut(2)) {
+            let r = (t[0] as i32 + t[3] as i32 + bt[0] as i32 + bt[3] as i32) / 4;
+            let g = (t[1] as i32 + t[4] as i32 + bt[1] as i32 + bt[4] as i32) / 4;
+            let b = (t[2] as i32 + t[5] as i32 + bt[2] as i32 + bt[5] as i32) / 4;
+            c[0] = (((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
+            c[1] = (((112 * r - 94 * g - 18 * b + 128) >> 8) + 128).clamp(0, 255) as u8;
         }
     }
 }

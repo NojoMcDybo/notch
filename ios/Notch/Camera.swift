@@ -22,8 +22,9 @@ enum Lens: String, CaseIterable, Identifiable {
     }
 }
 
-/// iPhone als Webcam: Kamerabild als JPEG (16:9) an `POST <Kamera-Adresse>frame`, ein Bild nach dem anderen.
-/// Die Notch auf dem PC macht daraus die virtuelle Kamera „Notch iPhone“.
+/// iPhone als Webcam: Kamerabild als JPEG (16:9, hoechstens 1280x720) an `POST <Kamera-Adresse>frame`. Bis zu
+/// `maxInflight` Bilder sind gleichzeitig unterwegs (sonst bestimmte die WLAN-Laufzeit die Bildrate); jedes traegt eine
+/// Nummer, ein ueberholtes verwirft die Notch. Die Notch auf dem PC macht daraus die virtuelle Kamera „Notch iPhone“.
 final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, URLSessionDelegate {
     @Published private(set) var running = false { didSet { live() } }
     @Published private(set) var fps = 0 { didSet { live() } }
@@ -34,6 +35,8 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
     weak var previewView: UIView?
     @Published private(set) var maxZoom = 5.0
     @Published private(set) var hasTorch = false
+    /// hoechste Bildrate der Kamera bei mindestens 1280x720 (60 auf iPhones, die es koennen, sonst 30)
+    @Published private(set) var maxRate = 30
     /// Hinten verfuegbare Objektive (iPhone 13: ultraweit und weit)
     let lenses: [Lens]
 
@@ -46,7 +49,8 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
     @Published var quality: Int { didSet { store(); queue.async { [q = quality] in self.jpegQuality = [0.4, 0.6, 0.8][min(max(q, 0), 2)] }; syncOut() } }
     @Published var rate: Int { didSet { store(); adjust(); syncOut() } }
     @Published var mirror: Bool { didSet { store(); queue.async { [m = mirror] in self.mirrored = m }; syncOut() } }
-    @Published var zoom = 1.0 { didSet { adjust(); syncOut() } }
+    /// Zoom aus der Notch gleitet (ramp), am iPhone folgt er direkt dem Finger
+    @Published var zoom = 1.0 { didSet { adjust(ramp: applyingRemote); syncOut() } }
     @Published var torch = false { didSet { adjust(); syncOut() } }
 
     private let capture = AVCaptureSession()
@@ -58,7 +62,10 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
     private var device: AVCaptureDevice?
     private var jpegQuality = 0.6
     private var mirrored = false
-    private var busy = false
+    /// Bilder unterwegs, laufende Bildnummer (nur auf `queue`)
+    private var inflight = 0
+    private var frameNo = 0
+    private let maxInflight = 3
     private var frames = 0
     private var since = Date()
     private var previewPending = false
@@ -138,7 +145,7 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
         torch = false
         queue.async { [self] in
             if capture.isRunning { capture.stopRunning() }
-            busy = false
+            inflight = 0
         }
         running = false
         hasFrame = false
@@ -176,16 +183,42 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
         capture.commitConfiguration()
         applied = nil
         device = dev
+        applyDevice(dev)
         let maxZ = min(Double(dev.activeFormat.videoMaxZoomFactor), 8)
         let torchOK = dev.hasTorch && dev.isTorchModeSupported(.on)
+        let best = bestRate(dev)
         DispatchQueue.main.async {
             self.error = nil
             self.maxZoom = max(maxZ, 1.01)
             self.hasTorch = torchOK
+            self.maxRate = best
             // Zoombereich und Licht haengen an der Kamera: der Notch melden
             self.postSettings()
         }
-        applyDevice(dev)
+    }
+
+    /// Formate mit mindestens 1280x720 im Seitenverhaeltnis 16:9
+    private func wideFormats(_ dev: AVCaptureDevice) -> [AVCaptureDevice.Format] {
+        dev.formats.filter { f in
+            let d = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+            return d.width >= 1280 && d.height >= 720 && Int(d.width) * 9 == Int(d.height) * 16
+        }
+    }
+
+    private func bestRate(_ dev: AVCaptureDevice) -> Int {
+        let m = wideFormats(dev).flatMap { $0.videoSupportedFrameRateRanges }.map { $0.maxFrameRate }.max() ?? 30
+        return m >= 59 ? 60 : 30
+    }
+
+    /// kleinstes 16:9-Format ab 1280x720, das diese Bildrate kann (wenig Pixel = schnelles Kodieren)
+    private func format(for dev: AVCaptureDevice, rate: Int) -> AVCaptureDevice.Format? {
+        let area = { (f: AVCaptureDevice.Format) -> Int in
+            let d = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+            return Int(d.width) * Int(d.height)
+        }
+        return wideFormats(dev)
+            .filter { $0.videoSupportedFrameRateRanges.contains { $0.maxFrameRate >= Double(rate) } }
+            .min { area($0) < area($1) }
     }
 
     // MARK: Abgleich mit der Notch
@@ -193,9 +226,9 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
     // Antwort auf das naechste Bild einen hoeheren Stand (X-Notch-Rev) und die App holt die Einstellungen ab.
 
     /// Adresse neben `frame` (settings, frame) mit Kennung und Name
-    private func endpoint(_ name: String) -> URL? {
+    private func endpoint(_ name: String, _ extra: [URLQueryItem] = []) -> URL? {
         guard let target, var c = URLComponents(url: target.deletingLastPathComponent().appendingPathComponent(name), resolvingAgainstBaseURL: false) else { return nil }
-        c.queryItems = [URLQueryItem(name: "c", value: cid), URLQueryItem(name: "n", value: deviceName)]
+        c.queryItems = [URLQueryItem(name: "c", value: cid), URLQueryItem(name: "n", value: deviceName)] + extra
         return c.url
     }
 
@@ -216,7 +249,7 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
         guard running, let u = endpoint("settings") else { return }
         let body: [String: Any] = [
             "settings": ["front": front, "lens": lens.rawValue, "quality": quality, "rate": rate, "mirror": mirror, "zoom": zoom, "torch": torch] as [String: Any],
-            "caps": ["lenses": lenses.map(\.rawValue), "zoom": ["min": 1.0, "max": maxZoom] as [String: Double], "torch": hasTorch] as [String: Any],
+            "caps": ["lenses": lenses.map(\.rawValue), "zoom": ["min": 1.0, "max": maxZoom] as [String: Double], "torch": hasTorch, "maxRate": maxRate] as [String: Any],
         ]
         var r = URLRequest(url: u)
         r.httpMethod = "POST"
@@ -257,7 +290,7 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
         if let v = s["front"] as? Bool, v != front { front = v }
         if let v = (s["lens"] as? String).flatMap(Lens.init(rawValue:)), v != lens, lenses.contains(v) { lens = v }
         if let v = s["quality"] as? Int, (0...2).contains(v), v != quality { quality = v }
-        if let v = s["rate"] as? Int, [15, 30].contains(v), v != rate { rate = v }
+        if let v = s["rate"] as? Int, [15, 30, 60].contains(v), v != rate { rate = min(v, maxRate) }
         if let v = s["mirror"] as? Bool, v != mirror { mirror = v }
         if let v = s["zoom"] as? Double {
             let z = min(max(v, 1), maxZoom)
@@ -270,23 +303,36 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
     }
 
     /// Zoom, Bildrate und Taschenlampe aendern, waehrend die Kamera laeuft
-    private func adjust() {
+    private func adjust(ramp: Bool = false) {
         queue.async { [self] in
-            if let device { applyDevice(device) }
+            if let device { applyDevice(device, ramp: ramp) }
         }
     }
 
-    /// Auf `queue`
-    private func applyDevice(_ dev: AVCaptureDevice) {
+    /// Auf `queue`. `ramp`: Zoom gleitet zum neuen Wert (aus der Notch), sonst sofort (Finger am iPhone)
+    private func applyDevice(_ dev: AVCaptureDevice, ramp: Bool = false) {
         let (rate, zoom, torch) = DispatchQueue.main.sync { (self.rate, self.zoom, self.torch) }
         guard (try? dev.lockForConfiguration()) != nil else { return }
         defer { dev.unlockForConfiguration() }
+        let fits = { (f: AVCaptureDevice.Format) -> Bool in
+            f.videoSupportedFrameRateRanges.contains { Double(rate) >= $0.minFrameRate && Double(rate) <= $0.maxFrameRate }
+        }
+        // 60 Bilder/s gibt es nur in bestimmten Formaten: dann dorthin wechseln (die Voreinstellung 720p kann oft nur 30)
+        if !fits(dev.activeFormat), let f = format(for: dev, rate: rate) {
+            dev.activeFormat = f
+        }
         // nur Bildraten, die das Format kennt (sonst wirft AVFoundation eine Ausnahme)
-        if dev.activeFormat.videoSupportedFrameRateRanges.contains(where: { Double(rate) >= $0.minFrameRate && Double(rate) <= $0.maxFrameRate }) {
+        if fits(dev.activeFormat) {
             dev.activeVideoMinFrameDuration = CMTime(value: 1, timescale: CMTimeScale(rate))
             dev.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: CMTimeScale(rate))
         }
-        dev.videoZoomFactor = min(max(zoom, 1), min(Double(dev.activeFormat.videoMaxZoomFactor), 8))
+        let z = CGFloat(min(max(zoom, 1), min(Double(dev.activeFormat.videoMaxZoomFactor), 8)))
+        if ramp {
+            dev.ramp(toVideoZoomFactor: z, withRate: 6)
+        } else {
+            if dev.isRampingVideoZoom { dev.cancelVideoZoomRamp() }
+            dev.videoZoomFactor = z
+        }
         if dev.hasTorch, dev.isTorchModeSupported(.on) {
             dev.torchMode = torch ? .on : .off
         }
@@ -311,7 +357,8 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
             connection.videoOrientation = orientation
             applied = orientation
         }
-        guard !busy, let target, let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        // alle Plaetze belegt: dieses Kamerabild auslassen (das naechste kommt gleich), statt sich zu stauen
+        guard inflight < maxInflight, let target, let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         var img = CIImage(cvPixelBuffer: pb)
         if mirrored {
             img = img.transformed(by: CGAffineTransform(scaleX: -1, y: 1)).transformed(by: CGAffineTransform(translationX: img.extent.width, y: 0))
@@ -325,6 +372,12 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
         } else if w * 9 < h * 16 {
             let nh = w * 9 / 16
             img = img.cropped(to: CGRect(x: e.minX, y: e.minY + (h - nh) / 2, width: w, height: nh))
+        }
+        // groessere Formate (60 Bilder/s gibt es oft nur in 1080p) hier verkleinern: weniger zu kodieren und zu
+        // senden, und der PC muss nicht skalieren
+        if img.extent.width > 1280.5 {
+            let s = 1280 / img.extent.width
+            img = img.transformed(by: CGAffineTransform(scaleX: s, y: s))
         }
         let q = CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)
         guard let jpeg = ctx.jpegRepresentation(of: img, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, options: [q: jpegQuality]) else { return }
@@ -342,24 +395,34 @@ final class CameraStreamer: NSObject, ObservableObject, AVCaptureVideoDataOutput
             }
         }
 
-        busy = true
-        var r = URLRequest(url: endpoint("frame") ?? target)
+        inflight += 1
+        frameNo += 1
+        let extra = [URLQueryItem(name: "s", value: String(frameNo)), URLQueryItem(name: "r", value: String(knownRev))]
+        var r = URLRequest(url: endpoint("frame", extra) ?? target)
         r.httpMethod = "POST"
         r.timeoutInterval = 5
         r.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
-        net.uploadTask(with: r, from: jpeg) { [weak self] _, resp, err in
+        net.uploadTask(with: r, from: jpeg) { [weak self] data, resp, err in
             guard let self else { return }
             let http = resp as? HTTPURLResponse
             let code = http?.statusCode ?? 0
             // Stand vom PC: ist dieses Geraet live, wurden Einstellungen in der Notch geaendert
             let liveNow = http?.value(forHTTPHeaderField: "X-Notch-Live").map { $0 == "1" }
             let rev = Int(http?.value(forHTTPHeaderField: "X-Notch-Rev") ?? "") ?? 0
+            // neuere Einstellungen aus der Notch kommen gleich mit der Antwort (200 mit JSON)
+            let news: [String: Any]? = code == 200 ? data.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] } : nil
             if let liveNow {
                 DispatchQueue.main.async { if self.isLive != liveNow { self.isLive = liveNow } }
             }
             self.queue.async {
-                if rev > self.knownRev { self.pullSettings() }
-                self.busy = false
+                if let news, let nrev = news["rev"] as? Int, nrev > self.knownRev {
+                    self.knownRev = nrev
+                    let s = news["settings"] as? [String: Any] ?? [:]
+                    DispatchQueue.main.async { self.applyRemote(s) }
+                } else if rev > self.knownRev {
+                    self.pullSettings()
+                }
+                self.inflight = max(0, self.inflight - 1)
                 self.frames += 1
                 let dt = Date().timeIntervalSince(self.since)
                 if dt >= 1 {
